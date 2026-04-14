@@ -1,0 +1,339 @@
+// Learn more: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum PostStatus {
+  draft
+  pending_approval
+  approved
+  scheduled
+  posted
+  rejected
+  failed
+}
+
+enum PostType {
+  promo
+  big_win
+  event
+  educational
+}
+
+enum Platform {
+  instagram
+  facebook
+  twitter
+  tiktok
+  telegram
+}
+
+enum SourceType {
+  promo
+  big_win
+  event
+  manual
+}
+
+enum EventStatus {
+  draft
+  active
+  ended
+  archived
+}
+
+enum ChannelStatus {
+  active
+  disconnected
+  error
+  disabled
+}
+
+enum UserRole {
+  admin
+  brand_manager
+  operator
+  viewer
+}
+
+// ─── Foundation Tables ────────────────────────────────────────────────────────
+
+model Brand {
+  id            String   @id @default(cuid())
+  name          String
+  logo_url      String?
+  primary_color   String?
+  secondary_color String?
+  accent_color    String?
+  domain        String?
+  active        Boolean  @default(true)
+  // Legacy — kept for backward compat; new settings use the dedicated JSON fields below
+  settings_json Json     @default("{}")
+  // Section-specific JSON blobs
+  integration_settings_json Json @default("{}")
+  voice_settings_json       Json @default("{}")
+  design_settings_json      Json @default("{}")
+  sample_captions_json      Json @default("[]")
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  user_permissions  UserBrandPermission[]
+  posts             Post[]
+  events            Event[]
+  automation_rules  AutomationRule[]
+  channels          Channel[]
+  templates         Template[]
+  audit_logs        AuditLog[]   // brand-scoped audit events only
+  click_events      ClickEvent[]
+  signup_events     SignupEvent[]
+  deposit_events    DepositEvent[]
+  revenue_events    RevenueEvent[]
+  post_metrics      PostMetricsRollup[]
+
+  @@map("brands")
+}
+
+model User {
+  id            String   @id @default(cuid())
+  name          String
+  email         String   @unique
+  password_hash String?
+  role          UserRole @default(operator)
+  active        Boolean  @default(true)
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  brand_permissions UserBrandPermission[]
+  posts_created     Post[]               @relation("PostCreatedBy")
+  posts_approved    Post[]               @relation("PostApprovedBy")
+  events_created    Event[]
+  audit_logs        AuditLog[]
+
+  @@map("users")
+}
+
+model UserBrandPermission {
+  id       String   @id @default(cuid())
+  user_id  String
+  brand_id String
+  role     UserRole
+
+  user  User  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  brand Brand @relation(fields: [brand_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, brand_id])
+  @@map("user_brand_permissions")
+}
+
+// ─── Content Tables ───────────────────────────────────────────────────────────
+
+model Post {
+  id           String      @id @default(cuid())
+  brand_id     String
+  post_type    PostType
+  platform     Platform
+  status       PostStatus  @default(draft)
+  headline     String?
+  caption      String?
+  cta          String?
+  banner_text  String?
+  image_prompt String?
+  source_type  SourceType?
+  source_id    String?
+  tracking_id  String?     @unique
+  scheduled_at     DateTime?
+  posted_at        DateTime?
+  rejected_reason  String?
+  created_by       String
+  approved_by      String?
+  created_at   DateTime    @default(now())
+  updated_at   DateTime    @updatedAt
+
+  brand           Brand              @relation(fields: [brand_id], references: [id])
+  creator         User               @relation("PostCreatedBy", fields: [created_by], references: [id])
+  approver        User?              @relation("PostApprovedBy", fields: [approved_by], references: [id])
+  metrics_rollup  PostMetricsRollup?
+
+  @@map("posts")
+}
+
+model Event {
+  id         String      @id @default(cuid())
+  brand_id   String
+  event_type String
+  title      String
+  objective  String?
+  rules      String?
+  reward     String?
+  start_at   DateTime?
+  end_at     DateTime?
+  theme      String?
+  status     EventStatus @default(draft)
+  created_by String
+  created_at DateTime    @default(now())
+  updated_at DateTime    @updatedAt
+
+  brand   Brand @relation(fields: [brand_id], references: [id])
+  creator User  @relation(fields: [created_by], references: [id])
+
+  @@map("events")
+}
+
+model AutomationRule {
+  id          String   @id @default(cuid())
+  brand_id    String
+  rule_name   String
+  rule_type   String
+  enabled     Boolean  @default(false)
+  config_json Json     @default("{}")
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  brand Brand @relation(fields: [brand_id], references: [id])
+
+  @@unique([brand_id, rule_type])
+  @@map("automation_rules")
+}
+
+model Channel {
+  id           String        @id @default(cuid())
+  brand_id     String
+  platform     Platform
+  account_name String
+  status       ChannelStatus @default(disconnected)
+  last_sync_at DateTime?
+  last_error   String?
+  config_json  Json          @default("{}")
+  created_at   DateTime      @default(now())
+  updated_at   DateTime      @updatedAt
+
+  brand Brand @relation(fields: [brand_id], references: [id])
+
+  @@map("channels")
+}
+
+model Template {
+  id            String   @id @default(cuid())
+  brand_id      String?
+  template_type String
+  name          String
+  active        Boolean  @default(true)
+  config_json   Json     @default("{}")
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  brand Brand? @relation(fields: [brand_id], references: [id])
+
+  @@map("templates")
+}
+
+// ─── Audit ────────────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  brand_id    String?  // null for system-level events (e.g. login)
+  user_id     String
+  action      String
+  entity_type String
+  entity_id   String
+  before_json Json?
+  after_json  Json?
+  created_at  DateTime @default(now())
+
+  brand Brand? @relation(fields: [brand_id], references: [id])
+  user  User   @relation(fields: [user_id], references: [id])
+
+  @@map("audit_logs")
+}
+
+// ─── Tracking Tables ──────────────────────────────────────────────────────────
+
+model ClickEvent {
+  id          String    @id @default(cuid())
+  tracking_id String
+  brand_id    String
+  platform    Platform?
+  referrer    String?
+  user_agent  String?
+  created_at  DateTime  @default(now())
+
+  brand Brand @relation(fields: [brand_id], references: [id])
+
+  @@index([brand_id, created_at])
+  @@map("click_events")
+}
+
+model SignupEvent {
+  id          String   @id @default(cuid())
+  tracking_id String
+  brand_id    String
+  user_id     String
+  created_at  DateTime @default(now())
+
+  brand Brand @relation(fields: [brand_id], references: [id])
+
+  @@index([brand_id, created_at])
+  @@map("signup_events")
+}
+
+model DepositEvent {
+  id          String   @id @default(cuid())
+  tracking_id String
+  brand_id    String
+  user_id     String
+  amount      Decimal  @db.Decimal(12, 2)
+  // "success" | "reversed" — default success; reversed deposits are excluded from metrics
+  status      String   @default("success")
+  created_at  DateTime @default(now())
+
+  brand Brand @relation(fields: [brand_id], references: [id])
+
+  @@index([brand_id, created_at])
+  @@index([brand_id, status, created_at])
+  @@map("deposit_events")
+}
+
+model RevenueEvent {
+  id          String   @id @default(cuid())
+  tracking_id String
+  brand_id    String
+  user_id     String
+  ggr_amount  Decimal  @db.Decimal(12, 2)
+  // "success" | "reversed" — default success; reversed entries are excluded from metrics
+  status      String   @default("success")
+  created_at  DateTime @default(now())
+
+  brand Brand @relation(fields: [brand_id], references: [id])
+
+  @@index([brand_id, created_at])
+  @@index([brand_id, status, created_at])
+  @@map("revenue_events")
+}
+
+// ─── Rollups ──────────────────────────────────────────────────────────────────
+
+model PostMetricsRollup {
+  id            String   @id @default(cuid())
+  post_id       String   @unique
+  brand_id      String
+  clicks        Int      @default(0)
+  signups       Int      @default(0)
+  depositors    Int      @default(0)
+  total_deposit Decimal  @default(0) @db.Decimal(14, 2)
+  total_ggr     Decimal  @default(0) @db.Decimal(14, 2)
+  updated_at    DateTime @updatedAt
+
+  post  Post  @relation(fields: [post_id], references: [id])
+  brand Brand @relation(fields: [brand_id], references: [id])
+
+  @@index([brand_id])
+  @@map("post_metrics_rollup")
+}
