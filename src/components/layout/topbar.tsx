@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
-import { useQuery } from "@tanstack/react-query";
-import { Building2, ChevronDown, Bell, User, AlertCircle } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Building2, ChevronDown, Bell, User, AlertCircle, Check } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -18,18 +18,69 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { brandsApi } from "@/lib/brands-api";
 import { cn } from "@/lib/utils";
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface ActiveBrand {
+  id: string;
+  name: string;
+  primary_color: string | null;
+}
+
+// ─── Fetchers ─────────────────────────────────────────────────────────────────
+
+async function fetchActiveBrand(): Promise<ActiveBrand | null> {
+  const res = await fetch("/api/brands/active", { credentials: "include" });
+  if (!res.ok) return null;
+  const json = await res.json();
+  return (json.data as ActiveBrand | null) ?? null;
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
 export function TopBar() {
   const { data: session } = useSession();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [switchError, setSwitchError] = useState<string | null>(null);
+  const autoSelectedRef = useRef(false);
 
-  // Fetch brands accessible to the current user
+  // Which brand is currently active (from cookie via API)
+  const { data: activeBrand, isLoading: activeBrandLoading } = useQuery({
+    queryKey: ["active-brand"],
+    queryFn: fetchActiveBrand,
+    staleTime: 30_000,
+  });
+
+  // All accessible active brands for this user
   const { data: brands } = useQuery({
     queryKey: ["brands-switcher"],
     queryFn: () => brandsApi.list({ active: "true" }),
     staleTime: 60_000,
   });
 
+  // ── Auto-select single brand ──────────────────────────────────────────────
+  useEffect(() => {
+    if (autoSelectedRef.current) return;
+    if (!brands || activeBrandLoading) return;
+    if (activeBrand) return; // already selected
+    if (brands.length === 1) {
+      autoSelectedRef.current = true;
+      switchBrand(brands[0].id);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [brands, activeBrand, activeBrandLoading]);
+
+  // ── Handle active brand becoming inactive / removed ───────────────────────
+  useEffect(() => {
+    if (!brands || !activeBrand) return;
+    const stillActive = brands.some((b) => b.id === activeBrand.id);
+    if (!stillActive && brands.length > 0) {
+      switchBrand(brands[0].id);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [brands, activeBrand]);
+
+  // ── Switch brand ──────────────────────────────────────────────────────────
   async function switchBrand(brandId: string) {
     setSwitchError(null);
     try {
@@ -43,6 +94,10 @@ export function TopBar() {
         setSwitchError(json.error ?? "Could not switch brand");
         return;
       }
+      // Refresh the active brand display immediately
+      await queryClient.invalidateQueries({ queryKey: ["active-brand"] });
+      // Mark all brand-scoped data as stale so pages refetch on next mount
+      queryClient.invalidateQueries();
       router.refresh();
     } catch {
       setSwitchError("Could not switch brand");
@@ -50,6 +105,12 @@ export function TopBar() {
   }
 
   const displayName = session?.user?.name ?? session?.user?.email ?? "Account";
+
+  // Button label: show active brand name once loaded
+  const buttonLabel =
+    activeBrandLoading
+      ? "Loading..."
+      : activeBrand?.name ?? "Select Brand";
 
   return (
     <header className="flex h-14 items-center justify-between border-b bg-background px-4">
@@ -61,42 +122,61 @@ export function TopBar() {
         <DropdownMenuTrigger
           className={cn(
             buttonVariants({ variant: "outline", size: "sm" }),
-            "gap-2",
+            "gap-2 max-w-[200px]",
             switchError && "border-destructive text-destructive"
           )}
         >
           {switchError ? (
-            <AlertCircle className="h-4 w-4" />
+            <AlertCircle className="h-4 w-4 shrink-0" />
+          ) : activeBrand?.primary_color ? (
+            <span
+              className="inline-block h-2.5 w-2.5 shrink-0 rounded-full border"
+              style={{ backgroundColor: activeBrand.primary_color }}
+            />
           ) : (
-            <Building2 className="h-4 w-4" />
+            <Building2 className="h-4 w-4 shrink-0" />
           )}
-          <span>Select Brand</span>
-          <ChevronDown className="h-3 w-3 opacity-60" />
+          <span className="truncate">{buttonLabel}</span>
+          <ChevronDown className="h-3 w-3 shrink-0 opacity-60" />
         </DropdownMenuTrigger>
+
         <DropdownMenuContent align="center" className="w-52">
           <DropdownMenuLabel>Switch Brand</DropdownMenuLabel>
           {switchError && (
             <p className="px-2 pb-1 text-xs text-destructive">{switchError}</p>
           )}
           <DropdownMenuSeparator />
+
           {!brands || brands.length === 0 ? (
-            <p className="px-2 py-1.5 text-xs text-muted-foreground">No brands available</p>
+            <p className="px-2 py-1.5 text-xs text-muted-foreground">
+              No brands available
+            </p>
           ) : (
-            brands.map((brand) => (
-              <DropdownMenuItem
-                key={brand.id}
-                onClick={() => switchBrand(brand.id)}
-              >
-                {/* Color dot */}
-                {brand.primary_color && (
-                  <span
-                    className="mr-2 inline-block h-2.5 w-2.5 rounded-full shrink-0 border"
-                    style={{ backgroundColor: brand.primary_color }}
-                  />
-                )}
-                <span className="truncate">{brand.name}</span>
-              </DropdownMenuItem>
-            ))
+            brands.map((brand) => {
+              const isActive = brand.id === activeBrand?.id;
+              return (
+                <DropdownMenuItem
+                  key={brand.id}
+                  onClick={() => switchBrand(brand.id)}
+                  className={cn(isActive && "bg-muted font-medium")}
+                >
+                  {/* Color dot */}
+                  {brand.primary_color ? (
+                    <span
+                      className="mr-2 inline-block h-2.5 w-2.5 shrink-0 rounded-full border"
+                      style={{ backgroundColor: brand.primary_color }}
+                    />
+                  ) : (
+                    <span className="mr-2 inline-block h-2.5 w-2.5 shrink-0" />
+                  )}
+                  <span className="flex-1 truncate">{brand.name}</span>
+                  {/* Checkmark for currently active brand */}
+                  {isActive && (
+                    <Check className="ml-1 h-3.5 w-3.5 shrink-0 text-primary" />
+                  )}
+                </DropdownMenuItem>
+              );
+            })
           )}
         </DropdownMenuContent>
       </DropdownMenu>
@@ -112,7 +192,10 @@ export function TopBar() {
 
         <DropdownMenu>
           <DropdownMenuTrigger
-            className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "rounded-full")}
+            className={cn(
+              buttonVariants({ variant: "ghost", size: "icon" }),
+              "rounded-full"
+            )}
           >
             <Avatar className="h-7 w-7">
               <AvatarFallback>

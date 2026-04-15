@@ -835,6 +835,9 @@ export default function BrandsPage() {
 
   function invalidate() {
     queryClient.invalidateQueries({ queryKey: ["brands"] });
+    // Keep topbar in sync: newly created/updated brands reflect immediately
+    queryClient.invalidateQueries({ queryKey: ["brands-switcher"] });
+    queryClient.invalidateQueries({ queryKey: ["active-brand"] });
   }
 
   return (

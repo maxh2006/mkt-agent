@@ -5,6 +5,37 @@ import { db } from "@/lib/db";
 import { ACTIVE_BRAND_COOKIE } from "@/lib/active-brand";
 import { Errors, sessionUser } from "@/lib/api";
 
+/**
+ * GET /api/brands/active
+ * Returns the currently active brand (id, name, primary_color) from the cookie.
+ * Returns { data: null } when no brand is selected or cookie is invalid.
+ */
+export async function GET(req: NextRequest) {
+  const session = await auth();
+  const user = sessionUser(session);
+  if (!user) return Errors.UNAUTHORIZED();
+
+  const brandId = req.cookies.get(ACTIVE_BRAND_COOKIE)?.value;
+  if (!brandId) return NextResponse.json({ data: null });
+
+  const brand = await db.brand.findFirst({
+    where: { id: brandId, active: true },
+    select: { id: true, name: true, primary_color: true },
+  });
+
+  if (!brand) return NextResponse.json({ data: null });
+
+  // Non-admins must have a permission record for this brand
+  if (user.role !== "admin") {
+    const perm = await db.userBrandPermission.findFirst({
+      where: { user_id: user.id, brand_id: brandId },
+    });
+    if (!perm) return NextResponse.json({ data: null });
+  }
+
+  return NextResponse.json({ data: brand });
+}
+
 const bodySchema = z.object({
   brand_id: z.string().min(1),
 });

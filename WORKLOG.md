@@ -7,6 +7,27 @@ _(none)_
 ## Done Tasks
 
 ### 2026-04-15
+- Task: Brand dropdown — strict DB source, active brand display, auto-select, query sync
+  - Status: Complete
+  - Files changed:
+    - src/app/api/brands/active/route.ts — added GET handler: reads cookie, validates
+      brand is active + user has access, returns { id, name, primary_color } or null
+    - src/components/layout/topbar.tsx — full refactor:
+        • queries ["active-brand"] via GET /api/brands/active (staleTime 30s)
+        • button shows active brand name (with color dot) instead of always "Select Brand"
+        • dropdown highlights selected brand with bg-muted + Check icon
+        • auto-selects the only brand on first load (useRef guard prevents loop)
+        • detects if active brand is no longer in accessible list → switches to first brand
+        • on switch: invalidates ["active-brand"] immediately, marks all queries stale,
+          calls router.refresh() for server components
+        • "Loading..." shown briefly while active-brand query is settling
+    - src/app/(app)/brands/page.tsx — invalidate() now also invalidates
+      ["brands-switcher"] and ["active-brand"] so topbar updates after brand create/edit
+  - Data source: GET /api/brands?active=true — admin sees all active brands, non-admin
+    sees only brands they have a UserBrandPermission record for
+  - No schema changes, no new tables
+
+
 - Task: VPS Deployment — Ubuntu + PM2 + Nginx + Cloudflare
   - Status: Deployment config complete. Awaiting live VPS credentials to execute.
   - Architecture: Ubuntu VPS / Node.js 22 LTS / PM2 / Nginx (port 80) / Cloudflare Flexible SSL
