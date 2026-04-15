@@ -2,25 +2,35 @@
 
 ## Ongoing Tasks
 
-- Task: VPS Deployment — Ubuntu + PM2 + Nginx + Cloudflare
-  - Status: In progress (2026-04-14)
-  - Goal: Deploy to a real VPS, expose via Cloudflare at dev.<domain>
-  - Architecture: Ubuntu VPS / Node.js 22 / PM2 / Nginx (port 80) / Cloudflare Flexible SSL in front
-  - What's being created:
-    - `.env.production.example` — env template for server setup
-    - `ecosystem.config.js` — PM2 app config
-    - `nginx/mkt-agent.conf` — Nginx reverse proxy config
-    - `scripts/server-setup.sh` — one-time VPS bootstrap
-    - `scripts/deploy.sh` — recurring git pull + rebuild + restart
-  - Remaining manual steps (need credentials):
-    1. Provision VPS, copy SSH key
-    2. Set Cloudflare DNS A record → VPS IP
-    3. SSH in and run server-setup.sh
-    4. Create /opt/mkt-agent/.env with real DATABASE_URL + AUTH_SECRET
-    5. Run deploy.sh to build and start app
-    6. Verify at dev.<domain>
+_(none)_
 
 ## Done Tasks
+
+### 2026-04-15
+- Task: VPS Deployment — Ubuntu + PM2 + Nginx + Cloudflare
+  - Status: Deployment config complete. Awaiting live VPS credentials to execute.
+  - Architecture: Ubuntu VPS / Node.js 22 LTS / PM2 / Nginx (port 80) / Cloudflare Flexible SSL
+  - Files created and committed:
+    - `.env.production.example` — env template (force-added past .gitignore)
+    - `ecosystem.config.js` — PM2 app config, app at /opt/mkt-agent port 3000
+    - `nginx/mkt-agent.conf` — reverse proxy; passes X-Forwarded-Proto from Cloudflare
+    - `scripts/server-setup.sh` — one-time Ubuntu bootstrap (Node, PM2, Nginx, clone, firewall)
+    - `scripts/deploy.sh` — git pull + npm install + prisma generate + migrate deploy + build + pm2 reload
+  - Required env vars on server:
+    - DATABASE_URL — Neon connection string
+    - AUTH_SECRET — openssl rand -base64 32
+    - AUTH_TRUST_HOST=true
+    - NODE_ENV=production
+  - Cloudflare DNS: A record dev → VPS IP, orange cloud proxied, SSL/TLS mode: Flexible
+  - App directory on server: /opt/mkt-agent
+  - PM2 process name: mkt-agent
+  - Key notes:
+    - src/generated/prisma is gitignored — prisma generate MUST run before every build
+    - proxy.ts already handles x-forwarded-host + x-forwarded-proto (Cloudflare-safe)
+    - trustHost: true is already set in src/auth.ts
+    - bootstrap: curl .../scripts/server-setup.sh | bash (once on fresh server)
+    - redeploy: cd /opt/mkt-agent && bash scripts/deploy.sh
+  - Next: SSH into VPS and run bootstrap + deploy when credentials available
 
 ### 2026-04-14
 - Task: Brand Management module (replaces Brand Settings)
