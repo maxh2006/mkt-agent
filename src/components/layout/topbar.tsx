@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Building2, ChevronDown, Bell, User, AlertCircle, Check, Layers, Menu } from "lucide-react";
@@ -38,7 +37,7 @@ async function fetchActiveBrand(): Promise<ActiveBrandState | null> {
 
 export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
   const { data: session } = useSession();
-  const router = useRouter();
+
   const queryClient = useQueryClient();
   const [switchError, setSwitchError] = useState<string | null>(null);
   const autoSelectedRef = useRef(false);
@@ -94,8 +93,7 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
         return;
       }
       await queryClient.invalidateQueries({ queryKey: ["active-brand"] });
-      queryClient.invalidateQueries();
-      router.refresh();
+      await queryClient.invalidateQueries();
     } catch {
       setSwitchError("Could not switch brand");
     }
