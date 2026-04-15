@@ -109,7 +109,10 @@ export async function DELETE() {
 function cookieOptions() {
   return {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    // Only mark Secure when the app is actually served over HTTPS.
+    // Using NODE_ENV breaks HTTP deployments — browsers silently drop
+    // Secure cookies on plain HTTP connections.
+    secure: process.env.NEXTAUTH_URL?.startsWith("https") ?? false,
     sameSite: "lax" as const,
     maxAge: 60 * 60 * 24 * 30, // 30 days
     path: "/",
