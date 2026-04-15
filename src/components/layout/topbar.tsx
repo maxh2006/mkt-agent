@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Building2, ChevronDown, Bell, User, Check, Layers, Menu } from "lucide-react";
@@ -14,7 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { brandsApi } from "@/lib/brands-api";
+import { brandsApi, type Brand } from "@/lib/brands-api";
 import { cn } from "@/lib/utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -33,7 +33,137 @@ async function fetchActiveBrand(): Promise<ActiveBrandState | null> {
   return (json.data as ActiveBrandState | null) ?? null;
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
+// ─── Custom brand switcher (no Base UI — avoids error #31) ───────────────────
+
+interface BrandSwitcherProps {
+  brands: Brand[] | undefined;
+  activeBrandState: ActiveBrandState | null | undefined;
+  activeBrandLoading: boolean;
+  onSwitch: (brandId: string) => Promise<void>;
+}
+
+function BrandSwitcher({
+  brands,
+  activeBrandState,
+  activeBrandLoading,
+  onSwitch,
+}: BrandSwitcherProps) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const isAllBrands = activeBrandState?.mode === "all";
+  const activeBrand = activeBrandState?.brand ?? null;
+
+  const buttonLabel = activeBrandLoading
+    ? "Loading..."
+    : isAllBrands
+    ? "All Brands"
+    : activeBrand?.name ?? "Select Brand";
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(e: PointerEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [open]);
+
+  async function handleSelect(brandId: string) {
+    setOpen(false);
+    await onSwitch(brandId);
+  }
+
+  return (
+    <div ref={containerRef} className="relative">
+      {/* Trigger */}
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={cn(
+          buttonVariants({ variant: "outline", size: "sm" }),
+          "gap-2 max-w-[220px]"
+        )}
+      >
+        {/* Icon */}
+        {isAllBrands ? (
+          <Layers className="h-4 w-4 shrink-0" />
+        ) : activeBrand?.primary_color ? (
+          <span
+            className="inline-block h-2.5 w-2.5 shrink-0 rounded-full border"
+            style={{ backgroundColor: activeBrand.primary_color }}
+          />
+        ) : (
+          <Building2 className="h-4 w-4 shrink-0" />
+        )}
+        <span className="truncate">{buttonLabel}</span>
+        <ChevronDown className="h-3 w-3 shrink-0 opacity-60" />
+      </button>
+
+      {/* Panel */}
+      {open && (
+        <div className="absolute left-1/2 top-full z-50 mt-1 w-56 -translate-x-1/2 rounded-lg border bg-popover p-1 shadow-md">
+          <p className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
+            Switch Brand
+          </p>
+          <div className="my-1 h-px bg-border" />
+
+          {/* All Brands */}
+          <button
+            type="button"
+            onClick={() => handleSelect("all")}
+            className={cn(
+              "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-muted",
+              isAllBrands && "bg-muted font-medium"
+            )}
+          >
+            <Layers className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <span className="flex-1 text-left">All Brands</span>
+            {isAllBrands && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
+          </button>
+
+          <div className="my-1 h-px bg-border" />
+
+          {/* Brand list */}
+          {!brands || brands.length === 0 ? (
+            <p className="px-2 py-1.5 text-xs text-muted-foreground">No brands available</p>
+          ) : (
+            brands.map((brand) => {
+              const isActive = !isAllBrands && brand.id === activeBrand?.id;
+              return (
+                <button
+                  key={brand.id}
+                  type="button"
+                  onClick={() => handleSelect(brand.id)}
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-muted",
+                    isActive && "bg-muted font-medium"
+                  )}
+                >
+                  {brand.primary_color ? (
+                    <span
+                      className="inline-block h-2.5 w-2.5 shrink-0 rounded-full border"
+                      style={{ backgroundColor: brand.primary_color }}
+                    />
+                  ) : (
+                    <span className="inline-block h-2.5 w-2.5 shrink-0" />
+                  )}
+                  <span className="flex-1 truncate text-left">{brand.name}</span>
+                  {isActive && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
+                </button>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── TopBar ───────────────────────────────────────────────────────────────────
 
 export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
   const { data: session } = useSession();
@@ -59,7 +189,7 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
   useEffect(() => {
     if (autoSelectedRef.current) return;
     if (!brands || activeBrandLoading) return;
-    if (activeBrandState) return; // already has a state
+    if (activeBrandState) return;
     if (brands.length === 1) {
       autoSelectedRef.current = true;
       switchBrand(brands[0].id);
@@ -77,9 +207,7 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [brands, activeBrandState]);
 
-  // ── Switch brand (accepts a brand id or "all") ────────────────────────────
-  // NOTE: No state updates here — any setState call during Base UI's dropdown
-  // close animation unmounts the context provider and throws error #31.
+  // ── Switch brand (no Base UI involved — safe to invalidate immediately) ────
   async function switchBrand(brandId: string) {
     const res = await fetch("/api/brands/active", {
       method: "POST",
@@ -87,34 +215,11 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
       body: JSON.stringify({ brand_id: brandId }),
     });
     if (!res.ok) return;
-    // Defer invalidation until after the dropdown close animation completes.
-    setTimeout(() => {
-      queryClient.invalidateQueries({ queryKey: ["active-brand"] });
-      queryClient.invalidateQueries();
-    }, 150);
+    queryClient.invalidateQueries({ queryKey: ["active-brand"] });
+    queryClient.invalidateQueries();
   }
 
   const displayName = session?.user?.name ?? session?.user?.email ?? "Account";
-  const isAllBrands = activeBrandState?.mode === "all";
-  const activeBrand = activeBrandState?.brand ?? null;
-
-  // Button label and icon
-  const buttonLabel = activeBrandLoading
-    ? "Loading..."
-    : isAllBrands
-    ? "All Brands"
-    : activeBrand?.name ?? "Select Brand";
-
-  const buttonIcon = isAllBrands ? (
-    <Layers className="h-4 w-4 shrink-0" />
-  ) : activeBrand?.primary_color ? (
-    <span
-      className="inline-block h-2.5 w-2.5 shrink-0 rounded-full border"
-      style={{ backgroundColor: activeBrand.primary_color }}
-    />
-  ) : (
-    <Building2 className="h-4 w-4 shrink-0" />
-  );
 
   return (
     <header className="flex h-14 items-center justify-between border-b bg-background px-4">
@@ -130,68 +235,13 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
         <span className="text-base font-semibold tracking-tight">MKT Agent</span>
       </div>
 
-      {/* Brand Switcher */}
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          className={cn(
-            buttonVariants({ variant: "outline", size: "sm" }),
-            "gap-2 max-w-[220px]"
-          )}
-        >
-          {buttonIcon}
-          <span className="truncate">{buttonLabel}</span>
-          <ChevronDown className="h-3 w-3 shrink-0 opacity-60" />
-        </DropdownMenuTrigger>
-
-        <DropdownMenuContent align="center" className="w-56">
-          <DropdownMenuLabel>Switch Brand</DropdownMenuLabel>
-          <DropdownMenuSeparator />
-
-          {/* All Brands option */}
-          <DropdownMenuItem
-            onClick={() => switchBrand("all")}
-            className={cn(isAllBrands && "bg-muted font-medium")}
-          >
-            <Layers className="mr-2 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            <span className="flex-1">All Brands</span>
-            {isAllBrands && (
-              <Check className="ml-1 h-3.5 w-3.5 shrink-0 text-primary" />
-            )}
-          </DropdownMenuItem>
-
-          <DropdownMenuSeparator />
-
-          {!brands || brands.length === 0 ? (
-            <p className="px-2 py-1.5 text-xs text-muted-foreground">
-              No brands available
-            </p>
-          ) : (
-            brands.map((brand) => {
-              const isActive = !isAllBrands && brand.id === activeBrand?.id;
-              return (
-                <DropdownMenuItem
-                  key={brand.id}
-                  onClick={() => switchBrand(brand.id)}
-                  className={cn(isActive && "bg-muted font-medium")}
-                >
-                  {brand.primary_color ? (
-                    <span
-                      className="mr-2 inline-block h-2.5 w-2.5 shrink-0 rounded-full border"
-                      style={{ backgroundColor: brand.primary_color }}
-                    />
-                  ) : (
-                    <span className="mr-2 inline-block h-2.5 w-2.5 shrink-0" />
-                  )}
-                  <span className="flex-1 truncate">{brand.name}</span>
-                  {isActive && (
-                    <Check className="ml-1 h-3.5 w-3.5 shrink-0 text-primary" />
-                  )}
-                </DropdownMenuItem>
-              );
-            })
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
+      {/* Brand Switcher — custom, no Base UI */}
+      <BrandSwitcher
+        brands={brands}
+        activeBrandState={activeBrandState}
+        activeBrandLoading={activeBrandLoading}
+        onSwitch={switchBrand}
+      />
 
       {/* Notifications + User Menu */}
       <div className="flex items-center gap-2">
