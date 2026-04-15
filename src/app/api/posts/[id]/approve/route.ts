@@ -20,12 +20,12 @@ export async function POST(
   if (!user) return Errors.UNAUTHORIZED();
 
   const ctx = await getActiveBrand(user.id, user.role);
-  if (!ctx) return Errors.NO_ACTIVE_BRAND();
+  if (ctx.mode !== "single") return Errors.REQUIRES_SINGLE_BRAND();
   if (!assertCanApprove(ctx)) return Errors.FORBIDDEN();
 
   const { id } = await params;
   const post = await db.post.findFirst({
-    where: { id, brand_id: ctx.brand.id },
+    where: { id, brand_id: ctx.brand!.id },
   });
   if (!post) return Errors.NOT_FOUND("Post");
 
@@ -42,7 +42,7 @@ export async function POST(
   });
 
   void writeAuditLog({
-    brand_id: ctx.brand.id,
+    brand_id: ctx.brand!.id,
     user_id: user.id,
     action: AuditAction.POST_APPROVED,
     entity_type: "post",

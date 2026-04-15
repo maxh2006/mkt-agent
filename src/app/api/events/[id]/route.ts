@@ -9,6 +9,7 @@ import { updateEventSchema } from "@/lib/validations/event";
 /**
  * GET /api/events/[id]
  * Returns a single brand-scoped event. All roles can read.
+ * Works in both single and all-brands mode.
  */
 export async function GET(
   _req: NextRequest,
@@ -19,13 +20,13 @@ export async function GET(
   if (!user) return Errors.UNAUTHORIZED();
 
   const ctx = await getActiveBrand(user.id, user.role);
-  if (!ctx) return Errors.NO_ACTIVE_BRAND();
 
   const { id } = await params;
   const event = await db.event.findFirst({
-    where: { id, brand_id: ctx.brand.id },
+    where: { id, brand_id: { in: ctx.brandIds } },
     include: {
       creator: { select: { id: true, name: true } },
+      brand: { select: { id: true, name: true } },
     },
   });
   if (!event) return Errors.NOT_FOUND("Event");
@@ -35,8 +36,7 @@ export async function GET(
 
 /**
  * PATCH /api/events/[id]
- * Updates an event. Requires operator role or above.
- * Status transitions are tracked separately in the audit log.
+ * Updates an event. Requires single-brand mode + operator role or above.
  */
 export async function PATCH(
   req: NextRequest,
@@ -47,12 +47,12 @@ export async function PATCH(
   if (!user) return Errors.UNAUTHORIZED();
 
   const ctx = await getActiveBrand(user.id, user.role);
-  if (!ctx) return Errors.NO_ACTIVE_BRAND();
+  if (ctx.mode !== "single") return Errors.REQUIRES_SINGLE_BRAND();
   if (!assertCanEdit(ctx)) return Errors.FORBIDDEN();
 
   const { id } = await params;
   const existing = await db.event.findFirst({
-    where: { id, brand_id: ctx.brand.id },
+    where: { id, brand_id: ctx.brand!.id },
   });
   if (!existing) return Errors.NOT_FOUND("Event");
 
@@ -77,16 +77,11 @@ export async function PATCH(
   });
 
   const statusChanged = rest.status !== undefined && rest.status !== existing.status;
-
-  // Determine which non-status fields were actually changed so the audit is precise.
   const nonStatusFieldsChanged = Object.keys(parsed.data).some((k) => k !== "status");
 
-  // Write EVENT_UPDATED if any non-status fields were included in the payload.
-  // Write EVENT_STATUS_CHANGED additionally (separately) if the status transitioned.
-  // This ensures a single PATCH that changes both is fully audited.
   if (nonStatusFieldsChanged) {
     void writeAuditLog({
-      brand_id: ctx.brand.id,
+      brand_id: ctx.brand!.id,
       user_id: user.id,
       action: AuditAction.EVENT_UPDATED,
       entity_type: "event",
@@ -116,7 +111,7 @@ export async function PATCH(
 
   if (statusChanged) {
     void writeAuditLog({
-      brand_id: ctx.brand.id,
+      brand_id: ctx.brand!.id,
       user_id: user.id,
       action: AuditAction.EVENT_STATUS_CHANGED,
       entity_type: "event",

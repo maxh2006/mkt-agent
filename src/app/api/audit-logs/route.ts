@@ -38,7 +38,6 @@ export async function GET(req: NextRequest) {
   if (!user) return Errors.UNAUTHORIZED();
 
   const ctx = await getActiveBrand(user.id, user.role);
-  if (!ctx) return Errors.NO_ACTIVE_BRAND();
 
   const parsed = querySchema.safeParse(
     Object.fromEntries(req.nextUrl.searchParams.entries())
@@ -68,7 +67,7 @@ export async function GET(req: NextRequest) {
   }
 
   const where = {
-    brand_id: ctx.brand.id,
+    brand_id: { in: ctx.brandIds },
     ...(action ? { action } : {}),
     ...(entity_type ? { entity_type } : {}),
     ...(createdAtFilter ? { created_at: createdAtFilter } : {}),

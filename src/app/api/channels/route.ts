@@ -17,14 +17,16 @@ export async function GET(_req: NextRequest) {
   if (!user) return Errors.UNAUTHORIZED();
 
   const ctx = await getActiveBrand(user.id, user.role);
-  if (!ctx) return Errors.NO_ACTIVE_BRAND();
 
   const channels = await db.channel.findMany({
-    where: { brand_id: ctx.brand.id },
+    where: { brand_id: { in: ctx.brandIds } },
     orderBy: [{ platform: "asc" }, { account_name: "asc" }],
+    include: {
+      brand: { select: { id: true, name: true } },
+    },
   });
 
-  return ok(channels);
+  return ok({ channels, mode: ctx.mode });
 }
 
 /**
@@ -38,7 +40,7 @@ export async function POST(req: NextRequest) {
   if (!user) return Errors.UNAUTHORIZED();
 
   const ctx = await getActiveBrand(user.id, user.role);
-  if (!ctx) return Errors.NO_ACTIVE_BRAND();
+  if (ctx.mode !== "single") return Errors.REQUIRES_SINGLE_BRAND();
   if (!assertCanApprove(ctx)) return Errors.FORBIDDEN();
 
   const body = await req.json().catch(() => null);
@@ -51,7 +53,7 @@ export async function POST(req: NextRequest) {
 
   const channel = await db.channel.create({
     data: {
-      brand_id: ctx.brand.id,
+      brand_id: ctx.brand!.id,
       platform: rest.platform,
       account_name: rest.account_name,
       status: rest.status ?? "disconnected",
@@ -60,7 +62,7 @@ export async function POST(req: NextRequest) {
   });
 
   void writeAuditLog({
-    brand_id: ctx.brand.id,
+    brand_id: ctx.brand!.id,
     user_id: user.id,
     action: AuditAction.CHANNEL_CREATED,
     entity_type: "channel",

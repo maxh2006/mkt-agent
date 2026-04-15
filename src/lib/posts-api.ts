@@ -6,6 +6,11 @@ export interface PostAuthor {
   name: string;
 }
 
+export interface BrandRef {
+  id: string;
+  name: string;
+}
+
 export interface Post {
   id: string;
   brand_id: string;
@@ -29,6 +34,7 @@ export interface Post {
   updated_at: string;
   creator: PostAuthor;
   approver: PostAuthor | null;
+  brand?: BrandRef;
 }
 
 export interface PostsPage {
@@ -36,6 +42,7 @@ export interface PostsPage {
   total: number;
   page: number;
   per_page: number;
+  mode?: string;
 }
 
 export interface PostFilters {

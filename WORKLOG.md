@@ -2,11 +2,45 @@
 
 ## Ongoing Tasks
 
-_(none)_
+(none)
 
 ## Done Tasks
 
 ### 2026-04-15
+- Task: All Brands mode — default dashboard view + per-brand optional selection
+  - Status: Complete
+  - Architecture:
+    - Cookie value "all" = all-brands mode; specific brand_id = single-brand mode
+    - On login / missing cookie → defaults to "all"
+    - Invalid brand_id in cookie → falls back to "all"
+    - getActiveBrand() now always returns ActiveBrandContext (never null)
+    - ctx.brandIds: admin = all active brands, others = UserBrandPermission records
+    - Read routes: filter by brand_id: { in: ctx.brandIds } (works for both modes)
+    - Write routes: require ctx.mode === "single" → REQUIRES_SINGLE_BRAND (409)
+    - ctx.brand! non-null assertion safe after mode guard (TypeScript pattern)
+  - Files changed:
+    - src/lib/active-brand.ts — new ActiveBrandContext type, getActiveBrand always returns context
+    - src/lib/active-brand-client.ts — new useActiveBrand() hook (shares ["active-brand"] query key)
+    - src/lib/api.ts — REQUIRES_SINGLE_BRAND error added
+    - src/lib/posts-api.ts — Post.brand?: BrandRef added; PostsPage.mode? added
+    - src/lib/events-api.ts — Event.brand?: EventBrandRef added; EventsPage.mode? added
+    - src/app/api/brands/active/route.ts — GET returns { mode, brand }; POST accepts "all"
+    - src/app/api/posts/route.ts + [id]/route.ts + approve/reject/schedule — brandIds + mode guard
+    - src/app/api/events/route.ts + [id]/route.ts — brandIds + mode guard
+    - src/app/api/channels/route.ts + [id]/route.ts — brandIds + mode guard; GET includes brand
+    - src/app/api/automations/route.ts — all-brands mode skips seeding, queries across brandIds
+    - src/app/api/automations/[id]/route.ts — mode guard
+    - src/app/api/templates/route.ts + [id]/route.ts — brandIds in OR filter for globals; mode guard
+    - src/app/api/audit-logs/route.ts — brandIds filter
+    - src/app/api/insights/route.ts — brandIds across all queries
+    - src/components/layout/topbar.tsx — "All Brands" as first option, Layers icon, mode-aware display
+    - src/app/(app)/queue/page.tsx — brand column in all-brands mode, dead isNoBrand removed
+    - src/app/(app)/events/page.tsx — brand column + disabled "New Event" in all-brands mode
+  - Key notes:
+    - Automations seeding skipped in all-brands mode (can't seed across N brands at once)
+    - Templates global OR filter: brand_id IN brandIds OR brand_id IS NULL
+    - useActiveBrand() uses staleTime 30s and shares cache with topbar — no extra fetch
+
 - Task: Brand dropdown — strict DB source, active brand display, auto-select, query sync
   - Status: Complete
   - Files changed:

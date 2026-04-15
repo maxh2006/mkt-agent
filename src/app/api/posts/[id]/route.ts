@@ -17,14 +17,14 @@ export async function GET(
   if (!user) return Errors.UNAUTHORIZED();
 
   const ctx = await getActiveBrand(user.id, user.role);
-  if (!ctx) return Errors.NO_ACTIVE_BRAND();
 
   const { id } = await params;
   const post = await db.post.findFirst({
-    where: { id, brand_id: ctx.brand.id }, // brand_id enforced — no cross-brand leak
+    where: { id, brand_id: { in: ctx.brandIds } },
     include: {
       creator: { select: { id: true, name: true } },
       approver: { select: { id: true, name: true } },
+      brand: { select: { id: true, name: true } },
       metrics_rollup: true,
     },
   });
@@ -44,12 +44,12 @@ export async function PATCH(
   if (!user) return Errors.UNAUTHORIZED();
 
   const ctx = await getActiveBrand(user.id, user.role);
-  if (!ctx) return Errors.NO_ACTIVE_BRAND();
+  if (ctx.mode !== "single") return Errors.REQUIRES_SINGLE_BRAND();
   if (!assertCanEdit(ctx)) return Errors.FORBIDDEN();
 
   const { id } = await params;
   const existing = await db.post.findFirst({
-    where: { id, brand_id: ctx.brand.id },
+    where: { id, brand_id: ctx.brand!.id },
   });
   if (!existing) return Errors.NOT_FOUND("Post");
 
@@ -72,7 +72,7 @@ export async function PATCH(
   });
 
   void writeAuditLog({
-    brand_id: ctx.brand.id,
+    brand_id: ctx.brand!.id,
     user_id: user.id,
     action: AuditAction.POST_UPDATED,
     entity_type: "post",

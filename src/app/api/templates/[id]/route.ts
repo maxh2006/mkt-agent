@@ -36,14 +36,13 @@ export async function GET(
   if (!user) return Errors.UNAUTHORIZED();
 
   const ctx = await getActiveBrand(user.id, user.role);
-  if (!ctx) return Errors.NO_ACTIVE_BRAND();
 
   const { id } = await params;
 
   const template = await db.template.findFirst({
     where: {
       id,
-      OR: [{ brand_id: ctx.brand.id }, { brand_id: null }],
+      OR: [{ brand_id: { in: ctx.brandIds } }, { brand_id: null }],
     },
     select: TEMPLATE_SELECT,
   });
@@ -69,13 +68,13 @@ export async function PATCH(
   if (!user) return Errors.UNAUTHORIZED();
 
   const ctx = await getActiveBrand(user.id, user.role);
-  if (!ctx) return Errors.NO_ACTIVE_BRAND();
+  if (ctx.mode !== "single") return Errors.REQUIRES_SINGLE_BRAND();
   if (!assertCanApprove(ctx)) return Errors.FORBIDDEN();
 
   const { id } = await params;
 
   const existing = await db.template.findFirst({
-    where: { id, brand_id: ctx.brand.id }, // global templates are read-only
+    where: { id, brand_id: ctx.brand!.id }, // global templates are read-only
   });
   if (!existing) return Errors.NOT_FOUND("Template");
 
@@ -124,7 +123,7 @@ export async function PATCH(
 
   if (activeChanged) {
     void writeAuditLog({
-      brand_id: ctx.brand.id,
+      brand_id: ctx.brand!.id,
       user_id: user.id,
       action: AuditAction.TEMPLATE_TOGGLED,
       entity_type: "template",
@@ -136,7 +135,7 @@ export async function PATCH(
 
   if (name !== undefined || config !== undefined) {
     void writeAuditLog({
-      brand_id: ctx.brand.id,
+      brand_id: ctx.brand!.id,
       user_id: user.id,
       action: AuditAction.TEMPLATE_UPDATED,
       entity_type: "template",

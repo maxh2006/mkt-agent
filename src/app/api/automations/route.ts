@@ -18,9 +18,18 @@ export async function GET(_req: NextRequest) {
   if (!user) return Errors.UNAUTHORIZED();
 
   const ctx = await getActiveBrand(user.id, user.role);
-  if (!ctx) return Errors.NO_ACTIVE_BRAND();
 
-  const brandId = ctx.brand.id;
+  // In all-brands mode, skip seeding and return rules across all accessible brands.
+  if (ctx.mode === "all") {
+    const rules = await db.automationRule.findMany({
+      where: { brand_id: { in: ctx.brandIds } },
+      orderBy: { created_at: "asc" },
+      include: { brand: { select: { id: true, name: true } } },
+    });
+    return ok({ rules, mode: ctx.mode });
+  }
+
+  const brandId = ctx.brand!.id;
 
   // Upsert each default rule by (brand_id, rule_type).
   // Using upsert-per-rule rather than createMany so this is safe under concurrent requests
@@ -66,8 +75,8 @@ export async function GET(_req: NextRequest) {
       where: { brand_id: brandId },
       orderBy: { created_at: "asc" },
     });
-    return ok(all);
+    return ok({ rules: all, mode: ctx.mode });
   }
 
-  return ok(existing);
+  return ok({ rules: existing, mode: ctx.mode });
 }

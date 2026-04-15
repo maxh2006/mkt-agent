@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { eventsApi, type Event, type EventFilters } from "@/lib/events-api";
+import { useActiveBrand } from "@/lib/active-brand-client";
 import { EVENT_TYPES, EVENT_STATUSES, EVENT_TYPE_LABELS } from "@/lib/validations/event";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -46,6 +47,7 @@ const PER_PAGE = 25;
 
 export default function EventsPage() {
   const router = useRouter();
+  const { isAllBrands } = useActiveBrand();
   const [filters, setFilters] = useState<EventFilters>({ page: 1, per_page: PER_PAGE });
   const [searchInput, setSearchInput] = useState("");
 
@@ -54,9 +56,6 @@ export default function EventsPage() {
     queryFn: () => eventsApi.list(filters),
     retry: false,
   });
-
-  const isNoBrand =
-    isError && error instanceof Error && error.message.includes("No active brand");
 
   function setFilter(key: keyof EventFilters, value: string | number | undefined) {
     setFilters((prev) => ({ ...prev, [key]: value || undefined, page: 1 }));
@@ -84,7 +83,12 @@ export default function EventsPage() {
             Manage adhoc campaigns and seasonal activities.
           </p>
         </div>
-        <Button size="sm" onClick={() => router.push("/events/new")}>
+        <Button
+          size="sm"
+          onClick={() => router.push("/events/new")}
+          disabled={isAllBrands}
+          title={isAllBrands ? "Select a specific brand to create an event" : undefined}
+        >
           <Plus className="h-4 w-4" />
           New Event
         </Button>
@@ -157,16 +161,7 @@ export default function EventsPage() {
       </div>
 
       {/* States */}
-      {isNoBrand && (
-        <div className="rounded-lg border border-border bg-muted/30 px-6 py-10 text-center">
-          <p className="text-sm font-medium">No active brand selected</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Use the brand switcher in the top bar to select a brand.
-          </p>
-        </div>
-      )}
-
-      {isError && !isNoBrand && (
+      {isError && (
         <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-6 py-6 text-center">
           <p className="text-sm text-destructive">
             {error instanceof Error ? error.message : "Failed to load events"}
@@ -193,6 +188,7 @@ export default function EventsPage() {
                 <thead className="border-b bg-muted/50">
                   <tr>
                     <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Title</th>
+                    {isAllBrands && <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Brand</th>}
                     <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Type</th>
                     <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Status</th>
                     <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Date Range</th>
@@ -204,6 +200,7 @@ export default function EventsPage() {
                     <EventRow
                       key={event.id}
                       event={event}
+                      isAllBrands={isAllBrands}
                       onView={() => router.push(`/events/${event.id}`)}
                     />
                   ))}
@@ -244,7 +241,7 @@ export default function EventsPage() {
   );
 }
 
-function EventRow({ event, onView }: { event: Event; onView: () => void }) {
+function EventRow({ event, isAllBrands, onView }: { event: Event; isAllBrands: boolean; onView: () => void }) {
   return (
     <tr
       className="hover:bg-muted/30 transition-colors cursor-pointer"
@@ -256,6 +253,9 @@ function EventRow({ event, onView }: { event: Event; onView: () => void }) {
           <p className="text-xs text-muted-foreground truncate">{event.objective}</p>
         )}
       </td>
+      {isAllBrands && (
+        <td className="px-4 py-3 text-muted-foreground">{event.brand?.name ?? "—"}</td>
+      )}
       <td className="px-4 py-3 text-muted-foreground">
         {EVENT_TYPE_LABELS[event.event_type] ?? event.event_type}
       </td>

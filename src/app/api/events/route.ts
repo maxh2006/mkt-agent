@@ -8,8 +8,7 @@ import { createEventSchema, listEventsQuerySchema } from "@/lib/validations/even
 
 /**
  * GET /api/events
- * Returns brand-scoped events with optional status, event_type, search filters.
- * All roles can read.
+ * Returns brand-scoped events. Supports all-brands mode.
  */
 export async function GET(req: NextRequest) {
   const session = await auth();
@@ -17,7 +16,6 @@ export async function GET(req: NextRequest) {
   if (!user) return Errors.UNAUTHORIZED();
 
   const ctx = await getActiveBrand(user.id, user.role);
-  if (!ctx) return Errors.NO_ACTIVE_BRAND();
 
   const url = new URL(req.url);
   const raw = Object.fromEntries(url.searchParams.entries());
@@ -29,7 +27,7 @@ export async function GET(req: NextRequest) {
   const { status, event_type, search, page, per_page } = parsed.data;
 
   const where = {
-    brand_id: ctx.brand.id,
+    brand_id: { in: ctx.brandIds },
     ...(status ? { status } : {}),
     ...(event_type ? { event_type } : {}),
     ...(search
@@ -50,18 +48,18 @@ export async function GET(req: NextRequest) {
       take: per_page,
       include: {
         creator: { select: { id: true, name: true } },
+        brand: { select: { id: true, name: true } },
       },
     }),
     db.event.count({ where }),
   ]);
 
-  return ok({ events, total, page, per_page });
+  return ok({ events, total, page, per_page, mode: ctx.mode });
 }
 
 /**
  * POST /api/events
- * Creates a new event for the active brand.
- * Requires operator role or above (any non-viewer).
+ * Creates a new event. Requires single-brand mode + operator role or above.
  */
 export async function POST(req: NextRequest) {
   const session = await auth();
@@ -69,7 +67,7 @@ export async function POST(req: NextRequest) {
   if (!user) return Errors.UNAUTHORIZED();
 
   const ctx = await getActiveBrand(user.id, user.role);
-  if (!ctx) return Errors.NO_ACTIVE_BRAND();
+  if (ctx.mode !== "single") return Errors.REQUIRES_SINGLE_BRAND();
   if (!assertCanEdit(ctx)) return Errors.FORBIDDEN();
 
   const body = await req.json().catch(() => null);
@@ -83,7 +81,7 @@ export async function POST(req: NextRequest) {
   const event = await db.event.create({
     data: {
       ...rest,
-      brand_id: ctx.brand.id,
+      brand_id: ctx.brand!.id,
       created_by: user.id,
       status: rest.status ?? "draft",
       start_at: start_at ? new Date(start_at) : undefined,
@@ -95,7 +93,7 @@ export async function POST(req: NextRequest) {
   });
 
   void writeAuditLog({
-    brand_id: ctx.brand.id,
+    brand_id: ctx.brand!.id,
     user_id: user.id,
     action: AuditAction.EVENT_CREATED,
     entity_type: "event",

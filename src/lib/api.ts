@@ -16,6 +16,10 @@ export const Errors = {
   UNAUTHORIZED: () => apiError("Unauthorized", 401),
   FORBIDDEN: () => apiError("Forbidden", 403),
   NO_ACTIVE_BRAND: () => apiError("No active brand selected or access denied", 403),
+  // Returned by write routes when the user is in All Brands mode.
+  // The client should prompt the user to select a specific brand first.
+  REQUIRES_SINGLE_BRAND: () =>
+    apiError("Select a specific brand to perform this action", 409),
   NOT_FOUND: (entity = "Resource") => apiError(`${entity} not found`, 404),
   INVALID_TRANSITION: (from: string, to: string) =>
     apiError(`Cannot transition post from "${from}" to "${to}"`, 422),

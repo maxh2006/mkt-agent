@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import { postsApi, type Post, type PostFilters } from "@/lib/posts-api";
+import { useActiveBrand } from "@/lib/active-brand-client";
 import { StatusBadge } from "@/components/posts/status-badge";
 import { RejectDialog } from "@/components/posts/reject-dialog";
 import { ScheduleDialog } from "@/components/posts/schedule-dialog";
@@ -75,6 +76,7 @@ export default function ContentQueuePage() {
   const { data: session } = useSession();
   const queryClient = useQueryClient();
   const canApprove = canApproveRole(session?.user?.role);
+  const { isAllBrands } = useActiveBrand();
 
   const [filters, setFilters] = useState<PostFilters>({
     page: 1,
@@ -86,9 +88,6 @@ export default function ContentQueuePage() {
     queryFn: () => postsApi.list(filters),
     retry: false,
   });
-
-  const isNoBrand =
-    isError && error instanceof Error && error.message.includes("No active brand");
 
   function setFilter(key: keyof PostFilters, value: string | number | undefined) {
     setFilters((prev) => ({ ...prev, [key]: value || undefined, page: 1 }));
@@ -178,16 +177,7 @@ export default function ContentQueuePage() {
       </div>
 
       {/* States */}
-      {isNoBrand && (
-        <div className="rounded-lg border border-border bg-muted/30 px-6 py-10 text-center">
-          <p className="text-sm font-medium">No active brand selected</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Use the brand switcher in the top bar to select a brand.
-          </p>
-        </div>
-      )}
-
-      {isError && !isNoBrand && (
+      {isError && (
         <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-6 py-6 text-center">
           <p className="text-sm text-destructive">
             {error instanceof Error ? error.message : "Failed to load posts"}
@@ -214,6 +204,7 @@ export default function ContentQueuePage() {
                 <thead className="border-b bg-muted/50">
                   <tr>
                     <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Content</th>
+                    {isAllBrands && <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Brand</th>}
                     <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Platform</th>
                     <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Type</th>
                     <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Status</th>
@@ -228,6 +219,7 @@ export default function ContentQueuePage() {
                       key={post.id}
                       post={post}
                       canApprove={canApprove}
+                      isAllBrands={isAllBrands}
                       onView={() => router.push(`/queue/${post.id}`)}
                       onApprove={() => handleApprove(post.id)}
                       onReject={(reason) => handleReject(post.id, reason)}
@@ -276,6 +268,7 @@ export default function ContentQueuePage() {
 interface PostRowProps {
   post: Post;
   canApprove: boolean;
+  isAllBrands: boolean;
   onView: () => void;
   onApprove: () => Promise<void>;
   onReject: (reason?: string) => Promise<void>;
@@ -287,6 +280,7 @@ interface PostRowProps {
 function PostRow({
   post,
   canApprove,
+  isAllBrands,
   onView,
   onApprove,
   onReject,
@@ -318,6 +312,9 @@ function PostRow({
           <p className="text-xs text-muted-foreground truncate">{post.creator.name}</p>
         )}
       </td>
+      {isAllBrands && (
+        <td className="px-4 py-3 text-muted-foreground">{post.brand?.name ?? "—"}</td>
+      )}
       <td className="px-4 py-3 text-muted-foreground">{platformLabel}</td>
       <td className="px-4 py-3 text-muted-foreground">{postTypeLabel}</td>
       <td className="px-4 py-3">

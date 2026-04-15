@@ -38,7 +38,6 @@ export async function GET(req: NextRequest) {
   if (!user) return Errors.UNAUTHORIZED();
 
   const ctx = await getActiveBrand(user.id, user.role);
-  if (!ctx) return Errors.NO_ACTIVE_BRAND();
 
   const parsed = listTemplatesQuerySchema.safeParse(
     Object.fromEntries(req.nextUrl.searchParams.entries())
@@ -50,8 +49,8 @@ export async function GET(req: NextRequest) {
   const { template_type, active, include_global } = parsed.data;
 
   const brandFilter: Prisma.TemplateWhereInput = include_global
-    ? { OR: [{ brand_id: ctx.brand.id }, { brand_id: null }] }
-    : { brand_id: ctx.brand.id };
+    ? { OR: [{ brand_id: { in: ctx.brandIds } }, { brand_id: null }] }
+    : { brand_id: { in: ctx.brandIds } };
 
   const where: Prisma.TemplateWhereInput = {
     ...brandFilter,
@@ -81,7 +80,7 @@ export async function POST(req: NextRequest) {
   if (!user) return Errors.UNAUTHORIZED();
 
   const ctx = await getActiveBrand(user.id, user.role);
-  if (!ctx) return Errors.NO_ACTIVE_BRAND();
+  if (ctx.mode !== "single") return Errors.REQUIRES_SINGLE_BRAND();
   if (!assertCanApprove(ctx)) return Errors.FORBIDDEN();
 
   const body = await req.json().catch(() => null);
@@ -99,7 +98,7 @@ export async function POST(req: NextRequest) {
 
   const template = await db.template.create({
     data: {
-      brand_id: ctx.brand.id,
+      brand_id: ctx.brand!.id,
       template_type: template_type as TemplateType,
       name,
       active: active ?? true,
@@ -109,7 +108,7 @@ export async function POST(req: NextRequest) {
   });
 
   void writeAuditLog({
-    brand_id: ctx.brand.id,
+    brand_id: ctx.brand!.id,
     user_id: user.id,
     action: AuditAction.TEMPLATE_CREATED,
     entity_type: "template",

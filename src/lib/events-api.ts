@@ -6,6 +6,11 @@ export interface EventCreator {
   name: string;
 }
 
+export interface EventBrandRef {
+  id: string;
+  name: string;
+}
+
 export interface Event {
   id: string;
   brand_id: string;
@@ -22,6 +27,7 @@ export interface Event {
   created_at: string;
   updated_at: string;
   creator: EventCreator;
+  brand?: EventBrandRef;
 }
 
 export interface EventsPage {
@@ -29,6 +35,7 @@ export interface EventsPage {
   total: number;
   page: number;
   per_page: number;
+  mode?: string;
 }
 
 export interface EventFilters {

@@ -4,41 +4,123 @@ import type { UserRole } from "@/generated/prisma/enums";
 
 export const ACTIVE_BRAND_COOKIE = "active_brand_id";
 
-export interface ActiveBrandContext {
-  brand: {
-    id: string;
-    name: string;
-    logo_url: string | null;
-    primary_color: string | null;
-    domain: string | null;
-    active: boolean;
-    settings_json: unknown;
-  };
-  role: UserRole;
+// Special cookie value meaning "show all accessible brands"
+export const ALL_BRANDS_VALUE = "all";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export interface BrandInfo {
+  id: string;
+  name: string;
+  logo_url: string | null;
+  primary_color: string | null;
+  domain: string | null;
+  active: boolean;
+  settings_json: unknown;
 }
 
 /**
- * Reads the active brand from the cookie, validates it exists and is active,
- * and verifies the current user has access to it.
+ * Returned by getActiveBrand() for every authenticated request.
  *
- * Admin users bypass the permission table and can access any active brand.
+ * mode = "single": user has selected a specific brand.
+ *   - brand is populated
+ *   - brandIds contains exactly one entry
+ *   - role is the user's brand-specific role from UserBrandPermission
+ *     (admin always gets "admin")
  *
- * Returns null when:
- * - the cookie is missing
- * - the brand does not exist or is inactive
- * - the user does not have a permission record for that brand (non-admin)
+ * mode = "all": user is in All Brands view (default after login).
+ *   - brand is null
+ *   - brandIds contains all accessible active brand IDs
+ *   - role is the user's global role from the User table
+ *
+ * brandIds is always populated and safe to use in { in: ctx.brandIds } filters.
+ * An empty array means the user has no accessible brands — queries return nothing.
+ */
+export interface ActiveBrandContext {
+  mode: "single" | "all";
+  brand: BrandInfo | null;
+  brandIds: string[];
+  role: UserRole;
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Returns all active brand IDs accessible to this user.
+ * Admin → all active brands.
+ * Others → brands they have a UserBrandPermission record for (brand must be active).
+ */
+async function getAccessibleBrandIds(
+  userId: string,
+  userGlobalRole: UserRole
+): Promise<string[]> {
+  if (userGlobalRole === "admin") {
+    const brands = await db.brand.findMany({
+      where: { active: true },
+      select: { id: true },
+      orderBy: { name: "asc" },
+    });
+    return brands.map((b) => b.id);
+  }
+
+  const perms = await db.userBrandPermission.findMany({
+    where: {
+      user_id: userId,
+      brand: { active: true },
+    },
+    select: { brand_id: true },
+  });
+  return perms.map((p) => p.brand_id);
+}
+
+// ─── Main export ─────────────────────────────────────────────────────────────
+
+/**
+ * Resolves the active brand context for the current request.
+ *
+ * Always returns a valid ActiveBrandContext — never null.
+ *
+ * Fallback to all-brands mode when:
+ * - cookie is missing
+ * - cookie value is "all"
+ * - cookie contains a brand_id the user cannot access or that is inactive
+ *
+ * Route handlers should check ctx.mode before writes:
+ *   if (ctx.mode !== "single") return Errors.REQUIRES_SINGLE_BRAND();
  */
 export async function getActiveBrand(
   userId: string,
   userGlobalRole: UserRole
-): Promise<ActiveBrandContext | null> {
+): Promise<ActiveBrandContext> {
   const cookieStore = await cookies();
-  const brandId = cookieStore.get(ACTIVE_BRAND_COOKIE)?.value;
+  const cookieValue = cookieStore.get(ACTIVE_BRAND_COOKIE)?.value;
 
-  if (!brandId) return null;
+  const accessibleIds = await getAccessibleBrandIds(userId, userGlobalRole);
+
+  // All-brands mode: missing cookie, explicit "all", or zero accessible brands
+  if (!cookieValue || cookieValue === ALL_BRANDS_VALUE) {
+    return {
+      mode: "all",
+      brand: null,
+      brandIds: accessibleIds,
+      role: userGlobalRole,
+    };
+  }
+
+  // Specific brand requested — validate it is accessible
+  const isAccessible = accessibleIds.includes(cookieValue);
+  if (!isAccessible) {
+    // Invalid or inaccessible brand — fall back to all-brands
+    return {
+      mode: "all",
+      brand: null,
+      brandIds: accessibleIds,
+      role: userGlobalRole,
+    };
+  }
 
   const brand = await db.brand.findFirst({
-    where: { id: brandId, active: true },
+    where: { id: cookieValue, active: true },
     select: {
       id: true,
       name: true,
@@ -50,18 +132,29 @@ export async function getActiveBrand(
     },
   });
 
-  if (!brand) return null;
-
-  // Admins access any active brand regardless of permission records
-  if (userGlobalRole === "admin") {
-    return { brand, role: "admin" };
+  if (!brand) {
+    // Brand no longer exists or inactive — fall back
+    return {
+      mode: "all",
+      brand: null,
+      brandIds: accessibleIds,
+      role: userGlobalRole,
+    };
   }
 
-  const permission = await db.userBrandPermission.findFirst({
-    where: { user_id: userId, brand_id: brandId },
-  });
+  // Determine brand-specific role
+  let brandRole: UserRole = userGlobalRole;
+  if (userGlobalRole !== "admin") {
+    const perm = await db.userBrandPermission.findFirst({
+      where: { user_id: userId, brand_id: cookieValue },
+    });
+    if (perm) brandRole = perm.role;
+  }
 
-  if (!permission) return null;
-
-  return { brand, role: permission.role };
+  return {
+    mode: "single",
+    brand,
+    brandIds: [cookieValue],
+    role: brandRole,
+  };
 }

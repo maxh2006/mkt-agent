@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
   if (!user) return Errors.UNAUTHORIZED();
 
   const ctx = await getActiveBrand(user.id, user.role);
-  if (!ctx) return Errors.NO_ACTIVE_BRAND();
+  if (ctx.mode !== "single") return Errors.REQUIRES_SINGLE_BRAND();
   if (!assertCanEdit(ctx)) return Errors.FORBIDDEN();
 
   const body = await req.json().catch(() => null);
@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
 
   const post = await db.post.create({
     data: {
-      brand_id: ctx.brand.id,
+      brand_id: ctx.brand!.id,
       created_by: user.id,
       status: "draft",
       tracking_id: crypto.randomUUID(),
@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
   });
 
   void writeAuditLog({
-    brand_id: ctx.brand.id,
+    brand_id: ctx.brand!.id,
     user_id: user.id,
     action: AuditAction.POST_CREATED,
     entity_type: "post",
@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
   return ok(post, 201);
 }
 
-// ─── GET /api/posts — list posts for the active brand ─────────────────────────
+// ─── GET /api/posts — list posts (brand-scoped, supports all-brands mode) ─────
 
 export async function GET(req: NextRequest) {
   const session = await auth();
@@ -56,7 +56,6 @@ export async function GET(req: NextRequest) {
   if (!user) return Errors.UNAUTHORIZED();
 
   const ctx = await getActiveBrand(user.id, user.role);
-  if (!ctx) return Errors.NO_ACTIVE_BRAND();
 
   const { searchParams } = new URL(req.url);
   const queryParsed = listPostsQuerySchema.safeParse(
@@ -68,10 +67,12 @@ export async function GET(req: NextRequest) {
 
   const { status, platform, post_type, page, per_page } = queryParsed.data;
 
+  const brandFilter = { brand_id: { in: ctx.brandIds } };
+
   const [posts, total] = await Promise.all([
     db.post.findMany({
       where: {
-        brand_id: ctx.brand.id,
+        ...brandFilter,
         ...(status && { status }),
         ...(platform && { platform }),
         ...(post_type && { post_type }),
@@ -82,11 +83,12 @@ export async function GET(req: NextRequest) {
       include: {
         creator: { select: { id: true, name: true } },
         approver: { select: { id: true, name: true } },
+        brand: { select: { id: true, name: true } },
       },
     }),
     db.post.count({
       where: {
-        brand_id: ctx.brand.id,
+        ...brandFilter,
         ...(status && { status }),
         ...(platform && { platform }),
         ...(post_type && { post_type }),
@@ -94,5 +96,5 @@ export async function GET(req: NextRequest) {
     }),
   ]);
 
-  return ok({ posts, total, page, per_page });
+  return ok({ posts, total, page, per_page, mode: ctx.mode });
 }

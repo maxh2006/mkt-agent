@@ -20,11 +20,10 @@ export async function GET(
   if (!user) return Errors.UNAUTHORIZED();
 
   const ctx = await getActiveBrand(user.id, user.role);
-  if (!ctx) return Errors.NO_ACTIVE_BRAND();
 
   const { id } = await params;
   const channel = await db.channel.findFirst({
-    where: { id, brand_id: ctx.brand.id },
+    where: { id, brand_id: { in: ctx.brandIds } },
   });
   if (!channel) return Errors.NOT_FOUND("Channel");
 
@@ -46,12 +45,12 @@ export async function PATCH(
   if (!user) return Errors.UNAUTHORIZED();
 
   const ctx = await getActiveBrand(user.id, user.role);
-  if (!ctx) return Errors.NO_ACTIVE_BRAND();
+  if (ctx.mode !== "single") return Errors.REQUIRES_SINGLE_BRAND();
   if (!assertCanApprove(ctx)) return Errors.FORBIDDEN();
 
   const { id } = await params;
   const existing = await db.channel.findFirst({
-    where: { id, brand_id: ctx.brand.id },
+    where: { id, brand_id: ctx.brand!.id },
   });
   if (!existing) return Errors.NOT_FOUND("Channel");
 
@@ -83,7 +82,7 @@ export async function PATCH(
 
   if (statusChanged) {
     void writeAuditLog({
-      brand_id: ctx.brand.id,
+      brand_id: ctx.brand!.id,
       user_id: user.id,
       action: AuditAction.CHANNEL_STATUS_CHANGED,
       entity_type: "channel",
@@ -94,7 +93,7 @@ export async function PATCH(
   }
 
   void writeAuditLog({
-    brand_id: ctx.brand.id,
+    brand_id: ctx.brand!.id,
     user_id: user.id,
     action: AuditAction.CHANNEL_UPDATED,
     entity_type: "channel",

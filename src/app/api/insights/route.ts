@@ -96,7 +96,6 @@ export async function GET(req: NextRequest) {
   if (!user) return Errors.UNAUTHORIZED();
 
   const ctx = await getActiveBrand(user.id, user.role);
-  if (!ctx) return Errors.NO_ACTIVE_BRAND();
 
   const params = req.nextUrl.searchParams;
 
@@ -108,39 +107,39 @@ export async function GET(req: NextRequest) {
   const rawLimit = parseInt(params.get("top_limit") ?? "5", 10);
   const topLimit = Number.isFinite(rawLimit) && rawLimit >= 1 && rawLimit <= 20 ? rawLimit : 5;
 
-  const brandId = ctx.brand.id;
+  const brandIds = ctx.brandIds;
   const { gte, lt } = periodRange(period);
   const dateFilter = { gte, lt };
 
   // ── Operational metrics ──────────────────────────────────────────────────
   const [generated, approved, rejected, published] = await Promise.all([
     db.post.count({
-      where: { brand_id: brandId, created_at: dateFilter },
+      where: { brand_id: { in: brandIds }, created_at: dateFilter },
     }),
     db.post.count({
       where: {
-        brand_id: brandId,
+        brand_id: { in: brandIds },
         status: { in: ["approved", "scheduled", "posted"] },
         created_at: dateFilter,
       },
     }),
     db.post.count({
-      where: { brand_id: brandId, status: "rejected", created_at: dateFilter },
+      where: { brand_id: { in: brandIds }, status: "rejected", created_at: dateFilter },
     }),
     db.post.count({
-      where: { brand_id: brandId, status: "posted", created_at: dateFilter },
+      where: { brand_id: { in: brandIds }, status: "posted", created_at: dateFilter },
     }),
   ]);
 
   // ── Attribution metrics (raw event tables, status=success only for deposits) ─
-  const successFilter = { brand_id: brandId, status: "success", created_at: dateFilter };
+  const successFilter = { brand_id: { in: brandIds }, status: "success", created_at: dateFilter };
 
   const [clicks, signups, depositAgg, ggrAgg, depositorGroups] = await Promise.all([
     db.clickEvent.count({
-      where: { brand_id: brandId, created_at: dateFilter },
+      where: { brand_id: { in: brandIds }, created_at: dateFilter },
     }),
     db.signupEvent.count({
-      where: { brand_id: brandId, created_at: dateFilter },
+      where: { brand_id: { in: brandIds }, created_at: dateFilter },
     }),
     db.depositEvent.aggregate({
       where: successFilter,
@@ -170,19 +169,19 @@ export async function GET(req: NextRequest) {
 
   const [topByClicks, topByDeposit, topByGgr] = await Promise.all([
     db.postMetricsRollup.findMany({
-      where: { brand_id: brandId },
+      where: { brand_id: { in: brandIds } },
       orderBy: { clicks: "desc" },
       take: topLimit,
       select: rollupSelect,
     }),
     db.postMetricsRollup.findMany({
-      where: { brand_id: brandId },
+      where: { brand_id: { in: brandIds } },
       orderBy: { total_deposit: "desc" },
       take: topLimit,
       select: rollupSelect,
     }),
     db.postMetricsRollup.findMany({
-      where: { brand_id: brandId },
+      where: { brand_id: { in: brandIds } },
       orderBy: { total_ggr: "desc" },
       take: topLimit,
       select: rollupSelect,

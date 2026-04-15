@@ -21,12 +21,12 @@ export async function PATCH(
   if (!user) return Errors.UNAUTHORIZED();
 
   const ctx = await getActiveBrand(user.id, user.role);
-  if (!ctx) return Errors.NO_ACTIVE_BRAND();
+  if (ctx.mode !== "single") return Errors.REQUIRES_SINGLE_BRAND();
   if (!assertCanApprove(ctx)) return Errors.FORBIDDEN();
 
   const { id } = await params;
   const existing = await db.automationRule.findFirst({
-    where: { id, brand_id: ctx.brand.id },
+    where: { id, brand_id: ctx.brand!.id },
   });
   if (!existing) return Errors.NOT_FOUND("Automation rule");
 
@@ -64,7 +64,7 @@ export async function PATCH(
 
   if (valueDisplayChanged) {
     void writeAuditLog({
-      brand_id: ctx.brand.id,
+      brand_id: ctx.brand!.id,
       user_id: user.id,
       action: AuditAction.AUTOMATION_VALUE_DISPLAY_CHANGED,
       entity_type: "automation_rule",
@@ -75,7 +75,7 @@ export async function PATCH(
   }
 
   void writeAuditLog({
-    brand_id: ctx.brand.id,
+    brand_id: ctx.brand!.id,
     user_id: user.id,
     action: AuditAction.AUTOMATION_UPDATED,
     entity_type: "automation_rule",
