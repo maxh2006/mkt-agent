@@ -2,12 +2,43 @@
 
 ## Ongoing Tasks
 
-- Task: UI Refinement Batch 1 — Global UI + Brand Switch polish
-  - Status: Complete (2026-04-15)
+
 
 ## Done Tasks
 
 ### 2026-04-15
+- Task: Content Queue — table refactor + prompt-based edit modal
+  - Status: Complete
+  - Scope: UI-only, no backend changes
+  - Files changed:
+    - src/components/posts/status-badge.tsx — added per-status lucide icons (FileEdit, Clock,
+      CheckCircle2, CalendarClock, SendHorizontal, XCircle, AlertTriangle); badge now renders
+      icon + label with gap-1 whitespace-nowrap
+    - src/components/posts/edit-post-modal.tsx (new) — Dialog showing current content sections
+      (Headline, Caption, CTA, Banner Text, Image Prompt), instruction textarea, "Apply Edit"
+      button (placeholder — AI logic wired in a future step); shows feedback message on apply
+    - src/app/(app)/queue/page.tsx — full table rewrite:
+        • Column order: Brand (all-brands only) | Thumbnail | Preview | Status | Type | Platform
+          | Scheduled | Created | Actions
+        • ThumbnailCell: 40×40 rounded square, platform abbreviation + color (IG/FB/TW/TK/TG)
+        • Preview: headline (bold) + caption (muted) truncated; creator name as tertiary line
+        • StatusBadge: now includes icon (imported from updated status-badge.tsx)
+        • PostTypeTag: compact colored border badge (Promo/Win/Event/Edu)
+        • PlatformTag: compact 2-letter abbreviation with platform color
+        • BrandCell: deterministic color dot per brand name + truncated name
+        • Scheduled: "Today, 2:30 PM" / "Tomorrow, 2:30 PM" / "Apr 12, 2:30 PM" / "—"
+        • Created: short date (Apr 12), xs size, lower opacity; hidden on xs screens
+        • Actions: View (Eye), Edit (Pencil, draft/pending/rejected), Approve (✓), Reject (✗),
+          Schedule (CalendarClock) — same role/status guards as before
+        • EditPostModal wired: clicking Edit sets editPost state, modal opens over the table
+        • Table: overflow-x-auto + min-w-[860px], responsive hidden columns on mobile
+  - Key notes:
+    - Edit modal "Apply Edit" is a placeholder — instruction is shown as saved but no API call
+    - Thumbnail uses platform color/abbr as visual placeholder (no image_url on Post type yet)
+    - Brand dot color is deterministic hash of brand name (no primary_color in BrandRef)
+    - No backend changes — all changes are UI-only
+
+
 - Task: UI Refinement Batch 1 — Global UI + Brand Switch polish
   - Status: Complete
   - Changes:
