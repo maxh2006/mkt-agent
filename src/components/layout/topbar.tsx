@@ -92,8 +92,13 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
         setSwitchError(json.error ?? "Could not switch brand");
         return;
       }
-      await queryClient.invalidateQueries({ queryKey: ["active-brand"] });
-      await queryClient.invalidateQueries();
+      // Defer invalidation so the dropdown finishes closing before React re-renders.
+      // Calling invalidateQueries() synchronously while the dropdown is still in its
+      // closing animation unmounts Base UI's context and throws error #31.
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: ["active-brand"] });
+        queryClient.invalidateQueries();
+      }, 50);
     } catch {
       setSwitchError("Could not switch brand");
     }
