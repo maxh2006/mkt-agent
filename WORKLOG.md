@@ -2,7 +2,23 @@
 
 ## Ongoing Tasks
 
-_(none)_
+- Task: VPS Deployment — Ubuntu + PM2 + Nginx + Cloudflare
+  - Status: In progress (2026-04-14)
+  - Goal: Deploy to a real VPS, expose via Cloudflare at dev.<domain>
+  - Architecture: Ubuntu VPS / Node.js 22 / PM2 / Nginx (port 80) / Cloudflare Flexible SSL in front
+  - What's being created:
+    - `.env.production.example` — env template for server setup
+    - `ecosystem.config.js` — PM2 app config
+    - `nginx/mkt-agent.conf` — Nginx reverse proxy config
+    - `scripts/server-setup.sh` — one-time VPS bootstrap
+    - `scripts/deploy.sh` — recurring git pull + rebuild + restart
+  - Remaining manual steps (need credentials):
+    1. Provision VPS, copy SSH key
+    2. Set Cloudflare DNS A record → VPS IP
+    3. SSH in and run server-setup.sh
+    4. Create /opt/mkt-agent/.env with real DATABASE_URL + AUTH_SECRET
+    5. Run deploy.sh to build and start app
+    6. Verify at dev.<domain>
 
 ## Done Tasks
 
