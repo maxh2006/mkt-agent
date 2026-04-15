@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Building2, ChevronDown, Bell, User, AlertCircle, Check, Layers, Menu } from "lucide-react";
+import { Building2, ChevronDown, Bell, User, Check, Layers, Menu } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -39,7 +39,6 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
   const { data: session } = useSession();
 
   const queryClient = useQueryClient();
-  const [switchError, setSwitchError] = useState<string | null>(null);
   const autoSelectedRef = useRef(false);
 
   // Current active brand state (from cookie via API)
@@ -79,29 +78,20 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
   }, [brands, activeBrandState]);
 
   // ── Switch brand (accepts a brand id or "all") ────────────────────────────
+  // NOTE: No state updates here — any setState call during Base UI's dropdown
+  // close animation unmounts the context provider and throws error #31.
   async function switchBrand(brandId: string) {
-    setSwitchError(null);
-    try {
-      const res = await fetch("/api/brands/active", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ brand_id: brandId }),
-      });
-      if (!res.ok) {
-        const json = await res.json().catch(() => ({}));
-        setSwitchError(json.error ?? "Could not switch brand");
-        return;
-      }
-      // Defer invalidation so the dropdown finishes closing before React re-renders.
-      // Calling invalidateQueries() synchronously while the dropdown is still in its
-      // closing animation unmounts Base UI's context and throws error #31.
-      setTimeout(() => {
-        queryClient.invalidateQueries({ queryKey: ["active-brand"] });
-        queryClient.invalidateQueries();
-      }, 50);
-    } catch {
-      setSwitchError("Could not switch brand");
-    }
+    const res = await fetch("/api/brands/active", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ brand_id: brandId }),
+    });
+    if (!res.ok) return;
+    // Defer invalidation until after the dropdown close animation completes.
+    setTimeout(() => {
+      queryClient.invalidateQueries({ queryKey: ["active-brand"] });
+      queryClient.invalidateQueries();
+    }, 150);
   }
 
   const displayName = session?.user?.name ?? session?.user?.email ?? "Account";
@@ -115,9 +105,7 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
     ? "All Brands"
     : activeBrand?.name ?? "Select Brand";
 
-  const buttonIcon = switchError ? (
-    <AlertCircle className="h-4 w-4 shrink-0" />
-  ) : isAllBrands ? (
+  const buttonIcon = isAllBrands ? (
     <Layers className="h-4 w-4 shrink-0" />
   ) : activeBrand?.primary_color ? (
     <span
@@ -143,12 +131,11 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
       </div>
 
       {/* Brand Switcher */}
-      <DropdownMenu onOpenChange={() => setSwitchError(null)}>
+      <DropdownMenu>
         <DropdownMenuTrigger
           className={cn(
             buttonVariants({ variant: "outline", size: "sm" }),
-            "gap-2 max-w-[220px]",
-            switchError && "border-destructive text-destructive"
+            "gap-2 max-w-[220px]"
           )}
         >
           {buttonIcon}
@@ -158,9 +145,6 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
 
         <DropdownMenuContent align="center" className="w-56">
           <DropdownMenuLabel>Switch Brand</DropdownMenuLabel>
-          {switchError && (
-            <p className="px-2 pb-1 text-xs text-destructive">{switchError}</p>
-          )}
           <DropdownMenuSeparator />
 
           {/* All Brands option */}
