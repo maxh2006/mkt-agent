@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Building2, ChevronDown, Bell, User, AlertCircle, Check, Layers } from "lucide-react";
+import { Building2, ChevronDown, Bell, User, AlertCircle, Check, Layers, Menu } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -36,7 +36,7 @@ async function fetchActiveBrand(): Promise<ActiveBrandState | null> {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function TopBar() {
+export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
   const { data: session } = useSession();
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -127,8 +127,17 @@ export function TopBar() {
 
   return (
     <header className="flex h-14 items-center justify-between border-b bg-background px-4">
-      {/* Logo */}
-      <span className="text-base font-semibold tracking-tight">MKT Agent</span>
+      {/* Mobile hamburger + Logo */}
+      <div className="flex items-center gap-2">
+        <button
+          className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "md:hidden")}
+          aria-label="Toggle menu"
+          onClick={onMenuClick}
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+        <span className="text-base font-semibold tracking-tight">MKT Agent</span>
+      </div>
 
       {/* Brand Switcher */}
       <DropdownMenu onOpenChange={() => setSwitchError(null)}>

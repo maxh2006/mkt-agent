@@ -200,7 +200,8 @@ export default function ContentQueuePage() {
             </div>
           ) : (
             <div className="overflow-hidden rounded-lg border border-border">
-              <table className="w-full text-sm">
+              <div className="overflow-x-auto">
+              <table className="w-full min-w-[720px] text-sm">
                 <thead className="border-b bg-muted/50">
                   <tr>
                     <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Content</th>
@@ -230,6 +231,7 @@ export default function ContentQueuePage() {
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           )}
 

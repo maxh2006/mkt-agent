@@ -26,17 +26,32 @@ const NAV_ITEMS = [
   { label: "Templates & Assets", href: "/templates",       icon: Layers },
   { label: "Insights",           href: "/insights",        icon: BarChart2 },
   { label: "Channels",           href: "/channels",        icon: Radio },
-  { label: "Brand Management",    href: "/brands",           icon: Settings2 },
+  { label: "Brand Management",   href: "/brands",          icon: Settings2 },
   { label: "Users & Roles",      href: "/users",           icon: Users },
   { label: "Audit Logs",         href: "/audit-logs",      icon: ScrollText },
 ] as const;
 
-export function Sidebar() {
+interface SidebarProps {
+  isOpen?: boolean;
+  onClose?: () => void;
+}
+
+export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   const pathname = usePathname();
 
   return (
-    <aside className="flex h-full w-56 flex-col border-r bg-background">
-      <nav className="flex flex-col gap-1 p-3 pt-4">
+    <aside
+      className={cn(
+        // Base: fixed overlay for mobile, relative for desktop
+        "flex flex-col w-56 border-r bg-background",
+        // Mobile: fixed sidebar that slides in/out
+        "fixed inset-y-0 left-0 z-30 transition-transform duration-200 ease-in-out",
+        isOpen ? "translate-x-0" : "-translate-x-full",
+        // Desktop: always visible, back in normal document flow
+        "md:relative md:inset-auto md:z-auto md:translate-x-0 md:flex",
+      )}
+    >
+      <nav className="flex flex-col gap-1 p-3 pt-4 overflow-y-auto flex-1">
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon;
           const isActive =
@@ -48,6 +63,7 @@ export function Sidebar() {
             <Link
               key={item.href}
               href={item.href}
+              onClick={onClose}
               className={cn(
                 "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
                 isActive

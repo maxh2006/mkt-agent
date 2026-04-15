@@ -2,11 +2,36 @@
 
 ## Ongoing Tasks
 
-(none)
+- Task: UI Refinement Batch 1 — Global UI + Brand Switch polish
+  - Status: Complete (2026-04-15)
 
 ## Done Tasks
 
 ### 2026-04-15
+- Task: UI Refinement Batch 1 — Global UI + Brand Switch polish
+  - Status: Complete
+  - Changes:
+    - src/app/layout.tsx — switched font from Geist to Roboto (300/400/500/700 weights,
+      --font-roboto CSS variable via next/font/google)
+    - src/app/globals.css — full theme update to Meta Business Suite palette:
+        • primary → oklch(0.52 0.22 258) ≈ #1877F2 (Facebook blue) with white foreground
+        • muted/secondary → oklch(0.962 0.004 260) ≈ #F0F2F5 (Facebook light gray)
+        • border/input → oklch(0.899 0.004 260) ≈ #DADDE1 (subtle gray border)
+        • ring → blue (matches primary)
+        • --font-sans mapped to --font-roboto
+        • radius reduced to 0.5rem (slightly tighter)
+    - src/components/layout/shell.tsx — converted to client component; manages
+      sidebarOpen state; renders mobile backdrop overlay
+    - src/components/layout/sidebar.tsx — responsive: fixed+translate-x on mobile
+      (slides in/out), md:relative always visible on desktop; nav links close sidebar on mobile
+    - src/components/layout/topbar.tsx — added onMenuClick prop; hamburger Menu button
+      visible only on mobile (md:hidden) in top-left
+    - src/app/(app)/queue/page.tsx — wrapped table in overflow-x-auto + min-w-[720px]
+      to prevent column squishing on narrow viewports
+    - src/app/(app)/events/page.tsx — same pattern, min-w-[560px]
+  - Brand dropdown: no changes needed — correctly implemented in previous session
+    (fetches from /api/brands, cookie-based active brand, All Brands mode, query invalidation)
+
 - Task: All Brands mode — default dashboard view + per-brand optional selection
   - Status: Complete
   - Architecture:
