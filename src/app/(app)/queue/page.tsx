@@ -281,52 +281,57 @@ export default function ContentQueuePage() {
         </div>
       )}
 
-      {/* Table */}
-      {data && !isError && (
+      {/* Table — always rendered once data resolves, empty state as a tbody row */}
+      {!isLoading && !isError && (
         <>
-          {data.posts.length === 0 ? (
-            <div className="rounded-lg border border-border bg-muted/20 px-6 py-10 text-center">
-              <p className="text-sm text-muted-foreground">No posts match the current filters.</p>
-            </div>
-          ) : (
-            <div className="overflow-hidden rounded-lg border border-border">
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[860px] text-sm">
-                  <thead className="border-b bg-muted/50">
-                    <tr>
-                      {isAllBrands && (
-                        <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">
-                          Brand
-                        </th>
-                      )}
-                      <th className="px-3 py-2.5 text-left font-medium text-muted-foreground w-12">
-                        {/* Thumbnail */}
-                      </th>
+          <div className="overflow-hidden rounded-lg border border-border">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[860px] text-sm">
+                <thead className="border-b bg-muted/50">
+                  <tr>
+                    {isAllBrands && (
                       <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">
-                        Preview
+                        Brand
                       </th>
-                      <th className="px-3 py-2.5 text-left font-medium text-muted-foreground whitespace-nowrap">
-                        Status
-                      </th>
-                      <th className="px-3 py-2.5 text-left font-medium text-muted-foreground whitespace-nowrap">
-                        Type
-                      </th>
-                      <th className="px-3 py-2.5 text-left font-medium text-muted-foreground whitespace-nowrap">
-                        Platform
-                      </th>
-                      <th className="px-3 py-2.5 text-left font-medium text-muted-foreground whitespace-nowrap">
-                        Scheduled
-                      </th>
-                      <th className="px-3 py-2.5 text-left font-medium text-muted-foreground whitespace-nowrap hidden sm:table-cell">
-                        Created
-                      </th>
-                      <th className="px-3 py-2.5 text-right font-medium text-muted-foreground">
-                        Actions
-                      </th>
+                    )}
+                    <th className="px-3 py-2.5 text-left font-medium text-muted-foreground w-12">
+                      {/* Thumbnail */}
+                    </th>
+                    <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">
+                      Preview
+                    </th>
+                    <th className="px-3 py-2.5 text-left font-medium text-muted-foreground whitespace-nowrap">
+                      Status
+                    </th>
+                    <th className="px-3 py-2.5 text-left font-medium text-muted-foreground whitespace-nowrap">
+                      Type
+                    </th>
+                    <th className="px-3 py-2.5 text-left font-medium text-muted-foreground whitespace-nowrap">
+                      Platform
+                    </th>
+                    <th className="px-3 py-2.5 text-left font-medium text-muted-foreground whitespace-nowrap">
+                      Scheduled
+                    </th>
+                    <th className="px-3 py-2.5 text-left font-medium text-muted-foreground whitespace-nowrap hidden sm:table-cell">
+                      Created
+                    </th>
+                    <th className="px-3 py-2.5 text-right font-medium text-muted-foreground">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {!data || data.posts.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={isAllBrands ? 9 : 8}
+                        className="px-4 py-10 text-center text-sm text-muted-foreground"
+                      >
+                        No posts match the current filters.
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {data.posts.map((post) => (
+                  ) : (
+                    data.posts.map((post) => (
                       <PostRow
                         key={post.id}
                         post={post}
@@ -338,18 +343,18 @@ export default function ContentQueuePage() {
                         onSchedule={(scheduledAt) => handleSchedule(post.id, scheduledAt)}
                         onEdit={() => setEditPost(post)}
                       />
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    ))
+                  )}
+                </tbody>
+              </table>
             </div>
-          )}
+          </div>
 
           {/* Pagination */}
           {totalPages > 1 && (
             <div className="flex items-center justify-between">
               <p className="text-xs text-muted-foreground">
-                {data.total} post{data.total !== 1 ? "s" : ""} — page {currentPage} of {totalPages}
+                {data?.total} post{data?.total !== 1 ? "s" : ""} — page {currentPage} of {totalPages}
               </p>
               <div className="flex gap-1">
                 <Button variant="outline" size="sm" onClick={() => setPage(currentPage - 1)} disabled={currentPage <= 1}>
