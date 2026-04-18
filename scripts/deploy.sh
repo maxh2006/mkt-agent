@@ -49,13 +49,13 @@ npm run build
 
 echo ""
 echo "==> [6/6] Restarting app via PM2..."
-# Start if not running, reload if already running
-if pm2 list | grep -q "mkt-agent"; then
-  pm2 reload mkt-agent
-else
-  pm2 start "$APP_DIR/ecosystem.config.js"
-fi
+# Kill any stale processes on port 3000 (e.g. leftover nohup or old PM2)
+sudo fuser -k 3000/tcp 2>/dev/null || true
+sleep 1
 
+# Stop existing PM2 process if running, then start fresh
+pm2 delete mkt-agent 2>/dev/null || true
+PORT=3000 NODE_ENV=production pm2 start "npx next start -p 3000" --name mkt-agent
 pm2 save
 
 echo ""
