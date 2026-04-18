@@ -5,15 +5,11 @@ import { getActiveBrand } from "@/lib/active-brand";
 import { ok, Errors, sessionUser, assertCanEdit } from "@/lib/api";
 import { writeAuditLog, AuditAction } from "@/lib/audit";
 import { updateEventSchema } from "@/lib/validations/event";
+import { normalizeEvent } from "@/lib/event-status";
 
-/**
- * GET /api/events/[id]
- * Returns a single brand-scoped event. All roles can read.
- * Works in both single and all-brands mode.
- */
 export async function GET(
   _req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await auth();
   const user = sessionUser(session);
@@ -31,16 +27,12 @@ export async function GET(
   });
   if (!event) return Errors.NOT_FOUND("Event");
 
-  return ok(event);
+  return ok(normalizeEvent(event));
 }
 
-/**
- * PATCH /api/events/[id]
- * Updates an event. Requires single-brand mode + operator role or above.
- */
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await auth();
   const user = sessionUser(session);
@@ -95,6 +87,10 @@ export async function PATCH(
         theme: existing.theme,
         start_at: existing.start_at,
         end_at: existing.end_at,
+        target_audience: existing.target_audience,
+        cta: existing.cta,
+        tone: existing.tone,
+        auto_generate_posts: existing.auto_generate_posts,
       },
       after: {
         title: updated.title,
@@ -105,6 +101,10 @@ export async function PATCH(
         theme: updated.theme,
         start_at: updated.start_at,
         end_at: updated.end_at,
+        target_audience: updated.target_audience,
+        cta: updated.cta,
+        tone: updated.tone,
+        auto_generate_posts: updated.auto_generate_posts,
       },
     });
   }
@@ -121,5 +121,5 @@ export async function PATCH(
     });
   }
 
-  return ok(updated);
+  return ok(normalizeEvent(updated));
 }

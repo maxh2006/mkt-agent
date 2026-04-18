@@ -8,6 +8,7 @@ import {
   createPostSchema,
   listPostsQuerySchema,
 } from "@/lib/validations/post";
+import { parsePostingInstance, formatPostingInstanceCompact } from "@/lib/posting-instance";
 
 // ─── POST /api/posts — create a draft post ────────────────────────────────────
 
@@ -120,5 +121,26 @@ export async function GET(req: NextRequest) {
     db.post.count({ where }),
   ]);
 
-  return ok({ posts, total, page, per_page, mode: ctx.mode });
+  // Enrich event-sourced posts with recurrence summary and event title
+  const eventIds = [...new Set(posts.filter((p) => p.source_type === "event" && p.source_id).map((p) => p.source_id!))];
+  const eventMap = new Map<string, { title: string; posting_instance_json: unknown }>();
+  if (eventIds.length > 0) {
+    const events = await db.event.findMany({
+      where: { id: { in: eventIds } },
+      select: { id: true, title: true, posting_instance_json: true },
+    });
+    for (const e of events) eventMap.set(e.id, { title: e.title, posting_instance_json: e.posting_instance_json });
+  }
+
+  const enriched = posts.map((p) => {
+    const ev = p.source_type === "event" && p.source_id ? eventMap.get(p.source_id) : null;
+    const piConfig = ev ? parsePostingInstance(ev.posting_instance_json) : null;
+    return {
+      ...p,
+      event_posting_summary: piConfig ? formatPostingInstanceCompact(piConfig) : null,
+      event_title: ev?.title ?? null,
+    };
+  });
+
+  return ok({ posts: enriched, total, page, per_page, mode: ctx.mode });
 }

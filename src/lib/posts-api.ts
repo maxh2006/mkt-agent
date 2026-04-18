@@ -25,6 +25,7 @@ export interface Post {
   image_prompt: string | null;
   source_type: string | null;
   source_id: string | null;
+  source_instance_key: string | null;
   tracking_id: string | null;
   scheduled_at: string | null;
   posted_at: string | null;
@@ -36,6 +37,8 @@ export interface Post {
   creator: PostAuthor;
   approver: PostAuthor | null;
   brand?: BrandRef;
+  event_posting_summary?: string | null;
+  event_title?: string | null;
 }
 
 export interface PostsPage {
@@ -108,4 +111,23 @@ export const postsApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ scheduled_at: scheduledAt }),
     }),
+
+  getEventContext: (id: string) =>
+    apiFetch<EventBriefContext | null>(`/api/posts/${id}/event-context`),
 };
+
+export interface EventBriefContext {
+  event_id: string;
+  event_title: string;
+  theme: string | null;
+  objective: string | null;
+  rules: string | null;
+  reward: string | null;
+  target_audience: string | null;
+  cta: string | null;
+  tone: string | null;
+  platform_scope: string[] | null;
+  notes_for_ai: string | null;
+  posting_instance_summary: string | null;
+  occurrence_datetime: string | null;
+}

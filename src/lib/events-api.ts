@@ -11,6 +11,13 @@ export interface EventBrandRef {
   name: string;
 }
 
+export interface PostingInstanceConfig {
+  frequency: "daily" | "weekly" | "monthly";
+  time: string;
+  weekdays?: number[];
+  month_days?: number[];
+}
+
 export interface Event {
   id: string;
   brand_id: string;
@@ -24,6 +31,13 @@ export interface Event {
   theme: string | null;
   status: string;
   created_by: string;
+  target_audience: string | null;
+  cta: string | null;
+  tone: string | null;
+  platform_scope: string[] | null;
+  notes_for_ai: string | null;
+  posting_instance_json: PostingInstanceConfig | null;
+  auto_generate_posts: boolean;
   created_at: string;
   updated_at: string;
   creator: EventCreator;
@@ -83,5 +97,10 @@ export const eventsApi = {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
+    }),
+
+  generateDrafts: (id: string) =>
+    apiFetch<{ created: number; occurrences: number }>(`/api/events/${id}/generate-drafts`, {
+      method: "POST",
     }),
 };

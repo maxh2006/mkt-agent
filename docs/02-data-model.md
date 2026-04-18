@@ -56,6 +56,7 @@ Use JSON fields only for flexible config sections.
 - image_prompt
 - source_type
 - source_id
+- source_instance_key (occurrence datetime key for event-derived posts)
 - tracking_id
 - scheduled_at
 - posted_at
@@ -75,8 +76,15 @@ Use JSON fields only for flexible config sections.
 - start_at
 - end_at
 - theme
-- status
+- status (active, ended, archived)
 - created_by
+- target_audience
+- cta
+- tone
+- platform_scope (JSON array of platform strings)
+- notes_for_ai
+- posting_instance_json (JSON: { frequency, time, weekdays?, month_days? })
+- auto_generate_posts (boolean, default false)
 - created_at
 - updated_at
 
@@ -179,10 +187,11 @@ Use JSON fields only for flexible config sections.
 - failed
 
 ### event_status
-- draft
 - active
 - ended
 - archived
+
+Event lifecycle: active events with passed end_at become ended; ended events 14+ days past end_at become archived. Status normalization applied on reads.
 
 ### channel_status
 - active

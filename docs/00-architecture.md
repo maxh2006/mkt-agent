@@ -30,8 +30,12 @@ Handles:
 - preview/edit/approve/schedule
 - post status lifecycle
 
-### 3. Events
+### 3. Events / Campaign Briefs
 Handles adhoc campaigns like Top Fans and seasonal activities.
+Events are structured AI-ready campaign briefs with target audience, tone, CTA, platform scope, and AI notes.
+Supports posting schedule configuration with daily/weekly/monthly recurrence.
+Events can generate draft posts in the content queue for human review.
+Event statuses: active → ended → archived (lifecycle-managed).
 
 ### 4. Automations
 Handles rule configuration for promo posts, big wins, educational posts, and later hot games.

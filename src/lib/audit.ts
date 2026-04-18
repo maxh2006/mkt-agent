@@ -61,6 +61,7 @@ export const AuditAction = {
   EVENT_CREATED: "event.created",
   EVENT_UPDATED: "event.updated",
   EVENT_STATUS_CHANGED: "event.status_changed",
+  EVENT_DRAFTS_GENERATED: "event.drafts_generated",
 
   // Users / roles
   ROLE_CHANGED: "role.changed",

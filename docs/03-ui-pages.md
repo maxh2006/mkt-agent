@@ -45,6 +45,10 @@ Show:
 ### Content Queue
 Main working page.
 
+Columns include Recurrence (shows posting schedule for event-derived posts).
+Edit modal detects event-derived posts and shows event context banner with constraint note.
+Post detail links Source ID to the source event for event-derived posts.
+
 Filters:
 - brand
 - status
@@ -83,8 +87,18 @@ Actions:
 ### Calendar
 Day/week/month views for scheduled posts.
 
-### Events
-Structured form for adhoc campaigns.
+### Events (Campaign Briefs)
+Structured form for adhoc campaigns. Events are AI-ready campaign briefs.
+
+Create form includes:
+- A. Event Details — title, type, theme, dates, objective, rules, reward
+- B. Campaign Brief — target audience, CTA, tone, platform scope, notes for AI
+- C. Posting Schedule — frequency (daily/weekly/monthly), time, day selection, recurrence preview
+- D. Auto-generate toggle
+
+Detail page shows all sections with inline editing. "Generate Drafts" button creates shell posts in Content Queue from the posting schedule.
+
+Event statuses: active, ended, archived (no draft). Lifecycle auto-managed.
 
 ### Automations
 Rule cards and value display rules.

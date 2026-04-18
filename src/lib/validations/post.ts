@@ -15,6 +15,7 @@ export const createPostSchema = z.object({
   image_prompt: z.string().max(1000).optional(),
   source_type: z.enum(sourceTypeValues).optional(),
   source_id: z.string().optional(),
+  source_instance_key: z.string().optional(),
 });
 
 export const updatePostSchema = z.object({

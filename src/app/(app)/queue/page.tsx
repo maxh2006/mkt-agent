@@ -310,6 +310,9 @@ export default function ContentQueuePage() {
                       Platform
                     </th>
                     <th className="px-3 py-2.5 text-left font-medium text-muted-foreground whitespace-nowrap">
+                      Recurrence
+                    </th>
+                    <th className="px-3 py-2.5 text-left font-medium text-muted-foreground whitespace-nowrap">
                       Scheduled
                     </th>
                     <th className="px-3 py-2.5 text-left font-medium text-muted-foreground whitespace-nowrap hidden sm:table-cell">
@@ -324,7 +327,7 @@ export default function ContentQueuePage() {
                   {!data || data.posts.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={isAllBrands ? 9 : 8}
+                        colSpan={isAllBrands ? 10 : 9}
                         className="px-4 py-10 text-center text-sm text-muted-foreground"
                       >
                         No posts match the current filters.
@@ -461,6 +464,11 @@ function PostRow({
       {/* Platform */}
       <td className="px-3 py-3">
         <PlatformTag platform={post.platform} />
+      </td>
+
+      {/* Recurrence */}
+      <td className="px-3 py-3 whitespace-nowrap text-xs text-muted-foreground">
+        {post.event_posting_summary ?? "—"}
       </td>
 
       {/* Scheduled */}

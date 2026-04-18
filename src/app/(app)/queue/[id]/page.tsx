@@ -361,8 +361,20 @@ export default function PostDetailPage() {
             <h2 className="text-sm font-semibold">Source &amp; Tracking</h2>
             <div className="grid grid-cols-2 gap-4">
               <Field label="Source Type" value={post.source_type} />
-              <Field label="Source ID" value={post.source_id} />
+              {post.source_type === "event" && post.source_id ? (
+                <div className="space-y-1">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Source Event</p>
+                  <a href={`/events/${post.source_id}`} className="text-sm text-primary hover:underline">
+                    {post.event_title ?? post.source_id}
+                  </a>
+                </div>
+              ) : (
+                <Field label="Source ID" value={post.source_id} />
+              )}
               <Field label="Tracking ID" value={post.tracking_id} />
+              {post.source_instance_key && (
+                <Field label="Occurrence" value={new Date(post.source_instance_key).toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })} />
+              )}
             </div>
           </div>
         </div>

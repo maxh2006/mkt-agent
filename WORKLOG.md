@@ -7,6 +7,69 @@
 ## Done Tasks
 
 ### 2026-04-18
+- Task: Events Module Upgrade — AI-ready campaign briefs + Content Queue integration
+  - Status: Complete
+  - Schema changes:
+    - EventStatus enum: removed draft, kept active/ended/archived, default changed to active
+    - Event model: added target_audience, cta, tone, platform_scope (Json), notes_for_ai,
+      posting_instance_json (Json), auto_generate_posts (Boolean)
+    - Post model: added source_instance_key (String?) for occurrence tracking
+    - Migration: 20260418180000_event_campaign_brief (data-migrated draft→active before enum change)
+  - New files:
+    - src/lib/event-status.ts — normalizeEventStatus(), normalizeEvent(), normalizeEvents()
+      with ARCHIVE_THRESHOLD_DAYS=14. Active→ended if past end_at, ended→archived if 14+ days past.
+    - src/lib/posting-instance.ts — PostingInstanceConfig interface, formatPostingInstance(),
+      formatPostingInstanceCompact(), formatPostingInstanceWithEnd(), parsePostingInstance(),
+      generateOccurrences() with month-day clamping for edge cases
+    - src/lib/event-brief-context.ts — EventBriefContext interface, resolveEventBriefContext()
+      loads event from DB and formats context for AI refinement
+    - src/app/api/events/[id]/generate-drafts/route.ts — POST creates shell Post records per
+      occurrence × platform from posting schedule, deduplicates by source_instance_key + platform
+    - src/app/api/posts/[id]/event-context/route.ts — GET returns EventBriefContext for a post
+  - Modified files:
+    - prisma/schema.prisma — EventStatus enum, Event model fields, Post.source_instance_key
+    - src/lib/validations/event.ts — removed draft, added postingInstanceSchema, extended
+      createEventSchema and updateEventSchema with campaign brief fields
+    - src/lib/validations/post.ts — added source_instance_key to createPostSchema
+    - src/lib/audit.ts — added EVENT_DRAFTS_GENERATED action
+    - src/app/api/events/route.ts — normalizeEvents on GET, status: "active" on POST, new fields
+    - src/app/api/events/[id]/route.ts — normalizeEvent on GET, new fields in PATCH audit
+    - src/app/api/posts/route.ts — enriches event-sourced posts with event_posting_summary
+      and event_title via batch event lookup
+    - src/lib/events-api.ts — Event interface expanded, generateDrafts method added
+    - src/lib/posts-api.ts — Post interface: source_instance_key, event_posting_summary,
+      event_title; added getEventContext method and EventBriefContext type
+    - src/app/(app)/events/page.tsx — removed draft from STATUS_COLORS
+    - src/app/(app)/events/new/page.tsx — full rewrite as campaign brief form with 3 sections:
+      Event Details, Campaign Brief (target_audience/cta/tone/platform_scope/notes_for_ai),
+      Posting Schedule (frequency/time/weekday or month-day selection/preview summary)
+    - src/app/(app)/events/[id]/page.tsx — full rewrite with Campaign Brief and Posting Schedule
+      sections in view/edit mode, Generate Drafts button
+    - src/app/(app)/queue/page.tsx — added Recurrence column showing event posting summary
+    - src/app/(app)/queue/[id]/page.tsx — Source ID links to /events/[id] for event-derived posts,
+      shows occurrence datetime
+    - src/components/posts/edit-post-modal.tsx — detects event-derived posts, fetches event
+      context, shows info banner with event title and constraint note
+    - docs/00-architecture.md, docs/02-data-model.md, docs/03-ui-pages.md,
+      docs/06-workflows-roles.md, docs/07-ai-boundaries.md — all updated
+  - Event form structure: title, type, theme, dates, objective, rules, reward +
+    campaign brief (target_audience, cta, tone, platform_scope, notes_for_ai) +
+    posting schedule (daily/weekly/monthly with time + day selection)
+  - Recurrence behavior: daily at time, weekly on selected weekdays at time,
+    monthly on selected days (with month-day clamping) at time. Preview summary shown in form.
+  - Event status lifecycle: active (default) → ended (past end_at) → archived (14+ days past).
+    Normalization applied on API reads via shared utility.
+  - Event-derived drafts: posts created via Generate Drafts with source_type=event,
+    source_id=event.id, source_instance_key=occurrence ISO, post_type=event.
+    One post per occurrence × platform.
+  - Queue edit constraint: edit modal detects event-derived posts, fetches event brief context
+    via /api/posts/[id]/event-context, shows info banner. Event rules and schedule cannot be
+    changed from queue — only content refinement.
+  - Deferred items:
+    - Actual AI content generation (Generate Drafts creates shell posts, no AI calls)
+    - Auto-generate cron job (auto_generate_posts flag stored but not wired to scheduler)
+    - Edit modal "Apply Edit" remains placeholder for future AI refinement
+
 - Task: Calendar Page refinement — visual distinction + detail dialog
   - Status: Complete
   - Scope: UI-only, single file changed

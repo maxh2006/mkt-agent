@@ -5,11 +5,8 @@ import { getActiveBrand } from "@/lib/active-brand";
 import { ok, Errors, sessionUser, assertCanEdit } from "@/lib/api";
 import { writeAuditLog, AuditAction } from "@/lib/audit";
 import { createEventSchema, listEventsQuerySchema } from "@/lib/validations/event";
+import { normalizeEvents } from "@/lib/event-status";
 
-/**
- * GET /api/events
- * Returns brand-scoped events. Supports all-brands mode.
- */
 export async function GET(req: NextRequest) {
   const session = await auth();
   const user = sessionUser(session);
@@ -54,13 +51,9 @@ export async function GET(req: NextRequest) {
     db.event.count({ where }),
   ]);
 
-  return ok({ events, total, page, per_page, mode: ctx.mode });
+  return ok({ events: normalizeEvents(events), total, page, per_page, mode: ctx.mode });
 }
 
-/**
- * POST /api/events
- * Creates a new event. Requires single-brand mode + operator role or above.
- */
 export async function POST(req: NextRequest) {
   const session = await auth();
   const user = sessionUser(session);
@@ -83,7 +76,7 @@ export async function POST(req: NextRequest) {
       ...rest,
       brand_id: ctx.brand!.id,
       created_by: user.id,
-      status: rest.status ?? "draft",
+      status: "active",
       start_at: start_at ? new Date(start_at) : undefined,
       end_at: end_at ? new Date(end_at) : undefined,
     },
@@ -98,7 +91,12 @@ export async function POST(req: NextRequest) {
     action: AuditAction.EVENT_CREATED,
     entity_type: "event",
     entity_id: event.id,
-    after: { title: event.title, event_type: event.event_type, status: event.status },
+    after: {
+      title: event.title,
+      event_type: event.event_type,
+      status: event.status,
+      auto_generate_posts: event.auto_generate_posts,
+    },
   });
 
   return ok(event, 201);

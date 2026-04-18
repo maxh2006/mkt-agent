@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -9,8 +9,8 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Sparkles } from "lucide-react";
-import type { Post } from "@/lib/posts-api";
+import { Sparkles, Info } from "lucide-react";
+import { postsApi, type Post, type EventBriefContext } from "@/lib/posts-api";
 
 interface EditPostModalProps {
   post: Post | null;
@@ -36,17 +36,33 @@ function buildContentSections(post: Post): ContentSection[] {
 export function EditPostModal({ post, open, onClose }: EditPostModalProps) {
   const [instruction, setInstruction] = useState("");
   const [applied, setApplied] = useState(false);
+  const [eventContext, setEventContext] = useState<EventBriefContext | null>(null);
+  const [loadingContext, setLoadingContext] = useState(false);
+
+  const isEventDerived = post?.source_type === "event" && !!post?.source_id;
+
+  useEffect(() => {
+    if (open && isEventDerived && post) {
+      setLoadingContext(true);
+      postsApi.getEventContext(post.id)
+        .then((ctx) => setEventContext(ctx))
+        .catch(() => setEventContext(null))
+        .finally(() => setLoadingContext(false));
+    } else {
+      setEventContext(null);
+    }
+  }, [open, isEventDerived, post?.id]);
 
   function handleOpenChange(next: boolean) {
     if (!next) {
       setInstruction("");
       setApplied(false);
+      setEventContext(null);
       onClose();
     }
   }
 
   function handleApply() {
-    // Placeholder — AI generation wired here in a future step.
     setApplied(true);
   }
 
@@ -62,6 +78,31 @@ export function EditPostModal({ post, open, onClose }: EditPostModalProps) {
         </DialogHeader>
 
         <div className="space-y-4">
+          {/* Event context banner */}
+          {isEventDerived && (
+            <div className="rounded-md border border-blue-200 bg-blue-50/50 px-3 py-2.5 space-y-1">
+              <div className="flex items-start gap-2">
+                <Info className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" />
+                <div className="text-sm">
+                  {loadingContext ? (
+                    <span className="text-muted-foreground">Loading event context…</span>
+                  ) : eventContext ? (
+                    <>
+                      <p className="font-medium text-blue-900">
+                        Generated from event: {eventContext.event_title}
+                      </p>
+                      <p className="text-xs text-blue-700 mt-0.5">
+                        Refinement will use the original event brief and posting schedule.
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-blue-800">This post was generated from an event.</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Current content preview */}
           <div>
             <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -98,6 +139,11 @@ export function EditPostModal({ post, open, onClose }: EditPostModalProps) {
               rows={3}
               className="w-full resize-none rounded-lg border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
+            {isEventDerived && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Event rules and posting schedule cannot be changed here. Edit the source event to modify those settings.
+              </p>
+            )}
           </div>
 
           {/* Placeholder feedback after applying */}

@@ -29,11 +29,15 @@
 5. operator approves and publishes
 
 ### Adhoc Event Flow
-1. operator creates event form
-2. AI generates concepts or copy
-3. operator selects and edits
-4. content enters queue
-5. operator schedules or publishes
+1. operator creates event with campaign brief (target audience, CTA, tone, platform scope, AI notes)
+2. operator configures posting schedule (daily/weekly/monthly with time)
+3. event is created as active
+4. operator clicks "Generate Drafts" to create shell posts per occurrence × platform
+5. (future) AI generates content for drafts using event brief context
+6. drafts enter Content Queue for human review
+7. operator edits, approves, and schedules
+8. event auto-transitions to ended when past end_at, then archived after 14 days
+9. editing event-derived drafts in queue retains original event rules and schedule context
 
 ### Educational Flow
 1. topic is selected or scheduled

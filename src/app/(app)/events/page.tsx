@@ -19,7 +19,6 @@ import { Plus, ChevronLeft, ChevronRight, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const STATUS_COLORS: Record<string, string> = {
-  draft: "bg-muted text-muted-foreground border-border",
   active: "bg-emerald-500/10 text-emerald-700 border-emerald-500/20 dark:text-emerald-400",
   ended: "bg-muted text-muted-foreground border-border",
   archived: "bg-muted/50 text-muted-foreground/60 border-border",

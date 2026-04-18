@@ -44,7 +44,6 @@ enum SourceType {
 }
 
 enum EventStatus {
-  draft
   active
   ended
   archived
@@ -146,9 +145,10 @@ model Post {
   cta          String?
   banner_text  String?
   image_prompt String?
-  source_type  SourceType?
-  source_id    String?
-  tracking_id  String?     @unique
+  source_type         SourceType?
+  source_id            String?
+  source_instance_key  String?
+  tracking_id          String?     @unique
   scheduled_at     DateTime?
   posted_at        DateTime?
   rejected_reason  String?
@@ -176,8 +176,15 @@ model Event {
   start_at   DateTime?
   end_at     DateTime?
   theme      String?
-  status     EventStatus @default(draft)
+  status     EventStatus @default(active)
   created_by String
+  target_audience       String?
+  cta                   String?
+  tone                  String?
+  platform_scope        Json?
+  notes_for_ai          String?
+  posting_instance_json Json?
+  auto_generate_posts   Boolean @default(false)
   created_at DateTime    @default(now())
   updated_at DateTime    @updatedAt
 

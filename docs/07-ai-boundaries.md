@@ -51,6 +51,21 @@ The system stores the output and lets humans review it.
 
 ---
 
+## Event Campaign Brief Context
+
+When refining event-derived posts, the AI receives a structured brief from the source event:
+- theme, objective, rules, reward
+- target_audience, cta, tone
+- platform_scope, notes_for_ai
+- posting instance summary and occurrence datetime
+
+The AI uses this context for content generation and refinement.
+Event-derived drafts remain constrained by the original event rules during refinement.
+Editing a queue draft must NOT change event recurrence or campaign rules.
+The actual AI generation is not yet implemented — only the data architecture and context resolution.
+
+---
+
 ## Guardrails
 
 - backend is source truth
