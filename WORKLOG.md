@@ -6,6 +6,52 @@
 
 ## Done Tasks
 
+### 2026-04-18
+- Task: Calendar Page — visual planner for approved + scheduled posts
+  - Status: Complete
+  - Scope: Backend extension + full calendar frontend (no external calendar library)
+  - Files changed:
+    - src/lib/validations/post.ts — added statuses (comma-separated), date_from, date_to params
+      to listPostsQuerySchema; raised per_page max from 100 → 200
+    - src/app/api/posts/route.ts — multi-status filter (status: { in: [...] }), date range OR
+      filter (approved → posted_at/updated_at, scheduled → scheduled_at), added primary_color
+      to brand select
+    - src/lib/posts-api.ts — extended BrandRef with primary_color, PostFilters with statuses/
+      date_from/date_to, updated buildPostsUrl
+    - src/lib/calendar-utils.ts (new) — getWeekRange, getMonthRange, getDaysInRange,
+      getPostDate, groupPostsByDate, formatCardTime, isToday, isSameMonth, formatDateRangeLabel
+    - src/components/calendar/calendar-post-card.tsx (new) — detailed (week) and compact (month)
+      variants; shows time, platform tag, status badge, brand dot + name (all-brands mode),
+      headline/caption truncated; click navigates to /queue/[id]
+    - src/components/calendar/calendar-week-view.tsx (new) — 7-column CSS grid (Mon–Sun),
+      day header with today highlight (primary circle), scrollable columns, min-h-[500px]
+    - src/components/calendar/calendar-month-view.tsx (new) — 7-column month grid, min-h-[120px]
+      cells, compact cards, +N more overflow button with expand/collapse, outside-month muting
+    - src/app/(app)/calendar/page.tsx — full rewrite from stub; week/month toggle, prev/next/today
+      navigation, date range label, 3 filters (platform, post_type, status), data fetching via
+      TanStack Query, loading/error/empty states
+  - How approved vs scheduled posts are handled:
+    - "approved" = already posted; calendar shows posted_at time (falls back to updated_at if null)
+    - "scheduled" = future posting; calendar shows scheduled_at time
+    - API date range filter uses OR clause mapping each status to its relevant date field
+    - Status filter on calendar only offers: All, Approved (Posted), Scheduled
+  - How All Brands mode behaves:
+    - Shows posts from all accessible brands
+    - Each card displays brand color dot (uses primary_color from Brand, falls back to
+      deterministic hash) + brand name
+    - Single brand mode hides brand info on cards
+  - How platform icons and timestamps are rendered:
+    - Platform: compact 2-letter abbreviation tags (IG/FB/TW/TK/TG) with platform-specific colors
+    - Timestamps: formatted as "10:30 AM" style using native Date.toLocaleTimeString
+    - Week view: detailed cards with time, platform, status, brand, headline
+    - Month view: single-line compact cards with time + platform + headline snippet
+  - Key notes:
+    - No external calendar library — custom CSS grid with Tailwind
+    - No drag-and-drop
+    - No new Prisma schema changes
+    - Backend changes are backward-compatible (existing queue page unaffected)
+    - Calendar uses separate query key ["calendar-posts"] to avoid cache conflicts with queue
+
 ### 2026-04-15
 - Task: Content Queue — table refactor + prompt-based edit modal
   - Status: Complete

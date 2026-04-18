@@ -31,12 +31,17 @@ export const schedulePostSchema = z.object({
   scheduled_at: z.string().datetime({ message: "scheduled_at must be an ISO 8601 datetime" }),
 });
 
+const postStatusValues = ["draft", "pending_approval", "approved", "scheduled", "posted", "rejected", "failed"] as const;
+
 export const listPostsQuerySchema = z.object({
-  status: z.enum(["draft", "pending_approval", "approved", "scheduled", "posted", "rejected", "failed"]).optional(),
+  status: z.enum(postStatusValues).optional(),
+  statuses: z.string().optional(),
   platform: z.enum(platformValues).optional(),
   post_type: z.enum(postTypeValues).optional(),
+  date_from: z.string().optional(),
+  date_to: z.string().optional(),
   page: z.coerce.number().int().min(1).default(1),
-  per_page: z.coerce.number().int().min(1).max(100).default(25),
+  per_page: z.coerce.number().int().min(1).max(200).default(25),
 });
 
 export type CreatePostInput = z.infer<typeof createPostSchema>;

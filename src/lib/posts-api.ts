@@ -9,6 +9,7 @@ export interface PostAuthor {
 export interface BrandRef {
   id: string;
   name: string;
+  primary_color?: string | null;
 }
 
 export interface Post {
@@ -47,8 +48,11 @@ export interface PostsPage {
 
 export interface PostFilters {
   status?: string;
+  statuses?: string;
   platform?: string;
   post_type?: string;
+  date_from?: string;
+  date_to?: string;
   page?: number;
   per_page?: number;
 }
@@ -63,8 +67,11 @@ async function apiFetch<T>(url: string, init?: RequestInit): Promise<T> {
 export function buildPostsUrl(filters: PostFilters): string {
   const params = new URLSearchParams();
   if (filters.status) params.set("status", filters.status);
+  if (filters.statuses) params.set("statuses", filters.statuses);
   if (filters.platform) params.set("platform", filters.platform);
   if (filters.post_type) params.set("post_type", filters.post_type);
+  if (filters.date_from) params.set("date_from", filters.date_from);
+  if (filters.date_to) params.set("date_to", filters.date_to);
   if (filters.page) params.set("page", String(filters.page));
   if (filters.per_page) params.set("per_page", String(filters.per_page));
   const qs = params.toString();
