@@ -12,6 +12,13 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ArrowLeft, Pencil, Save, X, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  EventDateTimePicker,
+  DEFAULT_START_TIME,
+  DEFAULT_END_TIME,
+  splitDatetime,
+  joinDatetime,
+} from "@/components/events/event-datetime-picker";
 
 const STATUS_COLORS: Record<string, string> = {
   active: "bg-emerald-500/10 text-emerald-700 border-emerald-500/20 dark:text-emerald-400",
@@ -105,7 +112,9 @@ function CheckboxGroup({ options, selected, onChange }: {
 interface EditData {
   title: string; event_type: string; status: string;
   objective: string; rules: string; reward: string;
-  start_at: string; end_at: string; theme: string;
+  start_date: string; start_time: string;
+  end_date: string; end_time: string;
+  theme: string;
   target_audience: string; cta: string; tone: string;
   platform_scope: string[]; notes_for_ai: string;
   posting_frequency: string; posting_time: string;
@@ -115,10 +124,14 @@ interface EditData {
 
 function initEditData(event: Event): EditData {
   const pi = event.posting_instance_json ? parsePostingInstance(event.posting_instance_json) : null;
+  const startParts = splitDatetime(toDatetimeLocal(event.start_at));
+  const endParts = splitDatetime(toDatetimeLocal(event.end_at));
   return {
     title: event.title, event_type: event.event_type, status: event.status,
     objective: event.objective ?? "", rules: event.rules ?? "", reward: event.reward ?? "",
-    start_at: toDatetimeLocal(event.start_at), end_at: toDatetimeLocal(event.end_at), theme: event.theme ?? "",
+    start_date: startParts.date, start_time: startParts.time || DEFAULT_START_TIME,
+    end_date: endParts.date, end_time: endParts.time || DEFAULT_END_TIME,
+    theme: event.theme ?? "",
     target_audience: event.target_audience ?? "", cta: event.cta ?? "", tone: event.tone ?? "",
     platform_scope: event.platform_scope ?? [], notes_for_ai: event.notes_for_ai ?? "",
     posting_frequency: pi?.frequency ?? "", posting_time: pi?.time ?? "15:00",
@@ -162,7 +175,9 @@ export default function EventDetailPage() {
 
   async function saveEdit() {
     if (!editData) return;
-    if (editData.start_at && editData.end_at && new Date(editData.end_at) <= new Date(editData.start_at)) {
+    const startDt = joinDatetime(editData.start_date, editData.start_time);
+    const endDt = joinDatetime(editData.end_date, editData.end_time);
+    if (startDt && endDt && new Date(endDt) <= new Date(startDt)) {
       setSaveError("End date must be after start date"); return;
     }
     setSaving(true); setSaveError(null);
@@ -176,8 +191,8 @@ export default function EventDetailPage() {
         platform_scope: editData.platform_scope.length > 0 ? editData.platform_scope : null,
         auto_generate_posts: editData.auto_generate_posts,
       };
-      if (editData.start_at) payload.start_at = new Date(editData.start_at).toISOString();
-      if (editData.end_at) payload.end_at = new Date(editData.end_at).toISOString();
+      if (startDt) payload.start_at = new Date(startDt).toISOString();
+      if (endDt) payload.end_at = new Date(endDt).toISOString();
       if (editPostingConfig) payload.posting_instance_json = editPostingConfig;
       await eventsApi.update(id, payload);
       queryClient.invalidateQueries({ queryKey: ["event", id] });
@@ -282,11 +297,17 @@ export default function EventDetailPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
                     <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Start</label>
-                    <input type="datetime-local" value={editData.start_at} onChange={(e) => setField("start_at", e.target.value)} className={inputClass} />
+                    <EventDateTimePicker
+                      dateValue={editData.start_date} timeValue={editData.start_time}
+                      onDateChange={(v) => setField("start_date", v)} onTimeChange={(v) => setField("start_time", v)}
+                      mode="start" />
                   </div>
                   <div className="space-y-1.5">
                     <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">End</label>
-                    <input type="datetime-local" value={editData.end_at} onChange={(e) => setField("end_at", e.target.value)} className={inputClass} />
+                    <EventDateTimePicker
+                      dateValue={editData.end_date} timeValue={editData.end_time}
+                      onDateChange={(v) => setField("end_date", v)} onTimeChange={(v) => setField("end_time", v)}
+                      mode="end" />
                   </div>
                 </div>
                 <EditableField label="Theme" name="theme" value={editData.theme} onChange={(v) => setField("theme", v)} maxLength={255} />

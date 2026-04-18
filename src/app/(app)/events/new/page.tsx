@@ -15,6 +15,12 @@ import {
 } from "@/components/ui/select";
 import { ArrowLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  EventDateTimePicker,
+  DEFAULT_START_TIME,
+  DEFAULT_END_TIME,
+  joinDatetime,
+} from "@/components/events/event-datetime-picker";
 
 const PLATFORMS = [
   { value: "instagram", label: "Instagram" },
@@ -46,8 +52,10 @@ interface FormData {
   objective: string;
   rules: string;
   reward: string;
-  start_at: string;
-  end_at: string;
+  start_date: string;
+  start_time: string;
+  end_date: string;
+  end_time: string;
   theme: string;
   target_audience: string;
   cta: string;
@@ -63,7 +71,9 @@ interface FormData {
 
 const EMPTY: FormData = {
   title: "", event_type: "", objective: "", rules: "", reward: "",
-  start_at: "", end_at: "", theme: "",
+  start_date: "", start_time: DEFAULT_START_TIME,
+  end_date: "", end_time: DEFAULT_END_TIME,
+  theme: "",
   target_audience: "", cta: "", tone: "",
   platform_scope: [], notes_for_ai: "",
   posting_frequency: "", posting_time: "15:00",
@@ -71,14 +81,16 @@ const EMPTY: FormData = {
   auto_generate_posts: false,
 };
 
-interface FieldErrors { title?: string; event_type?: string; end_at?: string; }
+interface FieldErrors { title?: string; event_type?: string; end_date?: string; }
 
 function validate(data: FormData): FieldErrors {
   const errors: FieldErrors = {};
   if (!data.title.trim()) errors.title = "Title is required";
   if (!data.event_type) errors.event_type = "Event type is required";
-  if (data.start_at && data.end_at && new Date(data.end_at) <= new Date(data.start_at)) {
-    errors.end_at = "End date must be after start date";
+  const startDt = joinDatetime(data.start_date, data.start_time);
+  const endDt = joinDatetime(data.end_date, data.end_time);
+  if (startDt && endDt && new Date(endDt) <= new Date(startDt)) {
+    errors.end_date = "End date must be after start date";
   }
   return errors;
 }
@@ -161,9 +173,10 @@ export default function NewEventPage() {
 
   const postingSummary = useMemo(() => {
     if (!postingConfig) return null;
-    const endDate = form.end_at ? new Date(form.end_at) : null;
+    const endDt = joinDatetime(form.end_date, form.end_time);
+    const endDate = endDt ? new Date(endDt) : null;
     return formatPostingInstanceWithEnd(postingConfig, endDate);
-  }, [postingConfig, form.end_at]);
+  }, [postingConfig, form.end_date, form.end_time]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -181,8 +194,10 @@ export default function NewEventPage() {
       if (form.rules.trim()) payload.rules = form.rules.trim();
       if (form.reward.trim()) payload.reward = form.reward.trim();
       if (form.theme.trim()) payload.theme = form.theme.trim();
-      if (form.start_at) payload.start_at = new Date(form.start_at).toISOString();
-      if (form.end_at) payload.end_at = new Date(form.end_at).toISOString();
+      const startDt = joinDatetime(form.start_date, form.start_time);
+      const endDt = joinDatetime(form.end_date, form.end_time);
+      if (startDt) payload.start_at = new Date(startDt).toISOString();
+      if (endDt) payload.end_at = new Date(endDt).toISOString();
       if (form.target_audience.trim()) payload.target_audience = form.target_audience.trim();
       if (form.cta.trim()) payload.cta = form.cta.trim();
       if (form.tone.trim()) payload.tone = form.tone.trim();
@@ -241,12 +256,16 @@ export default function NewEventPage() {
 
         <div className="grid grid-cols-2 gap-4">
           <LabeledField label="Start Date & Time">
-            <input type="datetime-local" value={form.start_at} onChange={(e) => set("start_at", e.target.value)}
-              className={inputClass} disabled={submitting} />
+            <EventDateTimePicker
+              dateValue={form.start_date} timeValue={form.start_time}
+              onDateChange={(v) => set("start_date", v)} onTimeChange={(v) => set("start_time", v)}
+              mode="start" disabled={submitting} />
           </LabeledField>
-          <LabeledField label="End Date & Time" error={errors.end_at}>
-            <input type="datetime-local" value={form.end_at} onChange={(e) => set("end_at", e.target.value)}
-              className={inputClass} disabled={submitting} />
+          <LabeledField label="End Date & Time" error={errors.end_date}>
+            <EventDateTimePicker
+              dateValue={form.end_date} timeValue={form.end_time}
+              onDateChange={(v) => set("end_date", v)} onTimeChange={(v) => set("end_time", v)}
+              mode="end" disabled={submitting} />
           </LabeledField>
         </div>
 

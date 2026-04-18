@@ -7,6 +7,24 @@
 ## Done Tasks
 
 ### 2026-04-18
+- Task: Events date/time picker refinement — bounded time selection with proper defaults
+  - Status: Complete
+  - Scope: UI-only, create + edit event forms
+  - Files changed:
+    - src/components/events/event-datetime-picker.tsx (new) — shared EventDateTimePicker
+      component with split date input + time Select dropdown. 96 time options (15-min intervals
+      from 00:00 to 23:45, plus 23:59 for end mode). Exports DEFAULT_START_TIME ("00:00"),
+      DEFAULT_END_TIME ("23:59"), splitDatetime(), joinDatetime() utilities.
+    - src/app/(app)/events/new/page.tsx — replaced datetime-local inputs with
+      EventDateTimePicker. FormData split into start_date/start_time and end_date/end_time.
+      Start defaults to 00:00, end defaults to 23:59.
+    - src/app/(app)/events/[id]/page.tsx — same replacement in edit mode. EditData and
+      initEditData updated. saveEdit uses joinDatetime for ISO conversion.
+  - How start time defaults: 00:00 (midnight) via DEFAULT_START_TIME constant
+  - How end time defaults: 23:59 via DEFAULT_END_TIME constant
+  - How bounded time picker works: Select dropdown with fixed options (15-min intervals),
+    no infinite scroll. End mode adds 23:59 PM option. Min 00:00, max 23:59.
+
 - Task: Events Module Upgrade — AI-ready campaign briefs + Content Queue integration
   - Status: Complete
   - Schema changes:
