@@ -7,6 +7,34 @@
 ## Done Tasks
 
 ### 2026-04-18
+- Task: Calendar Page refinement — visual distinction + detail dialog
+  - Status: Complete
+  - Scope: UI-only, single file changed
+  - Files changed:
+    - src/components/calendar/calendar-post-card.tsx — full rewrite with two improvements
+  - How approved vs scheduled styling now differs:
+    - Approved cards: emerald-green left border (3px week / 2px month), bg-emerald-500/5 tint,
+      hover to bg-emerald-500/10. Status indicator shows CheckCircle2 icon + "Posted" label
+      in emerald green.
+    - Scheduled cards: amber left border (3px week / 2px month), bg-amber-500/5 tint,
+      hover to bg-amber-500/10. Status indicator shows CalendarClock icon + "Scheduled" label
+      in amber.
+    - Both variants (detailed week cards and compact month cards) use the same color system
+      via STATUS_CARD_STYLES config object.
+  - How the calendar detail view works:
+    - Clicking any calendar card opens a Dialog (shadcn) instead of navigating away.
+    - Dialog shows: status indicator with icon, headline as title, thumbnail placeholder
+      (ImageIcon), brand dot + name (in all-brands mode), platform badge (full name),
+      post type label, posted/scheduled time with icon (green CheckCircle2 for approved,
+      amber CalendarClock for scheduled), full caption, CTA, banner text.
+    - Time formatting uses full readable format: "Fri, Apr 18, 2026, 10:30 AM".
+    - "Open full detail" button at bottom navigates to /queue/[id] for full editing/actions.
+  - Key notes:
+    - No backend changes
+    - No layout, filter, or navigation changes
+    - Dialog uses existing shadcn Dialog component
+    - Each card manages its own dialog open state via useState
+
 - Task: Calendar Page — visual planner for approved + scheduled posts
   - Status: Complete
   - Scope: Backend extension + full calendar frontend (no external calendar library)
