@@ -5,7 +5,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { getActiveBrand } from "@/lib/active-brand";
 import { ok, Errors, sessionUser, assertCanApprove } from "@/lib/api";
 import { writeAuditLog, AuditAction } from "@/lib/audit";
-import { updateAutomationSchema, bigWinRuleConfigSchema } from "@/lib/validations/automation";
+import { updateAutomationSchema, bigWinRuleConfigSchema, onGoingPromotionRuleConfigSchema, hotGamesRuleConfigSchema } from "@/lib/validations/automation";
 
 export async function PATCH(
   req: NextRequest,
@@ -33,10 +33,18 @@ export async function PATCH(
 
   const { enabled, config_json } = parsed.data;
 
-  if (existing.rule_type === "big_win" && config_json) {
-    const v2 = bigWinRuleConfigSchema.safeParse(config_json);
-    if (!v2.success) {
-      return Errors.VALIDATION(v2.error.issues[0]?.message ?? "Invalid big win config");
+  if (config_json) {
+    const schemaMap: Record<string, { safeParse: (d: unknown) => { success: boolean; error?: { issues: { message: string }[] } } }> = {
+      big_win: bigWinRuleConfigSchema,
+      running_promotion: onGoingPromotionRuleConfigSchema,
+      hot_games: hotGamesRuleConfigSchema,
+    };
+    const schema = schemaMap[existing.rule_type];
+    if (schema) {
+      const result = schema.safeParse(config_json);
+      if (!result.success) {
+        return Errors.VALIDATION(result.error?.issues[0]?.message ?? "Invalid config");
+      }
     }
   }
 

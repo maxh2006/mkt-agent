@@ -5,10 +5,16 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import { automationsApi, type AutomationRule } from "@/lib/automations-api";
 import { useActiveBrand } from "@/lib/active-brand-client";
-import { DEFAULT_BIG_WIN_RULE_CONFIG, type BigWinRuleConfig } from "@/lib/validations/automation";
+import {
+  DEFAULT_BIG_WIN_RULE_CONFIG, type BigWinRuleConfig,
+  DEFAULT_ONGOING_PROMOTION_CONFIG, type OnGoingPromotionRuleConfig, type PromoRule,
+  DEFAULT_HOT_GAMES_CONFIG, type HotGamesRuleConfig,
+} from "@/lib/validations/automation";
 import { maskUsername } from "@/lib/username-mask";
+import { CheckboxGroup } from "@/components/ui/checkbox-group";
 import { Button } from "@/components/ui/button";
-import { Info, Dices } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Info, Dices, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // ─── Shared UI primitives ────────────────────────────────────────────────────
@@ -33,16 +39,11 @@ function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (
   return (
     <button type="button" role="switch" aria-checked={checked} disabled={disabled}
       onClick={() => !disabled && onChange(!checked)}
-      className={cn(
-        "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-transparent transition-colors",
-        checked ? "bg-primary" : "bg-muted-foreground/20",
-        disabled && "opacity-50 cursor-not-allowed",
-      )}
+      className={cn("relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-transparent transition-colors",
+        checked ? "bg-primary" : "bg-muted-foreground/20", disabled && "opacity-50 cursor-not-allowed")}
     >
-      <span className={cn(
-        "pointer-events-none block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform",
-        checked ? "translate-x-4" : "translate-x-0.5",
-      )} />
+      <span className={cn("pointer-events-none block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform",
+        checked ? "translate-x-4" : "translate-x-0.5")} />
     </button>
   );
 }
@@ -54,43 +55,73 @@ function NumberInput({ value, onChange, min, max, step, suffix, disabled }: {
     <div className="flex items-center gap-1.5">
       <input type="number" value={value} min={min} max={max} step={step ?? 1} disabled={disabled}
         onChange={(e) => { const n = parseFloat(e.target.value); if (!isNaN(n)) onChange(n); }}
-        className="w-28 rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-      />
+        className="w-28 rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50" />
       {suffix && <span className="text-xs text-muted-foreground">{suffix}</span>}
     </div>
   );
 }
 
-// ─── Permission check ────────────────────────────────────────────────────────
-
-function canEditRules(role?: string) {
-  return role === "admin" || role === "brand_manager";
+function TextInput({ value, onChange, placeholder, disabled }: {
+  value: string; onChange: (v: string) => void; placeholder?: string; disabled?: boolean;
+}) {
+  return (
+    <input type="text" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} disabled={disabled}
+      className="w-full rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50" />
+  );
 }
 
-// ─── Config migration from old shape ─────────────────────────────────────────
-
-function migrateConfig(raw: Record<string, unknown>): BigWinRuleConfig {
-  const d = DEFAULT_BIG_WIN_RULE_CONFIG;
-  if (raw.default_rule) {
-    return { ...d, ...raw } as BigWinRuleConfig;
-  }
-  return {
-    api_url: (raw.api_url as string) ?? d.api_url,
-    default_rule: {
-      min_payout: (raw.min_payout as number) ?? d.default_rule.min_payout,
-      min_multiplier: (raw.min_multiplier as number) ?? d.default_rule.min_multiplier,
-    },
-    custom_rule_enabled: d.custom_rule_enabled,
-    custom_rule: d.custom_rule,
-  };
+function ContentQueueNotice() {
+  return (
+    <div className="rounded-md border border-blue-200 bg-blue-50/50 px-4 py-3">
+      <div className="flex items-start gap-2">
+        <Info className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" />
+        <div>
+          <p className="text-sm font-medium text-blue-900">Content Queue Flow</p>
+          <p className="text-xs text-blue-700 mt-0.5">
+            Matched rules create drafts in Content Queue for operator review. No content is published automatically from this page.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
 }
 
-// ─── Sample usernames ────────────────────────────────────────────────────────
+function CardFooter({ canEdit, dirty, saving, onSave, onReset }: {
+  canEdit: boolean; dirty: boolean; saving: boolean; onSave: () => void; onReset: () => void;
+}) {
+  if (!canEdit) return null;
+  return (
+    <div className="flex items-center gap-2 px-5 py-3 border-t bg-muted/20">
+      <Button size="sm" onClick={onSave} disabled={!dirty || saving}>{saving ? "Saving…" : "Save"}</Button>
+      <Button variant="outline" size="sm" onClick={onReset} disabled={!dirty || saving}>Reset</Button>
+    </div>
+  );
+}
+
+function canEditRules(role?: string) { return role === "admin" || role === "brand_manager"; }
+
+const WEEKDAYS = [
+  { value: 1, label: "Mon" }, { value: 2, label: "Tue" }, { value: 3, label: "Wed" },
+  { value: 4, label: "Thu" }, { value: 5, label: "Fri" }, { value: 6, label: "Sat" }, { value: 7, label: "Sun" },
+];
+
+const HOURS = Array.from({ length: 24 }, (_, i) => {
+  const label = i === 0 ? "12:00 AM" : i < 12 ? `${i}:00 AM` : i === 12 ? "12:00 PM" : `${i - 12}:00 PM`;
+  return { value: `${String(i).padStart(2, "0")}:00`, label };
+});
 
 const SAMPLE_USERNAMES = [
   "wildspinzuser", "max1234", "luckygamer99", "casinoqueen", "bigwinplayer",
   "starbet2026", "jackpothero", "spinmaster", "royalflush", "diamondking",
-  "slotfanatic", "megawin777", "ab", "abcd", "ace",
+];
+
+// ─── Tab types ───────────────────────────────────────────────────────────────
+
+type AutomationTab = "big_win" | "running_promotion" | "hot_games";
+const TABS: { id: AutomationTab; label: string }[] = [
+  { id: "big_win", label: "Big Wins" },
+  { id: "running_promotion", label: "On Going Promotions" },
+  { id: "hot_games", label: "Hot Games" },
 ];
 
 // ─── Main page ───────────────────────────────────────────────────────────────
@@ -100,17 +131,20 @@ export default function AutomationRulesPage() {
   const { isAllBrands, isLoading: brandLoading } = useActiveBrand();
   const queryClient = useQueryClient();
   const canEdit = canEditRules(session?.user?.role);
+  const [activeTab, setActiveTab] = useState<AutomationTab>("big_win");
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["automations"],
     queryFn: automationsApi.list,
   });
 
-  const bigWinRule = useMemo(() => {
-    if (!data) return null;
+  const rulesByType = useMemo(() => {
+    if (!data) return {};
     const rules = Array.isArray(data) ? data : (data as { rules: AutomationRule[] }).rules ?? [];
-    return rules.find((r) => r.rule_type === "big_win") ?? null;
+    return Object.fromEntries(rules.map((r) => [r.rule_type, r])) as Record<string, AutomationRule>;
   }, [data]);
+
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["automations"] });
 
   if (brandLoading || isLoading) {
     return (
@@ -134,7 +168,7 @@ export default function AutomationRulesPage() {
     );
   }
 
-  if (isError || !bigWinRule) {
+  if (isError) {
     return (
       <div className="space-y-6 max-w-3xl">
         <div><h1 className="text-2xl font-semibold">Automation Rules</h1></div>
@@ -150,271 +184,537 @@ export default function AutomationRulesPage() {
       <div>
         <h1 className="text-2xl font-semibold">Automation Rules</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Configure big win detection rules for this brand. Matching wins create drafts in the Content Queue.
+          Configure rules for automatic draft creation. Matched rules create drafts in the Content Queue.
         </p>
       </div>
-      <BigWinRuleCard rule={bigWinRule} canEdit={canEdit} onSaved={() => queryClient.invalidateQueries({ queryKey: ["automations"] })} />
+
+      {/* Tab bar */}
+      <div className="flex border-b border-border">
+        {TABS.map((tab) => (
+          <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+            className={cn("px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
+              activeTab === tab.id ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}
+          >{tab.label}</button>
+        ))}
+      </div>
+
+      {/* Tab content */}
+      {activeTab === "big_win" && rulesByType.big_win && (
+        <BigWinCard rule={rulesByType.big_win} canEdit={canEdit} onSaved={invalidate} />
+      )}
+      {activeTab === "running_promotion" && rulesByType.running_promotion && (
+        <OnGoingPromotionsCard rule={rulesByType.running_promotion} canEdit={canEdit} onSaved={invalidate} />
+      )}
+      {activeTab === "hot_games" && rulesByType.hot_games && (
+        <HotGamesCard rule={rulesByType.hot_games} canEdit={canEdit} onSaved={invalidate} />
+      )}
+
+      {/* Show notice if rule not seeded yet */}
+      {!rulesByType[activeTab] && (
+        <div className="rounded-lg border border-border bg-muted/20 px-6 py-10 text-center">
+          <p className="text-sm text-muted-foreground">No rule configured for this type yet. Reload to initialize.</p>
+        </div>
+      )}
     </div>
   );
 }
 
-// ─── Big Win Rule Card ───────────────────────────────────────────────────────
+// ─── Config migration helpers ────────────────────────────────────────────────
 
-function BigWinRuleCard({ rule, canEdit, onSaved }: { rule: AutomationRule; canEdit: boolean; onSaved: () => void }) {
-  const stored = migrateConfig(rule.config_json);
+function migrateBigWin(raw: Record<string, unknown>): BigWinRuleConfig {
+  const d = DEFAULT_BIG_WIN_RULE_CONFIG;
+  return {
+    api_url: (raw.api_url as string) ?? d.api_url,
+    check_frequency: (raw.check_frequency as BigWinRuleConfig["check_frequency"]) ?? d.check_frequency,
+    draft_cadence: (raw.draft_cadence as BigWinRuleConfig["draft_cadence"]) ?? d.draft_cadence,
+    default_rule: (raw.default_rule as BigWinRuleConfig["default_rule"]) ?? { min_payout: (raw.min_payout as number) ?? d.default_rule.min_payout, min_multiplier: (raw.min_multiplier as number) ?? d.default_rule.min_multiplier },
+    custom_rule_enabled: (raw.custom_rule_enabled as boolean) ?? d.custom_rule_enabled,
+    custom_rule: (raw.custom_rule as BigWinRuleConfig["custom_rule"]) ?? d.custom_rule,
+    dedupe_key: (raw.dedupe_key as BigWinRuleConfig["dedupe_key"]) ?? d.dedupe_key,
+    content_output_rules: (raw.content_output_rules as BigWinRuleConfig["content_output_rules"]) ?? d.content_output_rules,
+  };
+}
+
+function migrateOngoingPromo(raw: Record<string, unknown>): OnGoingPromotionRuleConfig {
+  const d = DEFAULT_ONGOING_PROMOTION_CONFIG;
+  if (raw.check_schedule) return { ...d, ...raw } as OnGoingPromotionRuleConfig;
+  return d;
+}
+
+function migrateHotGames(raw: Record<string, unknown>): HotGamesRuleConfig {
+  const d = DEFAULT_HOT_GAMES_CONFIG;
+  if (raw.check_schedule) return { ...d, ...raw } as HotGamesRuleConfig;
+  return d;
+}
+
+// ─── Big Win Card ────────────────────────────────────────────────────────────
+
+function BigWinCard({ rule, canEdit, onSaved }: { rule: AutomationRule; canEdit: boolean; onSaved: () => void }) {
+  const stored = migrateBigWin(rule.config_json);
   const [cfg, setCfg] = useState<BigWinRuleConfig>(stored);
   const [enabled, setEnabled] = useState(rule.enabled);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [sampleUsername, setSampleUsername] = useState("wildspinzuser");
 
-  const original = useMemo(() => migrateConfig(rule.config_json), [rule.config_json]);
+  const original = useMemo(() => migrateBigWin(rule.config_json), [rule.config_json]);
   const dirty = enabled !== rule.enabled || JSON.stringify(cfg) !== JSON.stringify(original);
+  const disabled = !canEdit;
 
-  function updateCfg<K extends keyof BigWinRuleConfig>(key: K, value: BigWinRuleConfig[K]) {
-    setCfg((p) => ({ ...p, [key]: value }));
-  }
-
-  function updateDefaultRule(field: string, value: number) {
-    setCfg((p) => ({ ...p, default_rule: { ...p.default_rule, [field]: value } }));
-  }
-
-  function updateCustomPayout(field: string, value: number) {
-    setCfg((p) => ({ ...p, custom_rule: { ...p.custom_rule, payout: { ...p.custom_rule.payout, [field]: value } } }));
-  }
-
-  function updateCustomMultiplier(field: string, value: number) {
-    setCfg((p) => ({ ...p, custom_rule: { ...p.custom_rule, multiplier: { ...p.custom_rule.multiplier, [field]: value } } }));
-  }
-
-  function resetForm() {
-    setCfg(original);
-    setEnabled(rule.enabled);
-    setSaveError(null);
+  function updateCfg<K extends keyof BigWinRuleConfig>(key: K, value: BigWinRuleConfig[K]) { setCfg((p) => ({ ...p, [key]: value })); }
+  function updateNested(path: string, value: unknown) {
+    setCfg((p) => {
+      const copy = JSON.parse(JSON.stringify(p));
+      const parts = path.split(".");
+      let obj = copy;
+      for (let i = 0; i < parts.length - 1; i++) obj = obj[parts[i]];
+      obj[parts[parts.length - 1]] = value;
+      return copy;
+    });
   }
 
   async function handleSave() {
     if (cfg.custom_rule_enabled) {
-      if (cfg.custom_rule.payout.min >= cfg.custom_rule.payout.max) {
-        setSaveError("Custom payout: minimum must be less than maximum"); return;
-      }
-      if (cfg.custom_rule.multiplier.min >= cfg.custom_rule.multiplier.max) {
-        setSaveError("Custom multiplier: minimum must be less than maximum"); return;
-      }
+      if (cfg.custom_rule.payout.min >= cfg.custom_rule.payout.max) { setSaveError("Custom payout: min must be less than max"); return; }
+      if (cfg.custom_rule.multiplier.min >= cfg.custom_rule.multiplier.max) { setSaveError("Custom multiplier: min must be less than max"); return; }
     }
     setSaving(true); setSaveError(null);
-    try {
-      await automationsApi.update(rule.id, { enabled, config_json: cfg });
-      onSaved();
-    } catch (err) { setSaveError(err instanceof Error ? err.message : "Failed to save"); }
+    try { await automationsApi.update(rule.id, { enabled, config_json: cfg }); onSaved(); }
+    catch (err) { setSaveError(err instanceof Error ? err.message : "Failed to save"); }
     finally { setSaving(false); }
   }
 
-  function generateUsername() {
-    const name = SAMPLE_USERNAMES[Math.floor(Math.random() * SAMPLE_USERNAMES.length)];
-    setSampleUsername(name);
-  }
-
-  const samplePayout = 6000;
-  const sampleMultiplier = 320;
-  const explanation = useMemo(() => {
-    const lines: string[] = [];
-    lines.push(`Source payout: $${samplePayout.toLocaleString()}`);
-    lines.push(`Source multiplier: ${sampleMultiplier}x`);
-
-    let matched = false;
-    let matchedRule = "";
-    let displayPayout = samplePayout;
-    let displayMultiplier = sampleMultiplier;
-
-    if (cfg.custom_rule_enabled) {
-      const cp = cfg.custom_rule.payout;
-      const cm = cfg.custom_rule.multiplier;
-      if (samplePayout >= cp.min && samplePayout < cp.max) {
-        matched = true;
-        matchedRule = "Custom payout rule";
-        displayPayout = Math.round(samplePayout * (1 + cp.increase_pct / 100));
-      } else if (sampleMultiplier >= cm.min && sampleMultiplier < cm.max) {
-        matched = true;
-        matchedRule = "Custom multiplier rule";
-        displayMultiplier = Math.round(sampleMultiplier * (1 + cm.increase_pct / 100));
-      }
-    }
-
-    if (!matched) {
-      if (samplePayout >= cfg.default_rule.min_payout) {
-        matched = true;
-        matchedRule = `Default rule (payout ≥ $${cfg.default_rule.min_payout.toLocaleString()})`;
-      } else if (sampleMultiplier >= cfg.default_rule.min_multiplier) {
-        matched = true;
-        matchedRule = `Default rule (multiplier ≥ ${cfg.default_rule.min_multiplier}x)`;
-      }
-    }
-
-    if (matched) {
-      lines.push(`Matched rule: ${matchedRule}`);
-      if (displayPayout !== samplePayout) lines.push(`Display payout: $${displayPayout.toLocaleString()}`);
-      if (displayMultiplier !== sampleMultiplier) lines.push(`Display multiplier: ${displayMultiplier}x`);
-      lines.push(`Username display: ${maskUsername(sampleUsername)}`);
-      lines.push(`→ Draft will be created in Content Queue`);
-    } else {
-      lines.push(`No rule matched — no draft will be created`);
-    }
-    return lines;
-  }, [cfg, sampleUsername]);
-
-  const disabled = !canEdit;
-
   return (
     <div className="rounded-lg border border-border">
-      {/* Header */}
       <div className="flex items-center justify-between px-5 py-4 border-b">
         <div>
           <h2 className="text-base font-semibold">Big Win Rules</h2>
-          <p className="text-xs text-muted-foreground mt-0.5">Create drafts in Content Queue when a win record matches your thresholds.</p>
+          <p className="text-xs text-muted-foreground mt-0.5">Batch snapshot mode — create drafts when wins match thresholds.</p>
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted-foreground">{enabled ? "Active" : "Inactive"}</span>
           <Toggle checked={enabled} onChange={setEnabled} disabled={disabled} />
         </div>
       </div>
-
       <div className="px-5 py-5 space-y-8">
-        {saveError && (
-          <div className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2">
-            <p className="text-sm text-destructive">{saveError}</p>
-          </div>
-        )}
+        {saveError && <div className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2"><p className="text-sm text-destructive">{saveError}</p></div>}
 
-        {/* Section 1: Big Win API */}
         <div>
           <SectionLabel>Big Win API</SectionLabel>
-          <FieldRow label="Big Win API URL" hint="Endpoint for win data. Leave blank to use brand integration setting.">
-            <input type="text" value={cfg.api_url ?? ""} disabled={disabled}
-              onChange={(e) => updateCfg("api_url", e.target.value || null)}
-              placeholder="https://api.example.com/big-wins"
-              className="w-full rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-            />
+          <FieldRow label="Big Win API URL" hint="Used to fetch Big Win data for this brand.">
+            <TextInput value={cfg.api_url ?? ""} onChange={(v) => updateCfg("api_url", v || null)} placeholder="https://api.example.com/big-wins" disabled={disabled} />
           </FieldRow>
         </div>
 
-        {/* Section 2: Default Rule */}
+        <div>
+          <SectionLabel>Check Frequency</SectionLabel>
+          <p className="text-xs text-muted-foreground mb-3">System checks source data in batch snapshot mode.</p>
+          <FieldRow label="Check every">
+            <NumberInput value={cfg.check_frequency.interval_days} onChange={(v) => updateNested("check_frequency.interval_days", v)} min={1} max={30} suffix="days" disabled={disabled} />
+          </FieldRow>
+          <FieldRow label="Check time">
+            <Select value={cfg.check_frequency.time} onValueChange={(v) => updateNested("check_frequency.time", v ?? "11:00")} disabled={disabled}>
+              <SelectTrigger className="w-[130px]"><SelectValue /></SelectTrigger>
+              <SelectContent className="max-h-[240px]">{HOURS.map((h) => <SelectItem key={h.value} value={h.value}>{h.label}</SelectItem>)}</SelectContent>
+            </Select>
+          </FieldRow>
+        </div>
+
+        <div>
+          <SectionLabel>Draft Creation Timing</SectionLabel>
+          <p className="text-xs text-muted-foreground mb-3">After each scan, eligible wins from the stored batch can produce drafts at this cadence.</p>
+          <FieldRow label="Create drafts every">
+            <NumberInput value={cfg.draft_cadence.interval_hours} onChange={(v) => updateNested("draft_cadence.interval_hours", v)} min={1} max={24} suffix="hours" disabled={disabled} />
+          </FieldRow>
+          <FieldRow label="Draft sample count">
+            <NumberInput value={cfg.draft_cadence.sample_count} onChange={(v) => updateNested("draft_cadence.sample_count", v)} min={1} max={10} disabled={disabled} />
+          </FieldRow>
+        </div>
+
         <div>
           <SectionLabel>Default Rule</SectionLabel>
-          <p className="text-xs text-muted-foreground mb-3">A draft will be created in Content Queue if either condition is met.</p>
+          <p className="text-xs text-muted-foreground mb-3">A draft will be created if either condition is met (OR logic).</p>
           <FieldRow label="Create a draft if payout is ≥">
-            <NumberInput value={cfg.default_rule.min_payout} onChange={(v) => updateDefaultRule("min_payout", v)} min={0} suffix="$" disabled={disabled} />
+            <NumberInput value={cfg.default_rule.min_payout} onChange={(v) => updateNested("default_rule.min_payout", v)} min={0} suffix="$" disabled={disabled} />
           </FieldRow>
           <FieldRow label="Create a draft if multiplier is ≥">
-            <NumberInput value={cfg.default_rule.min_multiplier} onChange={(v) => updateDefaultRule("min_multiplier", v)} min={0} step={0.1} suffix="x" disabled={disabled} />
+            <NumberInput value={cfg.default_rule.min_multiplier} onChange={(v) => updateNested("default_rule.min_multiplier", v)} min={0} step={0.1} suffix="x" disabled={disabled} />
           </FieldRow>
         </div>
 
-        {/* Section 3: Custom Rule */}
         <div>
           <SectionLabel>Custom Rule</SectionLabel>
-          <FieldRow label="Activate Custom Rule">
-            <Toggle checked={cfg.custom_rule_enabled} onChange={(v) => updateCfg("custom_rule_enabled", v)} disabled={disabled} />
-          </FieldRow>
-
+          <FieldRow label="Activate Custom Rule"><Toggle checked={cfg.custom_rule_enabled} onChange={(v) => updateCfg("custom_rule_enabled", v)} disabled={disabled} /></FieldRow>
           {cfg.custom_rule_enabled && (
             <div className="mt-4 space-y-6 rounded-md border border-border p-4 bg-muted/10">
               <div>
                 <p className="text-sm font-medium mb-3">Payout-Based Custom Rule</p>
-                <FieldRow label="If payout is ≥">
-                  <NumberInput value={cfg.custom_rule.payout.min} onChange={(v) => updateCustomPayout("min", v)} min={0} suffix="$" disabled={disabled} />
-                </FieldRow>
-                <FieldRow label="but less than">
-                  <NumberInput value={cfg.custom_rule.payout.max} onChange={(v) => updateCustomPayout("max", v)} min={0} suffix="$" disabled={disabled} />
-                </FieldRow>
-                <FieldRow label="Add to payout for content display" hint="Used only for content display. Source payout remains unchanged.">
-                  <NumberInput value={cfg.custom_rule.payout.increase_pct} onChange={(v) => updateCustomPayout("increase_pct", v)} min={0} max={1000} suffix="%" disabled={disabled} />
-                </FieldRow>
-                {cfg.custom_rule.payout.min >= cfg.custom_rule.payout.max && (
-                  <p className="text-xs text-destructive mt-1">Minimum must be less than maximum.</p>
-                )}
+                <FieldRow label="If payout is ≥"><NumberInput value={cfg.custom_rule.payout.min} onChange={(v) => updateNested("custom_rule.payout.min", v)} min={0} suffix="$" disabled={disabled} /></FieldRow>
+                <FieldRow label="but less than"><NumberInput value={cfg.custom_rule.payout.max} onChange={(v) => updateNested("custom_rule.payout.max", v)} min={0} suffix="$" disabled={disabled} /></FieldRow>
+                <FieldRow label="Add to payout for content display" hint="Display only. Source payout unchanged."><NumberInput value={cfg.custom_rule.payout.increase_pct} onChange={(v) => updateNested("custom_rule.payout.increase_pct", v)} min={0} max={1000} suffix="%" disabled={disabled} /></FieldRow>
               </div>
-
               <div>
                 <p className="text-sm font-medium mb-3">Multiplier-Based Custom Rule</p>
-                <FieldRow label="If multiplier is ≥">
-                  <NumberInput value={cfg.custom_rule.multiplier.min} onChange={(v) => updateCustomMultiplier("min", v)} min={0} step={0.1} suffix="x" disabled={disabled} />
-                </FieldRow>
-                <FieldRow label="but less than">
-                  <NumberInput value={cfg.custom_rule.multiplier.max} onChange={(v) => updateCustomMultiplier("max", v)} min={0} step={0.1} suffix="x" disabled={disabled} />
-                </FieldRow>
-                <FieldRow label="Add to multiplier for content display" hint="Used only for content display. Source multiplier remains unchanged.">
-                  <NumberInput value={cfg.custom_rule.multiplier.increase_pct} onChange={(v) => updateCustomMultiplier("increase_pct", v)} min={0} max={1000} suffix="%" disabled={disabled} />
-                </FieldRow>
-                {cfg.custom_rule.multiplier.min >= cfg.custom_rule.multiplier.max && (
-                  <p className="text-xs text-destructive mt-1">Minimum must be less than maximum.</p>
-                )}
+                <FieldRow label="If multiplier is ≥"><NumberInput value={cfg.custom_rule.multiplier.min} onChange={(v) => updateNested("custom_rule.multiplier.min", v)} min={0} step={0.1} suffix="x" disabled={disabled} /></FieldRow>
+                <FieldRow label="but less than"><NumberInput value={cfg.custom_rule.multiplier.max} onChange={(v) => updateNested("custom_rule.multiplier.max", v)} min={0} step={0.1} suffix="x" disabled={disabled} /></FieldRow>
+                <FieldRow label="Add to multiplier for content display" hint="Display only. Source multiplier unchanged."><NumberInput value={cfg.custom_rule.multiplier.increase_pct} onChange={(v) => updateNested("custom_rule.multiplier.increase_pct", v)} min={0} max={1000} suffix="%" disabled={disabled} /></FieldRow>
               </div>
             </div>
           )}
         </div>
 
-        {/* Section 4: Username Display */}
         <div>
           <SectionLabel>Username Display</SectionLabel>
-          <p className="text-xs text-muted-foreground mb-3">
-            All usernames shown publicly display only the first 2 and last 2 characters. Middle characters are masked with *.
-          </p>
-          <div className="flex items-center gap-3 mb-2">
-            <Button variant="outline" size="sm" onClick={generateUsername} type="button">
-              <Dices className="h-3.5 w-3.5" /> Generate Sample
-            </Button>
-          </div>
+          <p className="text-xs text-muted-foreground mb-3">Usernames show first 2 and last 2 characters. Middle characters masked with *.</p>
+          <Button variant="outline" size="sm" onClick={() => setSampleUsername(SAMPLE_USERNAMES[Math.floor(Math.random() * SAMPLE_USERNAMES.length)])} type="button">
+            <Dices className="h-3.5 w-3.5" /> Generate Sample
+          </Button>
           <div className="grid grid-cols-2 gap-4 mt-3">
-            <div>
-              <p className="text-xs text-muted-foreground mb-1">Original</p>
-              <p className="text-sm font-mono bg-muted/30 rounded px-2.5 py-1.5 border">{sampleUsername}</p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground mb-1">Masked</p>
-              <p className="text-sm font-mono bg-muted/30 rounded px-2.5 py-1.5 border">{maskUsername(sampleUsername)}</p>
-            </div>
+            <div><p className="text-xs text-muted-foreground mb-1">Original</p><p className="text-sm font-mono bg-muted/30 rounded px-2.5 py-1.5 border">{sampleUsername}</p></div>
+            <div><p className="text-xs text-muted-foreground mb-1">Masked</p><p className="text-sm font-mono bg-muted/30 rounded px-2.5 py-1.5 border">{maskUsername(sampleUsername)}</p></div>
           </div>
         </div>
 
-        {/* Section 5: Rule Result Explanation */}
         <div>
-          <SectionLabel>Rule Result Explanation</SectionLabel>
-          <div className="rounded-md border bg-muted/20 px-4 py-3 space-y-1">
-            {explanation.map((line, i) => (
-              <p key={i} className={cn("text-sm", line.startsWith("→") ? "font-medium text-emerald-700" : line.startsWith("No rule") ? "text-muted-foreground" : "")}>
-                {line}
-              </p>
+          <SectionLabel>Content Output Rules</SectionLabel>
+          <p className="text-xs text-muted-foreground mb-3">Defines what a generated Big Win draft must include.</p>
+          <FieldRow label="Game icon"><Toggle checked={cfg.content_output_rules.include_game_icon} onChange={(v) => updateNested("content_output_rules.include_game_icon", v)} disabled={disabled} /></FieldRow>
+          <FieldRow label="Bet amount"><Toggle checked={cfg.content_output_rules.include_bet_amount} onChange={(v) => updateNested("content_output_rules.include_bet_amount", v)} disabled={disabled} /></FieldRow>
+          <FieldRow label="Win amount"><Toggle checked={cfg.content_output_rules.include_win_amount} onChange={(v) => updateNested("content_output_rules.include_win_amount", v)} disabled={disabled} /></FieldRow>
+          <FieldRow label="Date and time"><Toggle checked={cfg.content_output_rules.include_datetime} onChange={(v) => updateNested("content_output_rules.include_datetime", v)} disabled={disabled} /></FieldRow>
+          <FieldRow label="Multiplier display" hint="Show multiplier only if it meets the multiplier threshold rule.">
+            <Select value={cfg.content_output_rules.multiplier_display_rule} onValueChange={(v) => updateNested("content_output_rules.multiplier_display_rule", v ?? "only_if_meets_threshold")} disabled={disabled}>
+              <SelectTrigger className="w-[220px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="only_if_meets_threshold">Only if meets threshold</SelectItem>
+                <SelectItem value="always">Always show</SelectItem>
+                <SelectItem value="never">Never show</SelectItem>
+              </SelectContent>
+            </Select>
+          </FieldRow>
+        </div>
+
+        <div>
+          <SectionLabel>Deduplication</SectionLabel>
+          <p className="text-xs text-muted-foreground mb-3">Prevent reprocessing the same win twice.</p>
+          <FieldRow label="Dedupe key">
+            <Select value={cfg.dedupe_key} onValueChange={(v) => updateCfg("dedupe_key", (v ?? "win_id") as BigWinRuleConfig["dedupe_key"])} disabled={disabled}>
+              <SelectTrigger className="w-[220px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="win_id">Win ID</SelectItem>
+                <SelectItem value="transaction_id">Transaction ID</SelectItem>
+                <SelectItem value="timestamp_user_amount">Timestamp + User + Amount</SelectItem>
+              </SelectContent>
+            </Select>
+          </FieldRow>
+        </div>
+
+        <div>
+          <SectionLabel>Summary</SectionLabel>
+          <div className="rounded-md border bg-muted/20 px-4 py-3 space-y-1 text-sm">
+            <p>Mode: Batch snapshot</p>
+            <p>Check: Every {cfg.check_frequency.interval_days} day{cfg.check_frequency.interval_days > 1 ? "s" : ""} at {cfg.check_frequency.time}</p>
+            <p>Drafts: Every {cfg.draft_cadence.interval_hours}h, {cfg.draft_cadence.sample_count} sample{cfg.draft_cadence.sample_count > 1 ? "s" : ""}</p>
+            <p>Dedupe: {cfg.dedupe_key.replace(/_/g, " ")}</p>
+          </div>
+        </div>
+
+        <ContentQueueNotice />
+      </div>
+      <CardFooter canEdit={canEdit} dirty={dirty} saving={saving} onSave={handleSave} onReset={() => { setCfg(original); setEnabled(rule.enabled); setSaveError(null); }} />
+    </div>
+  );
+}
+
+// ─── On Going Promotions Card ────────────────────────────────────────────────
+
+function OnGoingPromotionsCard({ rule, canEdit, onSaved }: { rule: AutomationRule; canEdit: boolean; onSaved: () => void }) {
+  const stored = migrateOngoingPromo(rule.config_json);
+  const [cfg, setCfg] = useState<OnGoingPromotionRuleConfig>(stored);
+  const [enabled, setEnabled] = useState(rule.enabled);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const original = useMemo(() => migrateOngoingPromo(rule.config_json), [rule.config_json]);
+  const dirty = enabled !== rule.enabled || JSON.stringify(cfg) !== JSON.stringify(original);
+  const disabled = !canEdit;
+
+  function updateCfg<K extends keyof OnGoingPromotionRuleConfig>(key: K, value: OnGoingPromotionRuleConfig[K]) { setCfg((p) => ({ ...p, [key]: value })); }
+
+  function addPromoRule() {
+    const newRule: PromoRule = {
+      id: crypto.randomUUID(),
+      promo_id: "", promo_name: "",
+      posting_mode: "daily",
+      recurrence: { time: "15:00" },
+      sample_count: 3,
+    };
+    setCfg((p) => ({ ...p, promo_rules: [...p.promo_rules, newRule] }));
+  }
+
+  function updatePromoRule(id: string, updates: Partial<PromoRule>) {
+    setCfg((p) => ({
+      ...p,
+      promo_rules: p.promo_rules.map((r) => r.id === id ? { ...r, ...updates } : r),
+    }));
+  }
+
+  function removePromoRule(id: string) {
+    setCfg((p) => ({ ...p, promo_rules: p.promo_rules.filter((r) => r.id !== id) }));
+  }
+
+  async function handleSave() {
+    setSaving(true); setSaveError(null);
+    try { await automationsApi.update(rule.id, { enabled, config_json: cfg }); onSaved(); }
+    catch (err) { setSaveError(err instanceof Error ? err.message : "Failed to save"); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <div className="rounded-lg border border-border">
+      <div className="flex items-center justify-between px-5 py-4 border-b">
+        <div>
+          <h2 className="text-base font-semibold">On Going Promotions Rules</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">Create drafts for active promotions from source API.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">{enabled ? "Active" : "Inactive"}</span>
+          <Toggle checked={enabled} onChange={setEnabled} disabled={disabled} />
+        </div>
+      </div>
+      <div className="px-5 py-5 space-y-8">
+        {saveError && <div className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2"><p className="text-sm text-destructive">{saveError}</p></div>}
+
+        <div>
+          <SectionLabel>Running Promotions API</SectionLabel>
+          <FieldRow label="Running Promotions API URL" hint="Used to fetch currently active promotions.">
+            <TextInput value={cfg.api_url ?? ""} onChange={(v) => updateCfg("api_url", v || null)} placeholder="https://api.example.com/promotions" disabled={disabled} />
+          </FieldRow>
+        </div>
+
+        <div>
+          <SectionLabel>Checking Rules</SectionLabel>
+          <FieldRow label="Check on">
+            <CheckboxGroup options={WEEKDAYS} selected={cfg.check_schedule.weekdays} onChange={(v) => setCfg((p) => ({ ...p, check_schedule: { ...p.check_schedule, weekdays: v as number[] } }))} disabled={disabled} />
+          </FieldRow>
+          <FieldRow label="Check time">
+            <Select value={cfg.check_schedule.time} onValueChange={(v) => setCfg((p) => ({ ...p, check_schedule: { ...p.check_schedule, time: v ?? "09:00" } }))} disabled={disabled}>
+              <SelectTrigger className="w-[130px]"><SelectValue /></SelectTrigger>
+              <SelectContent className="max-h-[240px]">{HOURS.map((h) => <SelectItem key={h.value} value={h.value}>{h.label}</SelectItem>)}</SelectContent>
+            </Select>
+          </FieldRow>
+          <FieldRow label="Draft creation delay" hint="Generate drafts this many minutes after API check.">
+            <NumberInput value={cfg.draft_delay_minutes} onChange={(v) => updateCfg("draft_delay_minutes", v)} min={0} max={120} suffix="min" disabled={disabled} />
+          </FieldRow>
+        </div>
+
+        <div>
+          <SectionLabel>Deduplication</SectionLabel>
+          <FieldRow label="Allow duplicate rule creation" hint="When off, already-detected promotions won't create duplicate rules.">
+            <Toggle checked={cfg.allow_duplicate_rules} onChange={(v) => updateCfg("allow_duplicate_rules", v)} disabled={disabled} />
+          </FieldRow>
+        </div>
+
+        <div>
+          <SectionLabel>Promotion Rules</SectionLabel>
+          {cfg.promo_rules.length === 0 && (
+            <p className="text-sm text-muted-foreground mb-3">No promotion rules configured. Add a rule to get started.</p>
+          )}
+          {cfg.promo_rules.map((pr) => (
+            <div key={pr.id} className="rounded-md border border-border p-4 mb-3 bg-muted/10 space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium">{pr.promo_name || "New Promotion Rule"}</p>
+                {canEdit && <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => removePromoRule(pr.id)}><Trash2 className="h-3.5 w-3.5" /></Button>}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><p className="text-xs text-muted-foreground mb-1">Promo ID</p><TextInput value={pr.promo_id} onChange={(v) => updatePromoRule(pr.id, { promo_id: v })} placeholder="From source API" disabled={disabled} /></div>
+                <div><p className="text-xs text-muted-foreground mb-1">Promo Name</p><TextInput value={pr.promo_name} onChange={(v) => updatePromoRule(pr.id, { promo_name: v })} placeholder="Promotion name" disabled={disabled} /></div>
+              </div>
+              <FieldRow label="Posting mode">
+                <Select value={pr.posting_mode} onValueChange={(v) => {
+                  const mode = (v ?? "daily") as PromoRule["posting_mode"];
+                  const rec = mode === "start_of_promo" ? null : { time: pr.recurrence?.time ?? "15:00", weekdays: pr.recurrence?.weekdays, month_days: pr.recurrence?.month_days };
+                  updatePromoRule(pr.id, { posting_mode: mode, recurrence: rec });
+                }} disabled={disabled}>
+                  <SelectTrigger className="w-[200px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="start_of_promo">Start of Promotion</SelectItem>
+                    <SelectItem value="daily">Daily</SelectItem>
+                    <SelectItem value="weekly">Weekly</SelectItem>
+                    <SelectItem value="monthly">Monthly</SelectItem>
+                  </SelectContent>
+                </Select>
+              </FieldRow>
+              {pr.recurrence && pr.posting_mode !== "start_of_promo" && (
+                <div className="pl-4 border-l-2 border-border space-y-2">
+                  <FieldRow label="Time">
+                    <Select value={pr.recurrence.time} onValueChange={(v) => updatePromoRule(pr.id, { recurrence: { ...pr.recurrence!, time: v ?? "15:00" } })} disabled={disabled}>
+                      <SelectTrigger className="w-[130px]"><SelectValue /></SelectTrigger>
+                      <SelectContent className="max-h-[240px]">{HOURS.map((h) => <SelectItem key={h.value} value={h.value}>{h.label}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </FieldRow>
+                  {pr.posting_mode === "weekly" && (
+                    <FieldRow label="Days">
+                      <CheckboxGroup options={WEEKDAYS} selected={pr.recurrence.weekdays ?? []} onChange={(v) => updatePromoRule(pr.id, { recurrence: { ...pr.recurrence!, weekdays: v as number[] } })} disabled={disabled} />
+                    </FieldRow>
+                  )}
+                  {pr.posting_mode === "monthly" && (
+                    <FieldRow label="Days of month">
+                      <CheckboxGroup options={Array.from({ length: 31 }, (_, i) => ({ value: i + 1, label: String(i + 1) }))} selected={pr.recurrence.month_days ?? []} onChange={(v) => updatePromoRule(pr.id, { recurrence: { ...pr.recurrence!, month_days: v as number[] } })} disabled={disabled} />
+                    </FieldRow>
+                  )}
+                </div>
+              )}
+              <FieldRow label="Draft sample count">
+                <NumberInput value={pr.sample_count} onChange={(v) => updatePromoRule(pr.id, { sample_count: v })} min={1} max={10} disabled={disabled} />
+              </FieldRow>
+            </div>
+          ))}
+          {canEdit && (
+            <Button variant="outline" size="sm" onClick={addPromoRule} type="button"><Plus className="h-3.5 w-3.5" /> Add Rule</Button>
+          )}
+        </div>
+
+        <div>
+          <SectionLabel>Summary</SectionLabel>
+          <div className="rounded-md border bg-muted/20 px-4 py-3 space-y-1 text-sm">
+            <p>Check: {cfg.check_schedule.weekdays.map((d) => WEEKDAYS.find((w) => w.value === d)?.label).filter(Boolean).join(", ") || "None"} at {cfg.check_schedule.time}</p>
+            <p>Draft delay: {cfg.draft_delay_minutes} min after scan</p>
+            <p>Rules configured: {cfg.promo_rules.length}</p>
+            <p>Duplicates: {cfg.allow_duplicate_rules ? "Allowed" : "Not allowed"}</p>
+          </div>
+        </div>
+
+        <ContentQueueNotice />
+      </div>
+      <CardFooter canEdit={canEdit} dirty={dirty} saving={saving} onSave={handleSave} onReset={() => { setCfg(original); setEnabled(rule.enabled); setSaveError(null); }} />
+    </div>
+  );
+}
+
+// ─── Hot Games Card ──────────────────────────────────────────────────────────
+
+function HotGamesCard({ rule, canEdit, onSaved }: { rule: AutomationRule; canEdit: boolean; onSaved: () => void }) {
+  const stored = migrateHotGames(rule.config_json);
+  const [cfg, setCfg] = useState<HotGamesRuleConfig>(stored);
+  const [enabled, setEnabled] = useState(rule.enabled);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const original = useMemo(() => migrateHotGames(rule.config_json), [rule.config_json]);
+  const dirty = enabled !== rule.enabled || JSON.stringify(cfg) !== JSON.stringify(original);
+  const disabled = !canEdit;
+
+  function updateCfg<K extends keyof HotGamesRuleConfig>(key: K, value: HotGamesRuleConfig[K]) { setCfg((p) => ({ ...p, [key]: value })); }
+
+  async function handleSave() {
+    setSaving(true); setSaveError(null);
+    try { await automationsApi.update(rule.id, { enabled, config_json: cfg }); onSaved(); }
+    catch (err) { setSaveError(err instanceof Error ? err.message : "Failed to save"); }
+    finally { setSaving(false); }
+  }
+
+  const timeLabels = ["6:00 PM", "7:00 PM", "8:00 PM", "9:00 PM", "10:00 PM", "11:00 PM"];
+
+  return (
+    <div className="rounded-lg border border-border">
+      <div className="flex items-center justify-between px-5 py-4 border-b">
+        <div>
+          <h2 className="text-base font-semibold">Hot Games Rules</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">Create 1 draft featuring top-performing games by RTP.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">{enabled ? "Active" : "Inactive"}</span>
+          <Toggle checked={enabled} onChange={setEnabled} disabled={disabled} />
+        </div>
+      </div>
+      <div className="px-5 py-5 space-y-8">
+        {saveError && <div className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2"><p className="text-sm text-destructive">{saveError}</p></div>}
+
+        <div>
+          <SectionLabel>Hot Games API</SectionLabel>
+          <FieldRow label="Hot Games API URL" hint="Used to fetch the top-performing games.">
+            <TextInput value={cfg.api_url ?? ""} onChange={(v) => updateCfg("api_url", v || null)} placeholder="https://api.example.com/hot-games" disabled={disabled} />
+          </FieldRow>
+        </div>
+
+        <div>
+          <SectionLabel>Checking Rules</SectionLabel>
+          <FieldRow label="Check on">
+            <CheckboxGroup options={WEEKDAYS} selected={cfg.check_schedule.weekdays} onChange={(v) => setCfg((p) => ({ ...p, check_schedule: { ...p.check_schedule, weekdays: v as number[] } }))} disabled={disabled} />
+          </FieldRow>
+          <FieldRow label="Check time">
+            <Select value={cfg.check_schedule.time} onValueChange={(v) => setCfg((p) => ({ ...p, check_schedule: { ...p.check_schedule, time: v ?? "16:00" } }))} disabled={disabled}>
+              <SelectTrigger className="w-[130px]"><SelectValue /></SelectTrigger>
+              <SelectContent className="max-h-[240px]">{HOURS.map((h) => <SelectItem key={h.value} value={h.value}>{h.label}</SelectItem>)}</SelectContent>
+            </Select>
+          </FieldRow>
+        </div>
+
+        <div>
+          <SectionLabel>Source Processing</SectionLabel>
+          <p className="text-xs text-muted-foreground mb-3">API returns top games by RTP from the source window. Ranking is frozen per scan.</p>
+          <FieldRow label="Source window">
+            <NumberInput value={cfg.source_window_minutes} onChange={(v) => updateCfg("source_window_minutes", v)} min={30} max={1440} suffix="min" disabled={disabled} />
+          </FieldRow>
+          <FieldRow label="Top games count">
+            <NumberInput value={cfg.top_games_count} onChange={(v) => updateCfg("top_games_count", v)} min={1} max={20} disabled={disabled} />
+          </FieldRow>
+        </div>
+
+        <div>
+          <SectionLabel>Fixed Game Time Mapping</SectionLabel>
+          <p className="text-xs text-muted-foreground mb-3">Each ranked game is mapped to a fixed suggested play time. Times are fixed and never change.</p>
+          <div className="grid grid-cols-3 gap-2">
+            {cfg.fixed_time_mapping.map((t, i) => (
+              <div key={i} className="flex items-center gap-2 rounded-md border bg-muted/20 px-3 py-2">
+                <span className="text-xs font-medium text-muted-foreground">Top {i + 1}</span>
+                <span className="text-sm font-medium">{timeLabels[i] ?? t}</span>
+              </div>
             ))}
           </div>
         </div>
 
-        {/* Section 6: Content Queue Flow Notice */}
-        <div className="rounded-md border border-blue-200 bg-blue-50/50 px-4 py-3">
-          <div className="flex items-start gap-2">
-            <Info className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" />
-            <div>
-              <p className="text-sm font-medium text-blue-900">Content Queue Flow</p>
-              <p className="text-xs text-blue-700 mt-0.5">
-                When a win matches these rules, a draft post is created in the Content Queue for review.
-                No content is published automatically from this page.
-              </p>
-            </div>
+        <div>
+          <SectionLabel>Output Format</SectionLabel>
+          <div className="rounded-md border bg-muted/20 px-4 py-3 space-y-1 text-sm">
+            <p>1 post containing all {cfg.top_games_count} games (not separate posts)</p>
+            <p>Each game includes: game icon, provider icon, game name</p>
+            <p>Purpose: invite users to play top-performing games at suggested times</p>
           </div>
         </div>
-      </div>
 
-      {/* Footer actions */}
-      {canEdit && (
-        <div className="flex items-center gap-2 px-5 py-3 border-t bg-muted/20">
-          <Button size="sm" onClick={handleSave} disabled={!dirty || saving}>
-            {saving ? "Saving…" : "Save"}
-          </Button>
-          <Button variant="outline" size="sm" onClick={resetForm} disabled={!dirty || saving}>
-            Reset
-          </Button>
+        <div>
+          <SectionLabel>Draft Creation</SectionLabel>
+          <FieldRow label="Draft delay after check" hint="Generate drafts this many minutes after the API check.">
+            <NumberInput value={cfg.draft_delay_minutes} onChange={(v) => updateCfg("draft_delay_minutes", v)} min={0} max={120} suffix="min" disabled={disabled} />
+          </FieldRow>
+          <FieldRow label="Draft sample count">
+            <NumberInput value={cfg.sample_count} onChange={(v) => updateCfg("sample_count", v)} min={1} max={10} disabled={disabled} />
+          </FieldRow>
         </div>
-      )}
+
+        <div>
+          <SectionLabel>Deduplication</SectionLabel>
+          <p className="text-xs text-muted-foreground mb-3">Deduplicate by scan timestamp to avoid reprocessing the same batch.</p>
+          <FieldRow label="Dedupe key">
+            <p className="text-sm">{cfg.dedupe_key.replace(/_/g, " ")}</p>
+          </FieldRow>
+        </div>
+
+        <div>
+          <SectionLabel>Summary</SectionLabel>
+          <div className="rounded-md border bg-muted/20 px-4 py-3 space-y-1 text-sm">
+            <p>Check: {cfg.check_schedule.weekdays.map((d) => WEEKDAYS.find((w) => w.value === d)?.label).filter(Boolean).join(", ")} at {cfg.check_schedule.time}</p>
+            <p>Source: Top {cfg.top_games_count} RTP games from previous {cfg.source_window_minutes} min</p>
+            <p>Output: 1 post, fixed times {timeLabels[0]}–{timeLabels[timeLabels.length - 1]}</p>
+            <p>Drafts: {cfg.sample_count} sample{cfg.sample_count > 1 ? "s" : ""}, {cfg.draft_delay_minutes} min delay</p>
+          </div>
+        </div>
+
+        <ContentQueueNotice />
+      </div>
+      <CardFooter canEdit={canEdit} dirty={dirty} saving={saving} onSave={handleSave} onReset={() => { setCfg(original); setEnabled(rule.enabled); setSaveError(null); }} />
     </div>
   );
 }

@@ -92,14 +92,14 @@ Use JSON fields only for flexible config sections.
 - id
 - brand_id
 - rule_name
-- rule_type (running_promotion, big_win, educational)
+- rule_type (big_win, running_promotion, hot_games, educational)
 - enabled
-- config_json (V2 for big_win: { api_url, default_rule, custom_rule_enabled, custom_rule })
+- config_json (typed per rule_type — see docs/04-automations.md for shapes)
 - created_at
 - updated_at
 
-Note: big_win config_json uses V2 shape with default_rule/custom_rule structure.
-Old shape (approval_required, auto_post, cooldown_minutes, value_display) is migrated at render time.
+Rule types: big_win (Big Wins), running_promotion (On Going Promotions), hot_games (Hot Games), educational (hidden).
+Old config shapes migrated at render time by merging with defaults.
 
 ### channels
 - id

@@ -7,6 +7,36 @@
 ## Done Tasks
 
 ### 2026-04-18
+- Task: Automation Rules — 3-tab page (Big Wins, On Going Promotions, Hot Games)
+  - Status: Complete
+  - Files changed:
+    - src/lib/validations/automation.ts — added hot_games to rule types, expanded BigWinRuleConfig
+      with check_frequency, draft_cadence, dedupe_key, content_output_rules. New schemas:
+      OnGoingPromotionRuleConfig (check_schedule, promo_rules array, draft_delay) and
+      HotGamesRuleConfig (check_schedule, source_window, fixed_time_mapping, sample_count)
+    - src/app/api/automations/[id]/route.ts — validation branches for all 3 rule types
+    - src/components/ui/checkbox-group.tsx (new) — extracted shared CheckboxGroup component
+    - src/app/(app)/automations/page.tsx — full rewrite: 3 tabs with BigWinCard,
+      OnGoingPromotionsCard, HotGamesCard. Each has enable toggle, config sections,
+      summary panel, Content Queue Flow Notice, dirty detection, save/reset
+    - src/app/(app)/events/new/page.tsx — import CheckboxGroup from shared
+    - src/app/(app)/events/[id]/page.tsx — import CheckboxGroup from shared
+    - docs/04-automations.md, docs/03-ui-pages.md, docs/02-data-model.md — updated
+  - Tab structure:
+    - Big Wins: API URL, check frequency (every N days + time), draft cadence (hours + sample count),
+      default rule (OR logic), custom rule (ranges + display increase), username masking,
+      content output rules, deduplication
+    - On Going Promotions: API URL, weekly check schedule, Allow Duplicate Rules toggle,
+      dynamic promo rules list (Add Rule → promo ID/name, posting mode, recurrence, sample count),
+      draft delay
+    - Hot Games: API URL, check schedule (Tue/Thu/Sat), source window (120 min), top 6 games,
+      fixed time mapping (6-11 PM), 1 post per scan, draft delay (10 min), 2 samples, scan dedupe
+  - Key notes:
+    - hot_games added as new rule_type — auto-seeded on first brand access
+    - running_promotion config migrated from legacy shape at render time
+    - CheckboxGroup extracted to src/components/ui/ for reuse across events + automations
+    - No Prisma schema changes — config_json handles all 3 shapes
+
 - Task: Automation Rules page — Big Win focused rules configuration
   - Status: Complete
   - Files changed:

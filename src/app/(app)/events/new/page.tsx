@@ -21,6 +21,7 @@ import {
   DEFAULT_END_TIME,
   joinDatetime,
 } from "@/components/events/event-datetime-picker";
+import { CheckboxGroup } from "@/components/ui/checkbox-group";
 
 const PLATFORMS = [
   { value: "instagram", label: "Instagram" },
@@ -121,32 +122,6 @@ function SectionHeader({ title }: { title: string }) {
 const inputClass = "w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50";
 const textareaClass = inputClass + " resize-y";
 
-function CheckboxGroup({ options, selected, onChange, disabled }: {
-  options: { value: string | number; label: string }[];
-  selected: (string | number)[];
-  onChange: (values: (string | number)[]) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <div className="flex flex-wrap gap-2">
-      {options.map((o) => {
-        const checked = selected.includes(o.value);
-        return (
-          <button key={o.value} type="button" disabled={disabled}
-            onClick={() => onChange(checked ? selected.filter((v) => v !== o.value) : [...selected, o.value])}
-            className={cn(
-              "rounded-md border px-2.5 py-1 text-xs font-medium transition-colors",
-              checked ? "bg-primary text-primary-foreground border-primary" : "bg-background hover:bg-muted border-input",
-              disabled && "opacity-50 cursor-not-allowed",
-            )}
-          >
-            {o.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
 
 export default function NewEventPage() {
   const router = useRouter();

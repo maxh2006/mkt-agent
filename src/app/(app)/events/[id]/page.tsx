@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ArrowLeft, Pencil, Save, X, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { CheckboxGroup } from "@/components/ui/checkbox-group";
 import {
   EventDateTimePicker,
   DEFAULT_START_TIME,
@@ -88,26 +89,6 @@ function EditableField({ label, name, value, onChange, maxLength, rows }: {
   );
 }
 
-function CheckboxGroup({ options, selected, onChange }: {
-  options: { value: string | number; label: string }[];
-  selected: (string | number)[];
-  onChange: (values: (string | number)[]) => void;
-}) {
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {options.map((o) => {
-        const checked = selected.includes(o.value);
-        return (
-          <button key={o.value} type="button"
-            onClick={() => onChange(checked ? selected.filter((v) => v !== o.value) : [...selected, o.value])}
-            className={cn("rounded-md border px-2 py-0.5 text-xs font-medium transition-colors",
-              checked ? "bg-primary text-primary-foreground border-primary" : "bg-background hover:bg-muted border-input")}
-          >{o.label}</button>
-        );
-      })}
-    </div>
-  );
-}
 
 interface EditData {
   title: string; event_type: string; status: string;

@@ -101,11 +101,14 @@ Detail page shows all sections with inline editing. "Generate Drafts" button cre
 Event statuses: active, ended, archived (no draft). Lifecycle auto-managed.
 
 ### Automation Rules
-Big Win rule configuration page (rules only, not content generation/preview/publishing).
-Sections: Big Win API URL, Default Rule (payout OR multiplier threshold), Custom Rule
-(payout/multiplier ranges with display increase %), Username Display (masking preview),
-Rule Result Explanation (live sample evaluation), Content Queue Flow Notice.
-All matched wins create drafts in Content Queue for review.
+Rules-only configuration page with 3 tabs:
+- **Big Wins** — batch snapshot mode, check frequency, draft cadence, default/custom rules,
+  username masking, content output rules, deduplication
+- **On Going Promotions** — API-based promo detection, weekly check schedule, per-promo rule
+  creation with posting mode (start/daily/weekly/monthly), recurrence config, draft delay
+- **Hot Games** — top RTP games from source window, fixed time mapping (6-11 PM),
+  single-post output containing all ranked games, scan deduplication
+All matched rules create drafts in Content Queue for operator review.
 
 ### Templates & Assets
 Brand assets, reusable templates, prompts, CTAs.
