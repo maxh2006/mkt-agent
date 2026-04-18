@@ -1,765 +1,417 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import { automationsApi, type AutomationRule } from "@/lib/automations-api";
-import {
-  AUTOMATION_RULE_LABELS,
-  AUTOMATION_RULE_DESCRIPTIONS,
-  DISPLAY_MODES,
-  DISPLAY_MODE_LABELS,
-  ADJUSTMENT_TYPES,
-  ADJUSTMENT_TYPE_LABELS,
-  DEFAULT_RUNNING_PROMOTION_CONFIG,
-  DEFAULT_BIG_WIN_CONFIG,
-  DEFAULT_EDUCATIONAL_CONFIG,
-  DEFAULT_VALUE_DISPLAY,
-  type RunningPromotionConfig,
-  type BigWinConfig,
-  type EducationalConfig,
-  type ValueDisplayConfig,
-} from "@/lib/validations/automation";
-import { computeDisplayValue, formatDisplayValue } from "@/lib/display-value";
+import { useActiveBrand } from "@/lib/active-brand-client";
+import { DEFAULT_BIG_WIN_RULE_CONFIG, type BigWinRuleConfig } from "@/lib/validations/automation";
+import { maskUsername } from "@/lib/username-mask";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Info, Dices } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-// ─── Permission helper ────────────────────────────────────────────────────────
-
-function canEditAutomations(role?: string) {
-  return role === "admin" || role === "brand_manager";
-}
-
-// ─── Shared field components ──────────────────────────────────────────────────
+// ─── Shared UI primitives ────────────────────────────────────────────────────
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-      {children}
-    </p>
-  );
+  return <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">{children}</h3>;
 }
 
-function FieldRow({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
+function FieldRow({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-start justify-between gap-6 py-3 border-b border-border last:border-0">
-      <div className="min-w-0">
+    <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4 py-2">
+      <div className="sm:w-64 shrink-0">
         <p className="text-sm font-medium">{label}</p>
         {hint && <p className="text-xs text-muted-foreground mt-0.5">{hint}</p>}
       </div>
-      <div className="shrink-0">{children}</div>
+      <div className="flex-1">{children}</div>
     </div>
   );
 }
 
-function Toggle({
-  checked,
-  onChange,
-  disabled,
-}: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
-  disabled?: boolean;
-}) {
+function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      disabled={disabled}
-      onClick={() => onChange(!checked)}
+    <button type="button" role="switch" aria-checked={checked} disabled={disabled}
+      onClick={() => !disabled && onChange(!checked)}
       className={cn(
-        "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
-        checked ? "bg-primary" : "bg-muted-foreground/30"
+        "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-transparent transition-colors",
+        checked ? "bg-primary" : "bg-muted-foreground/20",
+        disabled && "opacity-50 cursor-not-allowed",
       )}
     >
-      <span
-        className={cn(
-          "pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform",
-          checked ? "translate-x-4" : "translate-x-0"
-        )}
-      />
+      <span className={cn(
+        "pointer-events-none block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform",
+        checked ? "translate-x-4" : "translate-x-0.5",
+      )} />
     </button>
   );
 }
 
-function NumberInput({
-  value,
-  onChange,
-  min,
-  max,
-  step,
-  disabled,
-  suffix,
-}: {
-  value: number;
-  onChange: (v: number) => void;
-  min?: number;
-  max?: number;
-  step?: number;
-  disabled?: boolean;
-  suffix?: string;
+function NumberInput({ value, onChange, min, max, step, suffix, disabled }: {
+  value: number; onChange: (v: number) => void; min?: number; max?: number; step?: number; suffix?: string; disabled?: boolean;
 }) {
   return (
     <div className="flex items-center gap-1.5">
-      <input
-        type="number"
-        value={value}
-        min={min}
-        max={max}
-        step={step ?? 1}
-        disabled={disabled}
-        onChange={(e) => {
-          const v = parseFloat(e.target.value);
-          if (!isNaN(v)) onChange(v);
-        }}
-        className="w-24 rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm text-right focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+      <input type="number" value={value} min={min} max={max} step={step ?? 1} disabled={disabled}
+        onChange={(e) => { const n = parseFloat(e.target.value); if (!isNaN(n)) onChange(n); }}
+        className="w-28 rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
       />
       {suffix && <span className="text-xs text-muted-foreground">{suffix}</span>}
     </div>
   );
 }
 
-// ─── Card shell ───────────────────────────────────────────────────────────────
+// ─── Permission check ────────────────────────────────────────────────────────
 
-function AutomationCard({
-  title,
-  description,
-  enabled,
-  onToggleEnabled,
-  canEdit,
-  saving,
-  saveError,
-  onSave,
-  onReset,
-  dirty,
-  children,
-}: {
-  title: string;
-  description: string;
-  enabled: boolean;
-  onToggleEnabled: (v: boolean) => void;
-  canEdit: boolean;
-  saving: boolean;
-  saveError: string | null;
-  onSave: () => void;
-  onReset: () => void;
-  dirty: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <div
-      className={cn(
-        "rounded-xl border bg-card transition-colors",
-        enabled ? "border-border" : "border-border opacity-80"
-      )}
-    >
-      {/* Card header */}
-      <div className="flex items-start justify-between gap-4 px-6 py-4 border-b border-border">
-        <div>
-          <p className="font-semibold">{title}</p>
-          <p className="text-sm text-muted-foreground mt-0.5">{description}</p>
-        </div>
-        <Toggle checked={enabled} onChange={onToggleEnabled} disabled={!canEdit || saving} />
-      </div>
-
-      {/* Card body */}
-      <div className="px-6 py-4 space-y-4">
-        {children}
-
-        {saveError && (
-          <p className="text-xs text-destructive">{saveError}</p>
-        )}
-
-        {canEdit && (
-          <div className="flex gap-2 pt-2">
-            <Button size="sm" onClick={onSave} disabled={saving || !dirty}>
-              {saving ? "Saving…" : "Save Changes"}
-            </Button>
-            {dirty && (
-              <Button size="sm" variant="ghost" onClick={onReset} disabled={saving}>
-                Reset
-              </Button>
-            )}
-          </div>
-        )}
-
-        {!canEdit && (
-          <p className="text-xs text-muted-foreground">
-            You need brand manager or admin access to change automation settings.
-          </p>
-        )}
-      </div>
-    </div>
-  );
+function canEditRules(role?: string) {
+  return role === "admin" || role === "brand_manager";
 }
 
-// ─── Value Display Rules section (big_win) ────────────────────────────────────
+// ─── Config migration from old shape ─────────────────────────────────────────
 
-const PREVIEW_SOURCE = 5432;
-
-function ValueDisplaySection({
-  config,
-  onChange,
-  disabled,
-}: {
-  config: ValueDisplayConfig;
-  onChange: (cfg: ValueDisplayConfig) => void;
-  disabled: boolean;
-}) {
-  const displayValue = computeDisplayValue(PREVIEW_SOURCE, config);
-  const displayStr = formatDisplayValue(displayValue, config.display_mode);
-  const sourceStr = `$${PREVIEW_SOURCE.toLocaleString()}`;
-
-  const showAdjustment =
-    config.display_mode === "adjusted" && config.adjustment_type !== "none";
-
-  return (
-    <div className="space-y-3">
-      <SectionLabel>Value Display Rules</SectionLabel>
-
-      <div className="rounded-lg border border-border divide-y divide-border">
-        <FieldRow
-          label="Display mode"
-          hint="How the win amount appears in generated content"
-        >
-          <Select
-            value={config.display_mode}
-            onValueChange={(v) => v && onChange({ ...config, display_mode: v as ValueDisplayConfig["display_mode"] })}
-            disabled={disabled}
-          >
-            <SelectTrigger size="sm" className="w-56">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {DISPLAY_MODES.map((m) => (
-                <SelectItem key={m} value={m}>
-                  {DISPLAY_MODE_LABELS[m]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </FieldRow>
-
-        {config.display_mode === "adjusted" && (
-          <>
-            <FieldRow label="Adjustment type">
-              <Select
-                value={config.adjustment_type}
-                onValueChange={(v) => v && onChange({ ...config, adjustment_type: v as ValueDisplayConfig["adjustment_type"] })}
-                disabled={disabled}
-              >
-                <SelectTrigger size="sm" className="w-44">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {ADJUSTMENT_TYPES.map((t) => (
-                    <SelectItem key={t} value={t}>
-                      {ADJUSTMENT_TYPE_LABELS[t]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </FieldRow>
-
-            {(config.adjustment_type === "subtract" || config.adjustment_type === "multiply") && (
-              <FieldRow
-                label="Adjustment value"
-                hint={config.adjustment_type === "multiply" ? "Multiplier factor (e.g. 0.9 for 90%)" : "Amount to subtract"}
-              >
-                <NumberInput
-                  value={config.adjustment_value}
-                  onChange={(v) => onChange({ ...config, adjustment_value: v })}
-                  min={0}
-                  step={config.adjustment_type === "multiply" ? 0.01 : 1}
-                  disabled={disabled}
-                />
-              </FieldRow>
-            )}
-
-            <FieldRow
-              label="Max allowed adjustment"
-              hint="Warn if display value deviates more than this % from source"
-            >
-              <NumberInput
-                value={config.max_adjustment_pct}
-                onChange={(v) => onChange({ ...config, max_adjustment_pct: v })}
-                min={0}
-                max={100}
-                disabled={disabled}
-                suffix="%"
-              />
-            </FieldRow>
-          </>
-        )}
-
-        <FieldRow
-          label="Approval required if adjusted"
-          hint="Require manual approval when display value differs from source"
-        >
-          <Toggle
-            checked={config.approval_required_if_adjusted}
-            onChange={(v) => onChange({ ...config, approval_required_if_adjusted: v })}
-            disabled={disabled}
-          />
-        </FieldRow>
-      </div>
-
-      {/* Preview */}
-      <div className="rounded-lg border border-border bg-muted/20 px-4 py-3 space-y-1">
-        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Preview (sample source: {sourceStr})</p>
-        <div className="flex items-center gap-3 text-sm">
-          <span className="text-muted-foreground">Source:</span>
-          <span className="font-mono">{sourceStr}</span>
-          <span className="text-muted-foreground">→</span>
-          <span className="font-medium">
-            {displayStr}
-          </span>
-          {showAdjustment && Math.abs(displayValue - PREVIEW_SOURCE) / PREVIEW_SOURCE * 100 > config.max_adjustment_pct && (
-            <span className="text-xs text-amber-600 font-medium">
-              ⚠ Exceeds max adjustment
-            </span>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Running Promotion Card ───────────────────────────────────────────────────
-
-function RunningPromotionCard({
-  rule,
-  canEdit,
-}: {
-  rule: AutomationRule;
-  canEdit: boolean;
-}) {
-  const queryClient = useQueryClient();
-  const stored = { ...(rule.config_json as RunningPromotionConfig) };
-  const [cfg, setCfg] = useState<RunningPromotionConfig>({
-    ...DEFAULT_RUNNING_PROMOTION_CONFIG,
-    ...stored,
-  });
-  const [enabled, setEnabled] = useState(rule.enabled);
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-
-  const original = { ...DEFAULT_RUNNING_PROMOTION_CONFIG, ...stored };
-  const dirty =
-    enabled !== rule.enabled || JSON.stringify(cfg) !== JSON.stringify(original);
-
-  async function handleSave() {
-    setSaving(true);
-    setSaveError(null);
-    try {
-      await automationsApi.update(rule.id, { enabled, config_json: cfg });
-      queryClient.invalidateQueries({ queryKey: ["automations"] });
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "Failed to save");
-    } finally {
-      setSaving(false);
-    }
+function migrateConfig(raw: Record<string, unknown>): BigWinRuleConfig {
+  const d = DEFAULT_BIG_WIN_RULE_CONFIG;
+  if (raw.default_rule) {
+    return { ...d, ...raw } as BigWinRuleConfig;
   }
-
-  function handleReset() {
-    setCfg({ ...DEFAULT_RUNNING_PROMOTION_CONFIG, ...stored });
-    setEnabled(rule.enabled);
-    setSaveError(null);
-  }
-
-  return (
-    <AutomationCard
-      title={AUTOMATION_RULE_LABELS.running_promotion}
-      description={AUTOMATION_RULE_DESCRIPTIONS.running_promotion}
-      enabled={enabled}
-      onToggleEnabled={setEnabled}
-      canEdit={canEdit}
-      saving={saving}
-      saveError={saveError}
-      onSave={handleSave}
-      onReset={handleReset}
-      dirty={dirty}
-    >
-      <div className="space-y-3">
-        <SectionLabel>Settings</SectionLabel>
-        <div className="rounded-lg border border-border divide-y divide-border">
-          <FieldRow
-            label="Require approval"
-            hint="Posts enter the review queue before publishing"
-          >
-            <Toggle checked={cfg.approval_required} onChange={(v) => setCfg((c) => ({ ...c, approval_required: v }))} disabled={!canEdit || saving} />
-          </FieldRow>
-          <FieldRow
-            label="Auto-post"
-            hint="Publish directly without operator review (only if approval not required)"
-          >
-            <Toggle checked={cfg.auto_post} onChange={(v) => setCfg((c) => ({ ...c, auto_post: v }))} disabled={!canEdit || saving || cfg.approval_required} />
-          </FieldRow>
-        </div>
-      </div>
-
-      <div className="space-y-3">
-        <SectionLabel>Timing</SectionLabel>
-        <div className="rounded-lg border border-border divide-y divide-border">
-          <FieldRow
-            label="Pre-launch post"
-            hint="Generate a post this many hours before the promotion starts"
-          >
-            <NumberInput
-              value={cfg.pre_launch_hours}
-              onChange={(v) => setCfg((c) => ({ ...c, pre_launch_hours: Math.round(v) }))}
-              min={0}
-              max={168}
-              disabled={!canEdit || saving}
-              suffix="hrs before"
-            />
-          </FieldRow>
-          <FieldRow
-            label="Post when live"
-            hint="Generate a post the moment the promotion goes live"
-          >
-            <Toggle checked={cfg.live_post} onChange={(v) => setCfg((c) => ({ ...c, live_post: v }))} disabled={!canEdit || saving} />
-          </FieldRow>
-          <FieldRow
-            label="Last-chance post"
-            hint="Generate a post this many hours before the promotion ends"
-          >
-            <NumberInput
-              value={cfg.last_chance_hours}
-              onChange={(v) => setCfg((c) => ({ ...c, last_chance_hours: Math.round(v) }))}
-              min={0}
-              max={72}
-              disabled={!canEdit || saving}
-              suffix="hrs before end"
-            />
-          </FieldRow>
-        </div>
-      </div>
-    </AutomationCard>
-  );
-}
-
-// ─── Big Win Card ─────────────────────────────────────────────────────────────
-
-function BigWinCard({
-  rule,
-  canEdit,
-}: {
-  rule: AutomationRule;
-  canEdit: boolean;
-}) {
-  const queryClient = useQueryClient();
-  const stored = rule.config_json as BigWinConfig;
-  const [cfg, setCfg] = useState<BigWinConfig>({
-    ...DEFAULT_BIG_WIN_CONFIG,
-    ...stored,
-    value_display: {
-      ...DEFAULT_VALUE_DISPLAY,
-      ...(stored.value_display ?? {}),
+  return {
+    api_url: (raw.api_url as string) ?? d.api_url,
+    default_rule: {
+      min_payout: (raw.min_payout as number) ?? d.default_rule.min_payout,
+      min_multiplier: (raw.min_multiplier as number) ?? d.default_rule.min_multiplier,
     },
-  });
-  const [enabled, setEnabled] = useState(rule.enabled);
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-
-  const original: BigWinConfig = {
-    ...DEFAULT_BIG_WIN_CONFIG,
-    ...stored,
-    value_display: { ...DEFAULT_VALUE_DISPLAY, ...(stored.value_display ?? {}) },
+    custom_rule_enabled: d.custom_rule_enabled,
+    custom_rule: d.custom_rule,
   };
-  const dirty =
-    enabled !== rule.enabled || JSON.stringify(cfg) !== JSON.stringify(original);
-
-  async function handleSave() {
-    setSaving(true);
-    setSaveError(null);
-    try {
-      await automationsApi.update(rule.id, { enabled, config_json: cfg });
-      queryClient.invalidateQueries({ queryKey: ["automations"] });
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "Failed to save");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  function handleReset() {
-    setCfg({ ...DEFAULT_BIG_WIN_CONFIG, ...stored, value_display: { ...DEFAULT_VALUE_DISPLAY, ...(stored.value_display ?? {}) } });
-    setEnabled(rule.enabled);
-    setSaveError(null);
-  }
-
-  return (
-    <AutomationCard
-      title={AUTOMATION_RULE_LABELS.big_win}
-      description={AUTOMATION_RULE_DESCRIPTIONS.big_win}
-      enabled={enabled}
-      onToggleEnabled={setEnabled}
-      canEdit={canEdit}
-      saving={saving}
-      saveError={saveError}
-      onSave={handleSave}
-      onReset={handleReset}
-      dirty={dirty}
-    >
-      <div className="space-y-3">
-        <SectionLabel>Settings</SectionLabel>
-        <div className="rounded-lg border border-border divide-y divide-border">
-          <FieldRow label="Require approval" hint="Posts enter the review queue before publishing">
-            <Toggle checked={cfg.approval_required} onChange={(v) => setCfg((c) => ({ ...c, approval_required: v }))} disabled={!canEdit || saving} />
-          </FieldRow>
-          <FieldRow label="Auto-post" hint="Publish directly without review (only if approval not required)">
-            <Toggle checked={cfg.auto_post} onChange={(v) => setCfg((c) => ({ ...c, auto_post: v }))} disabled={!canEdit || saving || cfg.approval_required} />
-          </FieldRow>
-        </div>
-      </div>
-
-      <div className="space-y-3">
-        <SectionLabel>Thresholds</SectionLabel>
-        <div className="rounded-lg border border-border divide-y divide-border">
-          <FieldRow
-            label="Minimum payout"
-            hint="Only trigger for wins at or above this amount"
-          >
-            <NumberInput
-              value={cfg.min_payout}
-              onChange={(v) => setCfg((c) => ({ ...c, min_payout: v }))}
-              min={0}
-              disabled={!canEdit || saving}
-              suffix="$"
-            />
-          </FieldRow>
-          <FieldRow
-            label="Minimum multiplier"
-            hint="Only trigger for wins with at least this multiplier (0 = any)"
-          >
-            <NumberInput
-              value={cfg.min_multiplier}
-              onChange={(v) => setCfg((c) => ({ ...c, min_multiplier: v }))}
-              min={0}
-              step={0.1}
-              disabled={!canEdit || saving}
-              suffix="×"
-            />
-          </FieldRow>
-          <FieldRow
-            label="Cooldown"
-            hint="Minimum time between consecutive big win posts for this brand"
-          >
-            <NumberInput
-              value={cfg.cooldown_minutes}
-              onChange={(v) => setCfg((c) => ({ ...c, cooldown_minutes: Math.round(v) }))}
-              min={0}
-              disabled={!canEdit || saving}
-              suffix="min"
-            />
-          </FieldRow>
-        </div>
-      </div>
-
-      <ValueDisplaySection
-        config={cfg.value_display}
-        onChange={(vd) => setCfg((c) => ({ ...c, value_display: vd }))}
-        disabled={!canEdit || saving}
-      />
-    </AutomationCard>
-  );
 }
 
-// ─── Educational Card ─────────────────────────────────────────────────────────
+// ─── Sample usernames ────────────────────────────────────────────────────────
 
-function EducationalCard({
-  rule,
-  canEdit,
-}: {
-  rule: AutomationRule;
-  canEdit: boolean;
-}) {
-  const queryClient = useQueryClient();
-  const stored = rule.config_json as EducationalConfig;
-  const [cfg, setCfg] = useState<EducationalConfig>({
-    ...DEFAULT_EDUCATIONAL_CONFIG,
-    ...stored,
-  });
-  const [enabled, setEnabled] = useState(rule.enabled);
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
+const SAMPLE_USERNAMES = [
+  "wildspinzuser", "max1234", "luckygamer99", "casinoqueen", "bigwinplayer",
+  "starbet2026", "jackpothero", "spinmaster", "royalflush", "diamondking",
+  "slotfanatic", "megawin777", "ab", "abcd", "ace",
+];
 
-  const original = { ...DEFAULT_EDUCATIONAL_CONFIG, ...stored };
-  const dirty =
-    enabled !== rule.enabled || JSON.stringify(cfg) !== JSON.stringify(original);
+// ─── Main page ───────────────────────────────────────────────────────────────
 
-  async function handleSave() {
-    setSaving(true);
-    setSaveError(null);
-    try {
-      await automationsApi.update(rule.id, { enabled, config_json: cfg });
-      queryClient.invalidateQueries({ queryKey: ["automations"] });
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "Failed to save");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  function handleReset() {
-    setCfg({ ...DEFAULT_EDUCATIONAL_CONFIG, ...stored });
-    setEnabled(rule.enabled);
-    setSaveError(null);
-  }
-
-  return (
-    <AutomationCard
-      title={AUTOMATION_RULE_LABELS.educational}
-      description={AUTOMATION_RULE_DESCRIPTIONS.educational}
-      enabled={enabled}
-      onToggleEnabled={setEnabled}
-      canEdit={canEdit}
-      saving={saving}
-      saveError={saveError}
-      onSave={handleSave}
-      onReset={handleReset}
-      dirty={dirty}
-    >
-      <div className="space-y-3">
-        <SectionLabel>Settings</SectionLabel>
-        <div className="rounded-lg border border-border divide-y divide-border">
-          <FieldRow label="Require approval" hint="Posts enter the review queue before publishing">
-            <Toggle checked={cfg.approval_required} onChange={(v) => setCfg((c) => ({ ...c, approval_required: v }))} disabled={!canEdit || saving} />
-          </FieldRow>
-          <FieldRow label="Auto-post" hint="Publish directly without review (only if approval not required)">
-            <Toggle checked={cfg.auto_post} onChange={(v) => setCfg((c) => ({ ...c, auto_post: v }))} disabled={!canEdit || saving || cfg.approval_required} />
-          </FieldRow>
-        </div>
-      </div>
-
-      <div className="space-y-3">
-        <SectionLabel>Cadence</SectionLabel>
-        <div className="rounded-lg border border-border divide-y divide-border">
-          <FieldRow label="Schedule" hint="How often educational posts should be generated">
-            <Select
-              value={cfg.cadence}
-              onValueChange={(v) => v && setCfg((c) => ({ ...c, cadence: v as EducationalConfig["cadence"] }))}
-              disabled={!canEdit || saving}
-            >
-              <SelectTrigger size="sm" className="w-32">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="daily">Daily</SelectItem>
-                <SelectItem value="weekly">Weekly</SelectItem>
-                <SelectItem value="manual">Manual only</SelectItem>
-              </SelectContent>
-            </Select>
-          </FieldRow>
-          {cfg.cadence === "weekly" && (
-            <FieldRow label="Posts per week" hint="Target number of educational posts per week">
-              <NumberInput
-                value={cfg.posts_per_week}
-                onChange={(v) => setCfg((c) => ({ ...c, posts_per_week: Math.round(v) }))}
-                min={1}
-                max={14}
-                disabled={!canEdit || saving}
-                suffix="/ week"
-              />
-            </FieldRow>
-          )}
-        </div>
-      </div>
-    </AutomationCard>
-  );
-}
-
-// ─── Main page ────────────────────────────────────────────────────────────────
-
-const RULE_TYPE_ORDER = ["running_promotion", "big_win", "educational"] as const;
-
-export default function AutomationsPage() {
+export default function AutomationRulesPage() {
   const { data: session } = useSession();
-  const canEdit = canEditAutomations(session?.user?.role);
+  const { isAllBrands, isLoading: brandLoading } = useActiveBrand();
+  const queryClient = useQueryClient();
+  const canEdit = canEditRules(session?.user?.role);
 
-  const { data: rules, isLoading, isError, error } = useQuery({
+  const { data: rules, isLoading, isError } = useQuery({
     queryKey: ["automations"],
     queryFn: automationsApi.list,
-    retry: false,
   });
 
-  const isNoBrand =
-    isError && error instanceof Error && error.message.includes("No active brand");
+  const bigWinRule = useMemo(() => {
+    if (!rules) return null;
+    return (rules as AutomationRule[]).find((r) => r.rule_type === "big_win") ?? null;
+  }, [rules]);
 
-  // Index rules by rule_type for ordered rendering
-  const ruleMap = new Map(rules?.map((r) => [r.rule_type, r]) ?? []);
+  if (brandLoading || isLoading) {
+    return (
+      <div className="space-y-6 max-w-3xl">
+        <div><h1 className="text-2xl font-semibold">Automation Rules</h1></div>
+        <div className="rounded-lg border border-border bg-muted/20 px-6 py-10 text-center">
+          <p className="text-sm text-muted-foreground">Loading rules…</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (isAllBrands) {
+    return (
+      <div className="space-y-6 max-w-3xl">
+        <div><h1 className="text-2xl font-semibold">Automation Rules</h1></div>
+        <div className="rounded-lg border border-border bg-muted/20 px-6 py-10 text-center">
+          <p className="text-sm text-muted-foreground">Select a specific brand to configure automation rules.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (isError || !bigWinRule) {
+    return (
+      <div className="space-y-6 max-w-3xl">
+        <div><h1 className="text-2xl font-semibold">Automation Rules</h1></div>
+        <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-6 py-6 text-center">
+          <p className="text-sm text-destructive">Failed to load automation rules.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 max-w-3xl">
-      {/* Header */}
       <div>
-        <h1 className="text-2xl font-semibold">Automations</h1>
+        <h1 className="text-2xl font-semibold">Automation Rules</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Configure rules for automatic post generation. Changes apply to this brand only.
+          Configure big win detection rules for this brand. Matching wins create drafts in the Content Queue.
         </p>
       </div>
+      <BigWinRuleCard rule={bigWinRule} canEdit={canEdit} onSaved={() => queryClient.invalidateQueries({ queryKey: ["automations"] })} />
+    </div>
+  );
+}
 
-      {/* States */}
-      {isNoBrand && (
-        <div className="rounded-lg border border-border bg-muted/30 px-6 py-10 text-center">
-          <p className="text-sm font-medium">No active brand selected</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Use the brand switcher in the top bar to select a brand.
+// ─── Big Win Rule Card ───────────────────────────────────────────────────────
+
+function BigWinRuleCard({ rule, canEdit, onSaved }: { rule: AutomationRule; canEdit: boolean; onSaved: () => void }) {
+  const stored = migrateConfig(rule.config_json);
+  const [cfg, setCfg] = useState<BigWinRuleConfig>(stored);
+  const [enabled, setEnabled] = useState(rule.enabled);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [sampleUsername, setSampleUsername] = useState("wildspinzuser");
+
+  const original = useMemo(() => migrateConfig(rule.config_json), [rule.config_json]);
+  const dirty = enabled !== rule.enabled || JSON.stringify(cfg) !== JSON.stringify(original);
+
+  function updateCfg<K extends keyof BigWinRuleConfig>(key: K, value: BigWinRuleConfig[K]) {
+    setCfg((p) => ({ ...p, [key]: value }));
+  }
+
+  function updateDefaultRule(field: string, value: number) {
+    setCfg((p) => ({ ...p, default_rule: { ...p.default_rule, [field]: value } }));
+  }
+
+  function updateCustomPayout(field: string, value: number) {
+    setCfg((p) => ({ ...p, custom_rule: { ...p.custom_rule, payout: { ...p.custom_rule.payout, [field]: value } } }));
+  }
+
+  function updateCustomMultiplier(field: string, value: number) {
+    setCfg((p) => ({ ...p, custom_rule: { ...p.custom_rule, multiplier: { ...p.custom_rule.multiplier, [field]: value } } }));
+  }
+
+  function resetForm() {
+    setCfg(original);
+    setEnabled(rule.enabled);
+    setSaveError(null);
+  }
+
+  async function handleSave() {
+    if (cfg.custom_rule_enabled) {
+      if (cfg.custom_rule.payout.min >= cfg.custom_rule.payout.max) {
+        setSaveError("Custom payout: minimum must be less than maximum"); return;
+      }
+      if (cfg.custom_rule.multiplier.min >= cfg.custom_rule.multiplier.max) {
+        setSaveError("Custom multiplier: minimum must be less than maximum"); return;
+      }
+    }
+    setSaving(true); setSaveError(null);
+    try {
+      await automationsApi.update(rule.id, { enabled, config_json: cfg });
+      onSaved();
+    } catch (err) { setSaveError(err instanceof Error ? err.message : "Failed to save"); }
+    finally { setSaving(false); }
+  }
+
+  function generateUsername() {
+    const name = SAMPLE_USERNAMES[Math.floor(Math.random() * SAMPLE_USERNAMES.length)];
+    setSampleUsername(name);
+  }
+
+  const samplePayout = 6000;
+  const sampleMultiplier = 320;
+  const explanation = useMemo(() => {
+    const lines: string[] = [];
+    lines.push(`Source payout: $${samplePayout.toLocaleString()}`);
+    lines.push(`Source multiplier: ${sampleMultiplier}x`);
+
+    let matched = false;
+    let matchedRule = "";
+    let displayPayout = samplePayout;
+    let displayMultiplier = sampleMultiplier;
+
+    if (cfg.custom_rule_enabled) {
+      const cp = cfg.custom_rule.payout;
+      const cm = cfg.custom_rule.multiplier;
+      if (samplePayout >= cp.min && samplePayout < cp.max) {
+        matched = true;
+        matchedRule = "Custom payout rule";
+        displayPayout = Math.round(samplePayout * (1 + cp.increase_pct / 100));
+      } else if (sampleMultiplier >= cm.min && sampleMultiplier < cm.max) {
+        matched = true;
+        matchedRule = "Custom multiplier rule";
+        displayMultiplier = Math.round(sampleMultiplier * (1 + cm.increase_pct / 100));
+      }
+    }
+
+    if (!matched) {
+      if (samplePayout >= cfg.default_rule.min_payout) {
+        matched = true;
+        matchedRule = `Default rule (payout ≥ $${cfg.default_rule.min_payout.toLocaleString()})`;
+      } else if (sampleMultiplier >= cfg.default_rule.min_multiplier) {
+        matched = true;
+        matchedRule = `Default rule (multiplier ≥ ${cfg.default_rule.min_multiplier}x)`;
+      }
+    }
+
+    if (matched) {
+      lines.push(`Matched rule: ${matchedRule}`);
+      if (displayPayout !== samplePayout) lines.push(`Display payout: $${displayPayout.toLocaleString()}`);
+      if (displayMultiplier !== sampleMultiplier) lines.push(`Display multiplier: ${displayMultiplier}x`);
+      lines.push(`Username display: ${maskUsername(sampleUsername)}`);
+      lines.push(`→ Draft will be created in Content Queue`);
+    } else {
+      lines.push(`No rule matched — no draft will be created`);
+    }
+    return lines;
+  }, [cfg, sampleUsername]);
+
+  const disabled = !canEdit;
+
+  return (
+    <div className="rounded-lg border border-border">
+      {/* Header */}
+      <div className="flex items-center justify-between px-5 py-4 border-b">
+        <div>
+          <h2 className="text-base font-semibold">Big Win Rules</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">Create drafts in Content Queue when a win record matches your thresholds.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">{enabled ? "Active" : "Inactive"}</span>
+          <Toggle checked={enabled} onChange={setEnabled} disabled={disabled} />
+        </div>
+      </div>
+
+      <div className="px-5 py-5 space-y-8">
+        {saveError && (
+          <div className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2">
+            <p className="text-sm text-destructive">{saveError}</p>
+          </div>
+        )}
+
+        {/* Section 1: Big Win API */}
+        <div>
+          <SectionLabel>Big Win API</SectionLabel>
+          <FieldRow label="Big Win API URL" hint="Endpoint for win data. Leave blank to use brand integration setting.">
+            <input type="text" value={cfg.api_url ?? ""} disabled={disabled}
+              onChange={(e) => updateCfg("api_url", e.target.value || null)}
+              placeholder="https://api.example.com/big-wins"
+              className="w-full rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+            />
+          </FieldRow>
+        </div>
+
+        {/* Section 2: Default Rule */}
+        <div>
+          <SectionLabel>Default Rule</SectionLabel>
+          <p className="text-xs text-muted-foreground mb-3">A draft will be created in Content Queue if either condition is met.</p>
+          <FieldRow label="Create a draft if payout is ≥">
+            <NumberInput value={cfg.default_rule.min_payout} onChange={(v) => updateDefaultRule("min_payout", v)} min={0} suffix="$" disabled={disabled} />
+          </FieldRow>
+          <FieldRow label="Create a draft if multiplier is ≥">
+            <NumberInput value={cfg.default_rule.min_multiplier} onChange={(v) => updateDefaultRule("min_multiplier", v)} min={0} step={0.1} suffix="x" disabled={disabled} />
+          </FieldRow>
+        </div>
+
+        {/* Section 3: Custom Rule */}
+        <div>
+          <SectionLabel>Custom Rule</SectionLabel>
+          <FieldRow label="Activate Custom Rule">
+            <Toggle checked={cfg.custom_rule_enabled} onChange={(v) => updateCfg("custom_rule_enabled", v)} disabled={disabled} />
+          </FieldRow>
+
+          {cfg.custom_rule_enabled && (
+            <div className="mt-4 space-y-6 rounded-md border border-border p-4 bg-muted/10">
+              <div>
+                <p className="text-sm font-medium mb-3">Payout-Based Custom Rule</p>
+                <FieldRow label="If payout is ≥">
+                  <NumberInput value={cfg.custom_rule.payout.min} onChange={(v) => updateCustomPayout("min", v)} min={0} suffix="$" disabled={disabled} />
+                </FieldRow>
+                <FieldRow label="but less than">
+                  <NumberInput value={cfg.custom_rule.payout.max} onChange={(v) => updateCustomPayout("max", v)} min={0} suffix="$" disabled={disabled} />
+                </FieldRow>
+                <FieldRow label="Add to payout for content display" hint="Used only for content display. Source payout remains unchanged.">
+                  <NumberInput value={cfg.custom_rule.payout.increase_pct} onChange={(v) => updateCustomPayout("increase_pct", v)} min={0} max={1000} suffix="%" disabled={disabled} />
+                </FieldRow>
+                {cfg.custom_rule.payout.min >= cfg.custom_rule.payout.max && (
+                  <p className="text-xs text-destructive mt-1">Minimum must be less than maximum.</p>
+                )}
+              </div>
+
+              <div>
+                <p className="text-sm font-medium mb-3">Multiplier-Based Custom Rule</p>
+                <FieldRow label="If multiplier is ≥">
+                  <NumberInput value={cfg.custom_rule.multiplier.min} onChange={(v) => updateCustomMultiplier("min", v)} min={0} step={0.1} suffix="x" disabled={disabled} />
+                </FieldRow>
+                <FieldRow label="but less than">
+                  <NumberInput value={cfg.custom_rule.multiplier.max} onChange={(v) => updateCustomMultiplier("max", v)} min={0} step={0.1} suffix="x" disabled={disabled} />
+                </FieldRow>
+                <FieldRow label="Add to multiplier for content display" hint="Used only for content display. Source multiplier remains unchanged.">
+                  <NumberInput value={cfg.custom_rule.multiplier.increase_pct} onChange={(v) => updateCustomMultiplier("increase_pct", v)} min={0} max={1000} suffix="%" disabled={disabled} />
+                </FieldRow>
+                {cfg.custom_rule.multiplier.min >= cfg.custom_rule.multiplier.max && (
+                  <p className="text-xs text-destructive mt-1">Minimum must be less than maximum.</p>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Section 4: Username Display */}
+        <div>
+          <SectionLabel>Username Display</SectionLabel>
+          <p className="text-xs text-muted-foreground mb-3">
+            All usernames shown publicly display only the first 2 and last 2 characters. Middle characters are masked with *.
           </p>
+          <div className="flex items-center gap-3 mb-2">
+            <Button variant="outline" size="sm" onClick={generateUsername} type="button">
+              <Dices className="h-3.5 w-3.5" /> Generate Sample
+            </Button>
+          </div>
+          <div className="grid grid-cols-2 gap-4 mt-3">
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Original</p>
+              <p className="text-sm font-mono bg-muted/30 rounded px-2.5 py-1.5 border">{sampleUsername}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Masked</p>
+              <p className="text-sm font-mono bg-muted/30 rounded px-2.5 py-1.5 border">{maskUsername(sampleUsername)}</p>
+            </div>
+          </div>
         </div>
-      )}
 
-      {isError && !isNoBrand && (
-        <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-6 py-6 text-center">
-          <p className="text-sm text-destructive">
-            {error instanceof Error ? error.message : "Failed to load automations"}
-          </p>
+        {/* Section 5: Rule Result Explanation */}
+        <div>
+          <SectionLabel>Rule Result Explanation</SectionLabel>
+          <div className="rounded-md border bg-muted/20 px-4 py-3 space-y-1">
+            {explanation.map((line, i) => (
+              <p key={i} className={cn("text-sm", line.startsWith("→") ? "font-medium text-emerald-700" : line.startsWith("No rule") ? "text-muted-foreground" : "")}>
+                {line}
+              </p>
+            ))}
+          </div>
         </div>
-      )}
 
-      {isLoading && (
-        <div className="space-y-4">
-          {RULE_TYPE_ORDER.map((t) => (
-            <div key={t} className="rounded-xl border border-border bg-card h-24 animate-pulse" />
-          ))}
+        {/* Section 6: Content Queue Flow Notice */}
+        <div className="rounded-md border border-blue-200 bg-blue-50/50 px-4 py-3">
+          <div className="flex items-start gap-2">
+            <Info className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-blue-900">Content Queue Flow</p>
+              <p className="text-xs text-blue-700 mt-0.5">
+                When a win matches these rules, a draft post is created in the Content Queue for review.
+                No content is published automatically from this page.
+              </p>
+            </div>
+          </div>
         </div>
-      )}
+      </div>
 
-      {/* Cards */}
-      {rules && !isError && (
-        <div className="space-y-5">
-          {RULE_TYPE_ORDER.map((ruleType) => {
-            const rule = ruleMap.get(ruleType);
-            if (!rule) return null;
-
-            if (ruleType === "running_promotion") {
-              return <RunningPromotionCard key={rule.id} rule={rule} canEdit={canEdit} />;
-            }
-            if (ruleType === "big_win") {
-              return <BigWinCard key={rule.id} rule={rule} canEdit={canEdit} />;
-            }
-            if (ruleType === "educational") {
-              return <EducationalCard key={rule.id} rule={rule} canEdit={canEdit} />;
-            }
-            return null;
-          })}
+      {/* Footer actions */}
+      {canEdit && (
+        <div className="flex items-center gap-2 px-5 py-3 border-t bg-muted/20">
+          <Button size="sm" onClick={handleSave} disabled={!dirty || saving}>
+            {saving ? "Saving…" : "Save"}
+          </Button>
+          <Button variant="outline" size="sm" onClick={resetForm} disabled={!dirty || saving}>
+            Reset
+          </Button>
         </div>
       )}
     </div>

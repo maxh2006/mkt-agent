@@ -21,7 +21,7 @@ Simple, fast, preview-heavy, multi-brand aware.
 - Content Queue
 - Calendar
 - Events
-- Automations
+- Automation Rules
 - Templates & Assets
 - Insights
 - Channels
@@ -100,8 +100,12 @@ Detail page shows all sections with inline editing. "Generate Drafts" button cre
 
 Event statuses: active, ended, archived (no draft). Lifecycle auto-managed.
 
-### Automations
-Rule cards and value display rules.
+### Automation Rules
+Big Win rule configuration page (rules only, not content generation/preview/publishing).
+Sections: Big Win API URL, Default Rule (payout OR multiplier threshold), Custom Rule
+(payout/multiplier ranges with display increase %), Username Display (masking preview),
+Rule Result Explanation (live sample evaluation), Content Queue Flow Notice.
+All matched wins create drafts in Content Queue for review.
 
 ### Templates & Assets
 Brand assets, reusable templates, prompts, CTAs.

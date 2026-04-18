@@ -22,7 +22,7 @@ const NAV_ITEMS = [
   { label: "Content Queue",      href: "/queue",           icon: ListOrdered },
   { label: "Calendar",           href: "/calendar",        icon: CalendarDays },
   { label: "Events",             href: "/events",          icon: Zap },
-  { label: "Automations",        href: "/automations",     icon: SlidersHorizontal },
+  { label: "Automation Rules",    href: "/automations",     icon: SlidersHorizontal },
   { label: "Templates & Assets", href: "/templates",       icon: Layers },
   { label: "Insights",           href: "/insights",        icon: BarChart2 },
   { label: "Channels",           href: "/channels",        icon: Radio },

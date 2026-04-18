@@ -7,6 +7,34 @@
 ## Done Tasks
 
 ### 2026-04-18
+- Task: Automation Rules page — Big Win focused rules configuration
+  - Status: Complete
+  - Files changed:
+    - src/lib/username-mask.ts (new) — maskUsername() helper, first 2 + * middle + last 2
+    - src/lib/validations/automation.ts — new BigWinRuleConfig schema (api_url, default_rule,
+      custom_rule_enabled, custom_rule with payout/multiplier ranges + increase_pct).
+      Old schemas kept for backward compat.
+    - src/lib/display-value.ts (deleted) — superseded by new rule structure
+    - src/app/api/automations/[id]/route.ts — removed value_display audit, added V2 validation
+    - src/app/(app)/automations/page.tsx — full rewrite as "Automation Rules" page with
+      6 sections: Big Win API, Default Rule, Custom Rule, Username Display, Rule Result
+      Explanation, Content Queue Flow Notice. Only Big Win shown.
+    - src/components/layout/sidebar.tsx — label "Automations" → "Automation Rules"
+    - src/lib/audit.ts — AUTOMATION_VALUE_DISPLAY_CHANGED moved to legacy
+    - docs/03-ui-pages.md, docs/04-automations.md, docs/02-data-model.md — updated
+  - New page structure: 6 sections focused on Big Win rule configuration
+  - Default rule: OR logic — draft created if payout ≥ threshold OR multiplier ≥ threshold
+  - Custom rule: range-based with display increase %. Payout and multiplier sub-rules.
+    Validation: min < max. Display adjustments only — source values unchanged.
+  - Username masking: first 2 + * middle + last 2. ≤4 chars unchanged.
+  - Rule explanation: live computed preview using current form values with sample win data
+  - Content Queue flow: explicit notice that matched wins create drafts for review only
+  - Key notes:
+    - This is a rules config page only — no content generation, preview, or publishing
+    - Running Promotion and Educational hidden from UI but data preserved in DB
+    - Old config shape migrated at render time via migrateConfig()
+    - No Prisma schema changes — config_json is Json type
+
 - Task: Events date/time picker refinement — bounded time selection with proper defaults
   - Status: Complete
   - Scope: UI-only, create + edit event forms

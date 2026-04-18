@@ -55,6 +55,7 @@ export const AuditAction = {
   // Automations
   AUTOMATION_CREATED: "automation.created",
   AUTOMATION_UPDATED: "automation.updated",
+  // Legacy — value_display removed in V2 big win config
   AUTOMATION_VALUE_DISPLAY_CHANGED: "automation.value_display_changed",
 
   // Events

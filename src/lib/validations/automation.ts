@@ -17,69 +17,53 @@ export const AUTOMATION_RULE_LABELS: Record<AutomationRuleType, string> = {
 };
 
 export const AUTOMATION_RULE_DESCRIPTIONS: Record<AutomationRuleType, string> = {
-  running_promotion: "Automatically generate posts when promotions are scheduled or go live.",
-  big_win: "Generate posts when backend qualifies a win record above your thresholds.",
+  running_promotion: "Automatically create drafts when promotions are scheduled or go live.",
+  big_win: "Create drafts in Content Queue when a win record matches your thresholds.",
   educational: "Schedule regular educational content for your audience.",
 };
 
-// ─── Value Display Rules (big_win only for now) ───────────────────────────────
+// ─── Big Win Rule Config (V2) ────────────────────────────────────────────────
 
-export const DISPLAY_MODES = [
-  "exact",
-  "rounded",
-  "threshold_headline",
-  "range_headline",
-  "adjusted",
-] as const;
-
-export const ADJUSTMENT_TYPES = [
-  "none",
-  "round_down",
-  "round_up",
-  "subtract",
-  "multiply",
-] as const;
-
-export const DISPLAY_MODE_LABELS: Record<string, string> = {
-  exact: "Exact value",
-  rounded: "Rounded value",
-  threshold_headline: "Threshold headline (e.g. 'Over $1,000')",
-  range_headline: "Range headline (e.g. '$500–$1,000')",
-  adjusted: "Adjusted display value",
-};
-
-export const ADJUSTMENT_TYPE_LABELS: Record<string, string> = {
-  none: "No adjustment",
-  round_down: "Round down",
-  round_up: "Round up",
-  subtract: "Subtract fixed amount",
-  multiply: "Multiply by factor",
-};
-
-export const valueDisplaySchema = z.object({
-  display_mode: z.enum(DISPLAY_MODES),
-  adjustment_type: z.enum(ADJUSTMENT_TYPES),
-  adjustment_value: z.number().min(0),
-  max_adjustment_pct: z.number().min(0).max(100),
-  approval_required_if_adjusted: z.boolean(),
+const customRuleRangeSchema = z.object({
+  min: z.number().min(0),
+  max: z.number().min(0),
+  increase_pct: z.number().min(0).max(1000),
 });
 
-export type ValueDisplayConfig = z.infer<typeof valueDisplaySchema>;
+export const bigWinRuleConfigSchema = z.object({
+  api_url: z.string().nullable().optional(),
+  default_rule: z.object({
+    min_payout: z.number().min(0),
+    min_multiplier: z.number().min(0),
+  }),
+  custom_rule_enabled: z.boolean(),
+  custom_rule: z.object({
+    payout: customRuleRangeSchema,
+    multiplier: customRuleRangeSchema,
+  }),
+});
 
-export const DEFAULT_VALUE_DISPLAY: ValueDisplayConfig = {
-  display_mode: "exact",
-  adjustment_type: "none",
-  adjustment_value: 0,
-  max_adjustment_pct: 10,
-  approval_required_if_adjusted: true,
+export type BigWinRuleConfig = z.infer<typeof bigWinRuleConfigSchema>;
+
+export const DEFAULT_BIG_WIN_RULE_CONFIG: BigWinRuleConfig = {
+  api_url: null,
+  default_rule: {
+    min_payout: 500,
+    min_multiplier: 10,
+  },
+  custom_rule_enabled: false,
+  custom_rule: {
+    payout: { min: 1000, max: 5000, increase_pct: 0 },
+    multiplier: { min: 50, max: 500, increase_pct: 0 },
+  },
 };
 
-// ─── Per-rule config schemas ──────────────────────────────────────────────────
+// ─── Legacy configs (kept for backward compat with existing DB records) ──────
 
 export const runningPromotionConfigSchema = z.object({
   approval_required: z.boolean(),
   auto_post: z.boolean(),
-  pre_launch_hours: z.number().int().min(0).max(168),   // 0–7 days
+  pre_launch_hours: z.number().int().min(0).max(168),
   live_post: z.boolean(),
   last_chance_hours: z.number().int().min(0).max(72),
 });
@@ -92,26 +76,6 @@ export const DEFAULT_RUNNING_PROMOTION_CONFIG: RunningPromotionConfig = {
   pre_launch_hours: 24,
   live_post: true,
   last_chance_hours: 2,
-};
-
-export const bigWinConfigSchema = z.object({
-  approval_required: z.boolean(),
-  auto_post: z.boolean(),
-  min_payout: z.number().min(0),
-  min_multiplier: z.number().min(0),
-  cooldown_minutes: z.number().int().min(0),
-  value_display: valueDisplaySchema,
-});
-
-export type BigWinConfig = z.infer<typeof bigWinConfigSchema>;
-
-export const DEFAULT_BIG_WIN_CONFIG: BigWinConfig = {
-  approval_required: true,
-  auto_post: false,
-  min_payout: 500,
-  min_multiplier: 10,
-  cooldown_minutes: 60,
-  value_display: DEFAULT_VALUE_DISPLAY,
 };
 
 export const educationalConfigSchema = z.object({
@@ -154,7 +118,7 @@ export const DEFAULT_AUTOMATION_SEEDS: Array<{
   {
     rule_type: "big_win",
     rule_name: AUTOMATION_RULE_LABELS.big_win,
-    config: DEFAULT_BIG_WIN_CONFIG,
+    config: DEFAULT_BIG_WIN_RULE_CONFIG,
   },
   {
     rule_type: "educational",
@@ -162,7 +126,3 @@ export const DEFAULT_AUTOMATION_SEEDS: Array<{
     config: DEFAULT_EDUCATIONAL_CONFIG,
   },
 ];
-
-// computeDisplayValue and formatDisplayValue have been moved to src/lib/display-value.ts.
-// They are presentation-only utilities and must not be imported in route handlers or
-// any server-side code that writes to the database.
