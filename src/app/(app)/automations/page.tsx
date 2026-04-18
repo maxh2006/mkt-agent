@@ -101,15 +101,16 @@ export default function AutomationRulesPage() {
   const queryClient = useQueryClient();
   const canEdit = canEditRules(session?.user?.role);
 
-  const { data: rules, isLoading, isError } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["automations"],
     queryFn: automationsApi.list,
   });
 
   const bigWinRule = useMemo(() => {
-    if (!rules) return null;
-    return (rules as AutomationRule[]).find((r) => r.rule_type === "big_win") ?? null;
-  }, [rules]);
+    if (!data) return null;
+    const rules = Array.isArray(data) ? data : (data as { rules: AutomationRule[] }).rules ?? [];
+    return rules.find((r) => r.rule_type === "big_win") ?? null;
+  }, [data]);
 
   if (brandLoading || isLoading) {
     return (
