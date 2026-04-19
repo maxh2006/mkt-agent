@@ -16,9 +16,9 @@ Batch snapshot mode — system checks source data periodically.
 ```json
 {
   "api_url": null,
-  "check_frequency": { "interval_days": 2, "time": "11:00" },
-  "draft_cadence": { "interval_hours": 2, "sample_count": 3 },
-  "default_rule": { "min_payout": 500, "min_multiplier": 10 },
+  "check_frequency": { "interval_hours": 6 },
+  "draft_cadence": { "scan_delay_hours": 2, "sample_count": 3 },
+  "default_rule": { "min_payout": 500, "min_multiplier": 10, "logic": "OR" },
   "custom_rule_enabled": false,
   "custom_rule": {
     "payout": { "min": 1000, "max": 5000, "increase_pct": 0 },
@@ -34,10 +34,19 @@ Batch snapshot mode — system checks source data periodically.
 ```
 
 ### Rules
-- Default rule: OR logic (payout ≥ threshold OR multiplier ≥ threshold)
+- Check frequency: hourly interval. Anchor starts at 00:00:00 of the rule creation day
+  and repeats at the selected interval from that anchor.
+- Draft creation timing: single delay (scan_delay_hours) applied once after each scan
+  completes — not recurring draft creation.
+- Default rule: supports AND or OR logic between payout and multiplier thresholds
+  (default OR). AND requires both conditions met. OR requires either condition met.
 - Custom rule: range-based with display increase %. Source values never modified.
 - Content output: game icon, bet amount, win amount, datetime, conditional multiplier
-- Username masking: first 2 + * middle + last 2 chars
+- Username masking: first 2 + * middle + last 2 chars (reusable helper maskUsername)
+- Username source:
+  - Default rule drafts: use original source username (then masked)
+  - Custom rule drafts: generate a fresh random username per draft (6–8 lowercase
+    alphanumeric chars a-z and 0-9, then masked). Source username is not used.
 - Deduplication by win ID, transaction ID, or timestamp+user+amount
 
 ---

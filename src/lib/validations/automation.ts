@@ -36,16 +36,16 @@ const customRuleRangeSchema = z.object({
 export const bigWinRuleConfigSchema = z.object({
   api_url: z.string().nullable().optional(),
   check_frequency: z.object({
-    interval_days: z.number().int().min(1).max(30),
-    time: z.string(),
+    interval_hours: z.number().int().min(1).max(168),
   }),
   draft_cadence: z.object({
-    interval_hours: z.number().min(1).max(24),
+    scan_delay_hours: z.number().min(0).max(48),
     sample_count: z.number().int().min(1).max(10),
   }),
   default_rule: z.object({
     min_payout: z.number().min(0),
     min_multiplier: z.number().min(0),
+    logic: z.enum(["OR", "AND"]),
   }),
   custom_rule_enabled: z.boolean(),
   custom_rule: z.object({
@@ -66,9 +66,9 @@ export type BigWinRuleConfig = z.infer<typeof bigWinRuleConfigSchema>;
 
 export const DEFAULT_BIG_WIN_RULE_CONFIG: BigWinRuleConfig = {
   api_url: null,
-  check_frequency: { interval_days: 2, time: "11:00" },
-  draft_cadence: { interval_hours: 2, sample_count: 3 },
-  default_rule: { min_payout: 500, min_multiplier: 10 },
+  check_frequency: { interval_hours: 6 },
+  draft_cadence: { scan_delay_hours: 2, sample_count: 3 },
+  default_rule: { min_payout: 500, min_multiplier: 10, logic: "OR" },
   custom_rule_enabled: false,
   custom_rule: {
     payout: { min: 1000, max: 5000, increase_pct: 0 },

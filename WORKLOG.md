@@ -7,6 +7,57 @@
 ## Done Tasks
 
 ### 2026-04-18
+- Task: Fix Add Rule button on On Going Promotions tab
+  - Status: Complete
+  - Root cause:
+    The addPromoRule handler called crypto.randomUUID() to generate the new rule's id.
+    crypto.randomUUID() is a secure-context-only browser API — it is only available on
+    HTTPS or localhost. On the deployed server at http://34.92.70.250 (plain HTTP),
+    the call threw "TypeError: crypto.randomUUID is not a function", which React
+    swallowed silently in the onClick handler — so nothing happened when the operator
+    clicked Add Rule. On localhost dev it worked because localhost is a secure context.
+  - Files changed:
+    - src/lib/client-id.ts (new) — generateClientId() helper. Tries crypto.randomUUID()
+      when available, falls back to Date.now() + Math.random() combination for
+      non-HTTPS environments. Safe in all contexts.
+    - src/app/(app)/automations/page.tsx — imported generateClientId, replaced
+      crypto.randomUUID() in addPromoRule handler
+  - Verified: TypeScript passes clean. Add Rule will now work on both dev and deployed
+    HTTP site. Existing server-side crypto.randomUUID() calls in API routes are
+    unaffected (Node.js runtime always supports it).
+  - Scope kept tight: no other changes, no schema changes, no other tabs touched.
+
+- Task: Big Wins tab refinement — hourly check, AND/OR logic, custom-rule random usernames
+  - Status: Complete
+  - Files changed:
+    - src/lib/validations/automation.ts — check_frequency now { interval_hours } only (removed
+      time). draft_cadence renamed interval_hours → scan_delay_hours. default_rule adds
+      logic: "OR" | "AND". Updated DEFAULT_BIG_WIN_RULE_CONFIG.
+    - src/lib/username-mask.ts — added generateRandomUsername() (6–8 lowercase alphanumeric)
+    - src/app/(app)/automations/page.tsx — Big Wins card updated:
+      * Check Frequency: single hourly input + anchor rule helper text
+      * Draft Creation Timing: label "Create draft after X hours from scan" (single delay)
+      * Default Rule: new Condition logic dropdown (OR/AND), removed $ suffix from payout
+      * Custom Rule: removed $ suffix from payout range fields
+      * Username Display: removed Generate Sample button. Now shows two paths
+        (default rule = source username masked, custom rule = random username masked)
+      * Summary panel reflects new wording + default logic
+      * migrateBigWin handles old config shape (interval_days/time → interval_hours)
+    - docs/04-automations.md — updated config shape + rules to reflect all changes
+  - New check frequency behavior:
+    - Single "Check every N hours" input (1–168)
+    - Anchor: cycle starts at 00:00:00 of rule creation day, repeats at selected interval
+    - No separate time field anymore
+  - New default rule logic selector:
+    - OR (default): draft created if either payout OR multiplier condition is met
+    - AND: draft created only if both conditions are met
+  - New username behavior for custom rules:
+    - Default rule drafts: source username, then masked
+    - Custom rule drafts: fresh random username (6–8 chars, lowercase a-z + 0-9), then masked
+    - generateRandomUsername() helper in src/lib/username-mask.ts
+    - Single reusable maskUsername() still applies in both paths
+  - Docs updated: docs/04-automations.md
+
 - Task: Automation Rules — 3-tab page (Big Wins, On Going Promotions, Hot Games)
   - Status: Complete
   - Files changed:

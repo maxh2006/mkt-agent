@@ -10,11 +10,12 @@ import {
   DEFAULT_ONGOING_PROMOTION_CONFIG, type OnGoingPromotionRuleConfig, type PromoRule,
   DEFAULT_HOT_GAMES_CONFIG, type HotGamesRuleConfig,
 } from "@/lib/validations/automation";
-import { maskUsername } from "@/lib/username-mask";
+import { maskUsername, generateRandomUsername } from "@/lib/username-mask";
+import { generateClientId } from "@/lib/client-id";
 import { CheckboxGroup } from "@/components/ui/checkbox-group";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Info, Dices, Plus, Trash2 } from "lucide-react";
+import { Info, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // ─── Shared UI primitives ────────────────────────────────────────────────────
@@ -223,11 +224,27 @@ export default function AutomationRulesPage() {
 
 function migrateBigWin(raw: Record<string, unknown>): BigWinRuleConfig {
   const d = DEFAULT_BIG_WIN_RULE_CONFIG;
+  const rawCheck = raw.check_frequency as Record<string, unknown> | undefined;
+  const checkFreq = rawCheck && typeof rawCheck.interval_hours === "number"
+    ? { interval_hours: rawCheck.interval_hours as number }
+    : d.check_frequency;
+  const rawCadence = raw.draft_cadence as Record<string, unknown> | undefined;
+  const cadence = rawCadence && typeof rawCadence.scan_delay_hours === "number"
+    ? { scan_delay_hours: rawCadence.scan_delay_hours as number, sample_count: (rawCadence.sample_count as number) ?? d.draft_cadence.sample_count }
+    : d.draft_cadence;
+  const rawDefault = raw.default_rule as Record<string, unknown> | undefined;
+  const defaultRule = rawDefault
+    ? {
+        min_payout: (rawDefault.min_payout as number) ?? d.default_rule.min_payout,
+        min_multiplier: (rawDefault.min_multiplier as number) ?? d.default_rule.min_multiplier,
+        logic: ((rawDefault.logic as "OR" | "AND") ?? d.default_rule.logic),
+      }
+    : d.default_rule;
   return {
     api_url: (raw.api_url as string) ?? d.api_url,
-    check_frequency: (raw.check_frequency as BigWinRuleConfig["check_frequency"]) ?? d.check_frequency,
-    draft_cadence: (raw.draft_cadence as BigWinRuleConfig["draft_cadence"]) ?? d.draft_cadence,
-    default_rule: (raw.default_rule as BigWinRuleConfig["default_rule"]) ?? { min_payout: (raw.min_payout as number) ?? d.default_rule.min_payout, min_multiplier: (raw.min_multiplier as number) ?? d.default_rule.min_multiplier },
+    check_frequency: checkFreq,
+    draft_cadence: cadence,
+    default_rule: defaultRule,
     custom_rule_enabled: (raw.custom_rule_enabled as boolean) ?? d.custom_rule_enabled,
     custom_rule: (raw.custom_rule as BigWinRuleConfig["custom_rule"]) ?? d.custom_rule,
     dedupe_key: (raw.dedupe_key as BigWinRuleConfig["dedupe_key"]) ?? d.dedupe_key,
@@ -255,7 +272,8 @@ function BigWinCard({ rule, canEdit, onSaved }: { rule: AutomationRule; canEdit:
   const [enabled, setEnabled] = useState(rule.enabled);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [sampleUsername, setSampleUsername] = useState("wildspinzuser");
+  const [sampleUsername] = useState(() => SAMPLE_USERNAMES[Math.floor(Math.random() * SAMPLE_USERNAMES.length)]);
+  const [customSample] = useState(() => generateRandomUsername());
 
   const original = useMemo(() => migrateBigWin(rule.config_json), [rule.config_json]);
   const dirty = enabled !== rule.enabled || JSON.stringify(cfg) !== JSON.stringify(original);
@@ -310,21 +328,18 @@ function BigWinCard({ rule, canEdit, onSaved }: { rule: AutomationRule; canEdit:
           <SectionLabel>Check Frequency</SectionLabel>
           <p className="text-xs text-muted-foreground mb-3">System checks source data in batch snapshot mode.</p>
           <FieldRow label="Check every">
-            <NumberInput value={cfg.check_frequency.interval_days} onChange={(v) => updateNested("check_frequency.interval_days", v)} min={1} max={30} suffix="days" disabled={disabled} />
+            <NumberInput value={cfg.check_frequency.interval_hours} onChange={(v) => updateNested("check_frequency.interval_hours", v)} min={1} max={168} suffix="hours" disabled={disabled} />
           </FieldRow>
-          <FieldRow label="Check time">
-            <Select value={cfg.check_frequency.time} onValueChange={(v) => updateNested("check_frequency.time", v ?? "11:00")} disabled={disabled}>
-              <SelectTrigger className="w-[130px]"><SelectValue /></SelectTrigger>
-              <SelectContent className="max-h-[240px]">{HOURS.map((h) => <SelectItem key={h.value} value={h.value}>{h.label}</SelectItem>)}</SelectContent>
-            </Select>
-          </FieldRow>
+          <p className="text-xs text-muted-foreground mt-2">
+            Once saved, the cycle anchors to 00:00:00 of the rule creation day and repeats at the selected interval.
+          </p>
         </div>
 
         <div>
           <SectionLabel>Draft Creation Timing</SectionLabel>
-          <p className="text-xs text-muted-foreground mb-3">After each scan, eligible wins from the stored batch can produce drafts at this cadence.</p>
-          <FieldRow label="Create drafts every">
-            <NumberInput value={cfg.draft_cadence.interval_hours} onChange={(v) => updateNested("draft_cadence.interval_hours", v)} min={1} max={24} suffix="hours" disabled={disabled} />
+          <p className="text-xs text-muted-foreground mb-3">A single delay applied once after each scan completes.</p>
+          <FieldRow label="Create draft after X hours from scan">
+            <NumberInput value={cfg.draft_cadence.scan_delay_hours} onChange={(v) => updateNested("draft_cadence.scan_delay_hours", v)} min={0} max={48} step={0.5} suffix="hours" disabled={disabled} />
           </FieldRow>
           <FieldRow label="Draft sample count">
             <NumberInput value={cfg.draft_cadence.sample_count} onChange={(v) => updateNested("draft_cadence.sample_count", v)} min={1} max={10} disabled={disabled} />
@@ -333,9 +348,17 @@ function BigWinCard({ rule, canEdit, onSaved }: { rule: AutomationRule; canEdit:
 
         <div>
           <SectionLabel>Default Rule</SectionLabel>
-          <p className="text-xs text-muted-foreground mb-3">A draft will be created if either condition is met (OR logic).</p>
+          <FieldRow label="Condition logic" hint="OR: draft if either condition is met. AND: draft only if both are met.">
+            <Select value={cfg.default_rule.logic} onValueChange={(v) => updateNested("default_rule.logic", (v ?? "OR") as "OR" | "AND")} disabled={disabled}>
+              <SelectTrigger className="w-[130px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="OR">OR</SelectItem>
+                <SelectItem value="AND">AND</SelectItem>
+              </SelectContent>
+            </Select>
+          </FieldRow>
           <FieldRow label="Create a draft if payout is ≥">
-            <NumberInput value={cfg.default_rule.min_payout} onChange={(v) => updateNested("default_rule.min_payout", v)} min={0} suffix="$" disabled={disabled} />
+            <NumberInput value={cfg.default_rule.min_payout} onChange={(v) => updateNested("default_rule.min_payout", v)} min={0} disabled={disabled} />
           </FieldRow>
           <FieldRow label="Create a draft if multiplier is ≥">
             <NumberInput value={cfg.default_rule.min_multiplier} onChange={(v) => updateNested("default_rule.min_multiplier", v)} min={0} step={0.1} suffix="x" disabled={disabled} />
@@ -349,8 +372,8 @@ function BigWinCard({ rule, canEdit, onSaved }: { rule: AutomationRule; canEdit:
             <div className="mt-4 space-y-6 rounded-md border border-border p-4 bg-muted/10">
               <div>
                 <p className="text-sm font-medium mb-3">Payout-Based Custom Rule</p>
-                <FieldRow label="If payout is ≥"><NumberInput value={cfg.custom_rule.payout.min} onChange={(v) => updateNested("custom_rule.payout.min", v)} min={0} suffix="$" disabled={disabled} /></FieldRow>
-                <FieldRow label="but less than"><NumberInput value={cfg.custom_rule.payout.max} onChange={(v) => updateNested("custom_rule.payout.max", v)} min={0} suffix="$" disabled={disabled} /></FieldRow>
+                <FieldRow label="If payout is ≥"><NumberInput value={cfg.custom_rule.payout.min} onChange={(v) => updateNested("custom_rule.payout.min", v)} min={0} disabled={disabled} /></FieldRow>
+                <FieldRow label="but less than"><NumberInput value={cfg.custom_rule.payout.max} onChange={(v) => updateNested("custom_rule.payout.max", v)} min={0} disabled={disabled} /></FieldRow>
                 <FieldRow label="Add to payout for content display" hint="Display only. Source payout unchanged."><NumberInput value={cfg.custom_rule.payout.increase_pct} onChange={(v) => updateNested("custom_rule.payout.increase_pct", v)} min={0} max={1000} suffix="%" disabled={disabled} /></FieldRow>
               </div>
               <div>
@@ -365,13 +388,25 @@ function BigWinCard({ rule, canEdit, onSaved }: { rule: AutomationRule; canEdit:
 
         <div>
           <SectionLabel>Username Display</SectionLabel>
-          <p className="text-xs text-muted-foreground mb-3">Usernames show first 2 and last 2 characters. Middle characters masked with *.</p>
-          <Button variant="outline" size="sm" onClick={() => setSampleUsername(SAMPLE_USERNAMES[Math.floor(Math.random() * SAMPLE_USERNAMES.length)])} type="button">
-            <Dices className="h-3.5 w-3.5" /> Generate Sample
-          </Button>
-          <div className="grid grid-cols-2 gap-4 mt-3">
-            <div><p className="text-xs text-muted-foreground mb-1">Original</p><p className="text-sm font-mono bg-muted/30 rounded px-2.5 py-1.5 border">{sampleUsername}</p></div>
-            <div><p className="text-xs text-muted-foreground mb-1">Masked</p><p className="text-sm font-mono bg-muted/30 rounded px-2.5 py-1.5 border">{maskUsername(sampleUsername)}</p></div>
+          <p className="text-xs text-muted-foreground mb-3">
+            Default rule drafts use the source username (masked). Custom rule drafts use a freshly generated random username (6–8 lowercase alphanumeric chars, masked).
+          </p>
+          <p className="text-xs text-muted-foreground mb-3">
+            Masking rule: first 2 + * middle + last 2. Usernames of 4 chars or fewer are unchanged.
+          </p>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Default rule example</p>
+              <p className="text-sm font-mono bg-muted/30 rounded px-2.5 py-1.5 border">
+                {sampleUsername} → {maskUsername(sampleUsername)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Custom rule example</p>
+              <p className="text-sm font-mono bg-muted/30 rounded px-2.5 py-1.5 border">
+                {customSample} → {maskUsername(customSample)}
+              </p>
+            </div>
           </div>
         </div>
 
@@ -413,8 +448,9 @@ function BigWinCard({ rule, canEdit, onSaved }: { rule: AutomationRule; canEdit:
           <SectionLabel>Summary</SectionLabel>
           <div className="rounded-md border bg-muted/20 px-4 py-3 space-y-1 text-sm">
             <p>Mode: Batch snapshot</p>
-            <p>Check: Every {cfg.check_frequency.interval_days} day{cfg.check_frequency.interval_days > 1 ? "s" : ""} at {cfg.check_frequency.time}</p>
-            <p>Drafts: Every {cfg.draft_cadence.interval_hours}h, {cfg.draft_cadence.sample_count} sample{cfg.draft_cadence.sample_count > 1 ? "s" : ""}</p>
+            <p>Check: Every {cfg.check_frequency.interval_hours} hour{cfg.check_frequency.interval_hours > 1 ? "s" : ""} (anchor 00:00:00 of rule creation day)</p>
+            <p>Draft delay: {cfg.draft_cadence.scan_delay_hours}h after scan, {cfg.draft_cadence.sample_count} sample{cfg.draft_cadence.sample_count > 1 ? "s" : ""}</p>
+            <p>Default logic: {cfg.default_rule.logic}</p>
             <p>Dedupe: {cfg.dedupe_key.replace(/_/g, " ")}</p>
           </div>
         </div>
@@ -443,7 +479,7 @@ function OnGoingPromotionsCard({ rule, canEdit, onSaved }: { rule: AutomationRul
 
   function addPromoRule() {
     const newRule: PromoRule = {
-      id: crypto.randomUUID(),
+      id: generateClientId(),
       promo_id: "", promo_name: "",
       posting_mode: "daily",
       recurrence: { time: "15:00" },
