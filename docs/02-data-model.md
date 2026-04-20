@@ -57,6 +57,7 @@ Use JSON fields only for flexible config sections.
 - source_type
 - source_id
 - source_instance_key (occurrence datetime key for event-derived posts)
+- generation_context_json (per-draft automation context — e.g. frozen Hot Games snapshot)
 - tracking_id
 - scheduled_at
 - posted_at

@@ -26,6 +26,7 @@ export interface Post {
   source_type: string | null;
   source_id: string | null;
   source_instance_key: string | null;
+  generation_context_json?: Record<string, unknown> | null;
   tracking_id: string | null;
   scheduled_at: string | null;
   posted_at: string | null;

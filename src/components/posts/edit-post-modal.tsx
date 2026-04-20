@@ -103,6 +103,33 @@ export function EditPostModal({ post, open, onClose }: EditPostModalProps) {
             </div>
           )}
 
+          {/* Hot Games snapshot banner */}
+          {(() => {
+            const ctx = post.generation_context_json as Record<string, unknown> | null | undefined;
+            if (!ctx || ctx.type !== "hot_games_snapshot") return null;
+            const scanAt = ctx.scan_timestamp as string | undefined;
+            const sourceWindow = ctx.source_window_minutes as number | undefined;
+            const games = (ctx.ranked_games as Array<{ name?: string }> | undefined) ?? [];
+            return (
+              <div className="rounded-md border border-amber-200 bg-amber-50/60 px-3 py-2.5 space-y-1">
+                <div className="flex items-start gap-2">
+                  <Info className="h-4 w-4 text-amber-700 mt-0.5 shrink-0" />
+                  <div className="text-sm">
+                    <p className="font-medium text-amber-900">Hot Games snapshot (frozen)</p>
+                    <p className="text-xs text-amber-800 mt-0.5">
+                      {scanAt && <>Scan: {new Date(scanAt).toLocaleString()}. </>}
+                      {sourceWindow && <>Source window: {sourceWindow} min. </>}
+                      {games.length > 0 && <>Ranked games: {games.length}.</>}
+                    </p>
+                    <p className="text-xs text-amber-800 mt-0.5">
+                      Refinement reuses this snapshot — no new scan will run.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Current content preview */}
           <div>
             <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">

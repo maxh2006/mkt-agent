@@ -7,6 +7,56 @@
 ## Done Tasks
 
 ### 2026-04-18
+- Task: Hot Games tab refinement — dropdowns, ascending time mapping, frozen snapshot
+  - Status: Complete
+  - Files changed:
+    - prisma/schema.prisma — added Post.generation_context_json (Json?)
+    - prisma/migrations/20260418220000_post_generation_context/migration.sql (new) —
+      applied successfully to Neon
+    - src/lib/validations/automation.ts — hotGamesRuleConfigSchema: source_window_minutes
+      as literal union (30/60/90/120), hot_games_count (renamed from top_games_count) as
+      literal union (3–10), time_mapping (renamed from fixed_time_mapping) with length
+      matching hot_games_count + ascending order refinement, removed draft_delay_minutes.
+      Exported HOT_GAMES_SOURCE_WINDOWS and HOT_GAMES_COUNT_OPTIONS constants.
+    - src/lib/posts-api.ts — added generation_context_json to Post interface
+    - src/app/(app)/automations/page.tsx — Hot Games card rewrite:
+      * Source Window → Select dropdown (30/60/90/120)
+      * Hot Games Count → Select dropdown (3–10), label renamed from "Top Games Count"
+      * Time Mapping → vertical rows, N rows where N = hot_games_count, time Select per row,
+        row labels "Hot 1", "Hot 2", ..., inline red warning when not ascending, save blocked
+      * Removed draft delay field; added "Drafts are created immediately after a scan" text
+      * Added Frozen Snapshot notice at top explaining pinning behavior
+      * Summary panel updated with first/last mapped times and snapshot note
+      * migrateHotGames migrates old shape (top_games_count → hot_games_count,
+        fixed_time_mapping → time_mapping, drops draft_delay_minutes)
+      * setHotGamesCount dynamically resizes time_mapping array
+    - src/components/posts/edit-post-modal.tsx — Hot Games snapshot banner: when a post
+      has generation_context_json with type "hot_games_snapshot", shows amber info box
+      with scan timestamp, source window, ranked games count, and note that refinement
+      reuses the snapshot without scanning again
+    - docs/04-automations.md — new config shape, dropdown caps, ascending mapping, immediate
+      drafts, frozen snapshot behavior with example snapshot shape
+    - docs/02-data-model.md — added Post.generation_context_json
+    - docs/07-ai-boundaries.md — new Hot Games Frozen Snapshot section
+  - New Hot Games field behavior:
+    - Source Window: dropdown only (30/60/90/120), no free input
+    - Hot Games Count: dropdown only (3–10)
+    - Time Mapping: operator picks per rank, auto-resizes with count, ascending order enforced
+  - Ascending-order warning behavior:
+    - Per-row red "Times must be in ascending order." text to the right of offending row
+    - handleSave blocks with error if any pair is not ascending
+    - Zod schema has matching refine() for server-side validation
+  - Snapshot freezing behavior:
+    - Post.generation_context_json holds the snapshot { type, scan_timestamp,
+      source_window_minutes, ranked_games, time_mapping }
+    - Rules page prepares the architecture; actual snapshot write happens at scan-time
+      (future AI/generation layer)
+  - How Content Queue edits now reuse the same snapshot:
+    - Edit modal detects generation_context_json.type === "hot_games_snapshot"
+    - Shows a read-only banner with snapshot details and explicit note that refinement
+      reuses the snapshot and will not trigger a new scan
+  - Docs updated: 04-automations.md, 02-data-model.md, 07-ai-boundaries.md
+
 - Task: Fix Add Rule button on On Going Promotions tab
   - Status: Complete
   - Root cause:

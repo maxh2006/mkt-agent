@@ -124,19 +124,29 @@ export const DEFAULT_ONGOING_PROMOTION_CONFIG: OnGoingPromotionRuleConfig = {
 
 // ─── Hot Games Rule Config ───────────────────────────────────────────────────
 
+export const HOT_GAMES_SOURCE_WINDOWS = [30, 60, 90, 120] as const;
+export const HOT_GAMES_COUNT_OPTIONS = [3, 4, 5, 6, 7, 8, 9, 10] as const;
+
 export const hotGamesRuleConfigSchema = z.object({
   api_url: z.string().nullable().optional(),
   check_schedule: z.object({
     weekdays: z.array(z.number().int().min(1).max(7)),
     time: z.string(),
   }),
-  source_window_minutes: z.number().int().min(30).max(1440),
-  top_games_count: z.number().int().min(1).max(20),
-  fixed_time_mapping: z.array(z.string()),
-  draft_delay_minutes: z.number().int().min(0).max(120),
+  source_window_minutes: z.union([z.literal(30), z.literal(60), z.literal(90), z.literal(120)]),
+  hot_games_count: z.union([z.literal(3), z.literal(4), z.literal(5), z.literal(6), z.literal(7), z.literal(8), z.literal(9), z.literal(10)]),
+  time_mapping: z.array(z.string()),
   sample_count: z.number().int().min(1).max(10),
   dedupe_key: z.string(),
-});
+}).refine((d) => d.time_mapping.length === d.hot_games_count, {
+  message: "time_mapping length must match hot_games_count",
+  path: ["time_mapping"],
+}).refine((d) => {
+  for (let i = 1; i < d.time_mapping.length; i++) {
+    if (d.time_mapping[i] <= d.time_mapping[i - 1]) return false;
+  }
+  return true;
+}, { message: "time_mapping must be in strictly ascending order", path: ["time_mapping"] });
 
 export type HotGamesRuleConfig = z.infer<typeof hotGamesRuleConfigSchema>;
 
@@ -144,9 +154,8 @@ export const DEFAULT_HOT_GAMES_CONFIG: HotGamesRuleConfig = {
   api_url: null,
   check_schedule: { weekdays: [2, 4, 6], time: "16:00" },
   source_window_minutes: 120,
-  top_games_count: 6,
-  fixed_time_mapping: ["18:00", "19:00", "20:00", "21:00", "22:00", "23:00"],
-  draft_delay_minutes: 10,
+  hot_games_count: 6,
+  time_mapping: ["18:00", "19:00", "20:00", "21:00", "22:00", "23:00"],
   sample_count: 2,
   dedupe_key: "scan_timestamp",
 };

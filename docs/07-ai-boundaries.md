@@ -51,6 +51,16 @@ The system stores the output and lets humans review it.
 
 ---
 
+## Hot Games Frozen Snapshot
+
+Hot Games drafts store a frozen ranked-games snapshot in Post.generation_context_json at
+scan time. When a Hot Games draft is refined from Content Queue, the AI reuses that
+snapshot — it must NOT trigger a new API scan and must NOT replace the games list.
+The snapshot includes scan timestamp, source window, ranked games, and time mapping.
+This preserves the original ranked batch across refinement cycles.
+
+---
+
 ## Event Campaign Brief Context
 
 When refining event-derived posts, the AI receives a structured brief from the source event:

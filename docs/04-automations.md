@@ -95,23 +95,41 @@ Top-performing games by RTP, single-post output.
   "api_url": null,
   "check_schedule": { "weekdays": [2, 4, 6], "time": "16:00" },
   "source_window_minutes": 120,
-  "top_games_count": 6,
-  "fixed_time_mapping": ["18:00", "19:00", "20:00", "21:00", "22:00", "23:00"],
-  "draft_delay_minutes": 10,
+  "hot_games_count": 6,
+  "time_mapping": ["18:00", "19:00", "20:00", "21:00", "22:00", "23:00"],
   "sample_count": 2,
   "dedupe_key": "scan_timestamp"
 }
 ```
 
 ### Rules
-- Source: top 6 RTP games from previous 120 minutes
-- Ranking frozen per scan snapshot
+- Source Window: dropdown — 30 / 60 / 90 / 120 minutes (no other values allowed)
+- Hot Games Count: dropdown — 3 to 10 (no other values allowed)
+- Time Mapping: operator-defined per rank (Hot 1, Hot 2, ..., Hot N).
+  Must be in strictly ascending order. Inline red warning + save blocked if not ascending.
+  Row count always equals Hot Games Count.
 - Output: 1 post containing all ranked games (not separate posts)
-- Fixed time mapping: Top 1 = 6PM, Top 2 = 7PM, ..., Top 6 = 11PM
 - Each game includes: game icon, provider icon, game name
-- Draft delay: 10 min after check
-- Sample count: 2 draft samples
+- Draft creation: immediate after a scan returns a valid snapshot (no delay)
+- Sample count: N draft samples
 - Deduplication by scan timestamp
+
+### Frozen Snapshot
+When the API scan returns the ranked Hot Games batch, that snapshot is frozen and pinned
+to the resulting drafts via Post.generation_context_json. When a Hot Games draft is
+resent from Content Queue for refinement, the same snapshot is reused — the system does
+NOT scan the API again and does NOT replace the games list with a new batch.
+
+Snapshot shape stored on the post:
+```json
+{
+  "type": "hot_games_snapshot",
+  "scan_timestamp": "2026-04-18T16:00:00Z",
+  "source_window_minutes": 120,
+  "ranked_games": [ { "rank": 1, "name": "...", "provider": "...", "icon_url": "..." }, ... ],
+  "time_mapping": ["18:00", "19:00", ...]
+}
+```
 
 ---
 

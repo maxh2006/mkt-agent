@@ -148,6 +148,7 @@ model Post {
   source_type         SourceType?
   source_id            String?
   source_instance_key  String?
+  generation_context_json Json?
   tracking_id          String?     @unique
   scheduled_at     DateTime?
   posted_at        DateTime?

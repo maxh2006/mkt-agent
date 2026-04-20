@@ -9,6 +9,7 @@ import {
   DEFAULT_BIG_WIN_RULE_CONFIG, type BigWinRuleConfig,
   DEFAULT_ONGOING_PROMOTION_CONFIG, type OnGoingPromotionRuleConfig, type PromoRule,
   DEFAULT_HOT_GAMES_CONFIG, type HotGamesRuleConfig,
+  HOT_GAMES_SOURCE_WINDOWS, HOT_GAMES_COUNT_OPTIONS,
 } from "@/lib/validations/automation";
 import { maskUsername, generateRandomUsername } from "@/lib/username-mask";
 import { generateClientId } from "@/lib/client-id";
@@ -260,8 +261,23 @@ function migrateOngoingPromo(raw: Record<string, unknown>): OnGoingPromotionRule
 
 function migrateHotGames(raw: Record<string, unknown>): HotGamesRuleConfig {
   const d = DEFAULT_HOT_GAMES_CONFIG;
-  if (raw.check_schedule) return { ...d, ...raw } as HotGamesRuleConfig;
-  return d;
+  const count = ((raw.hot_games_count ?? raw.top_games_count) as number) ?? d.hot_games_count;
+  const validCount = (HOT_GAMES_COUNT_OPTIONS as readonly number[]).includes(count) ? (count as HotGamesRuleConfig["hot_games_count"]) : d.hot_games_count;
+  const sourceWindow = (raw.source_window_minutes as number) ?? d.source_window_minutes;
+  const validWindow = (HOT_GAMES_SOURCE_WINDOWS as readonly number[]).includes(sourceWindow) ? (sourceWindow as HotGamesRuleConfig["source_window_minutes"]) : d.source_window_minutes;
+  const rawMapping = (raw.time_mapping ?? raw.fixed_time_mapping) as string[] | undefined;
+  let mapping = Array.isArray(rawMapping) ? rawMapping : d.time_mapping;
+  if (mapping.length > validCount) mapping = mapping.slice(0, validCount);
+  while (mapping.length < validCount) mapping = [...mapping, "00:00"];
+  return {
+    api_url: (raw.api_url as string) ?? d.api_url,
+    check_schedule: (raw.check_schedule as HotGamesRuleConfig["check_schedule"]) ?? d.check_schedule,
+    source_window_minutes: validWindow,
+    hot_games_count: validCount,
+    time_mapping: mapping,
+    sample_count: (raw.sample_count as number) ?? d.sample_count,
+    dedupe_key: (raw.dedupe_key as string) ?? d.dedupe_key,
+  };
 }
 
 // ─── Big Win Card ────────────────────────────────────────────────────────────
@@ -643,14 +659,45 @@ function HotGamesCard({ rule, canEdit, onSaved }: { rule: AutomationRule; canEdi
 
   function updateCfg<K extends keyof HotGamesRuleConfig>(key: K, value: HotGamesRuleConfig[K]) { setCfg((p) => ({ ...p, [key]: value })); }
 
+  function setHotGamesCount(count: HotGamesRuleConfig["hot_games_count"]) {
+    setCfg((p) => {
+      let mapping = [...p.time_mapping];
+      if (mapping.length > count) mapping = mapping.slice(0, count);
+      while (mapping.length < count) {
+        const last = mapping[mapping.length - 1] ?? "17:00";
+        const [h] = last.split(":");
+        const nextH = Math.min(23, parseInt(h, 10) + 1);
+        mapping.push(`${String(nextH).padStart(2, "0")}:00`);
+      }
+      return { ...p, hot_games_count: count, time_mapping: mapping };
+    });
+  }
+
+  function setMappingTime(index: number, time: string) {
+    setCfg((p) => {
+      const next = [...p.time_mapping];
+      next[index] = time;
+      return { ...p, time_mapping: next };
+    });
+  }
+
+  const isAscending = useMemo(() => {
+    for (let i = 1; i < cfg.time_mapping.length; i++) {
+      if (cfg.time_mapping[i] <= cfg.time_mapping[i - 1]) return false;
+    }
+    return true;
+  }, [cfg.time_mapping]);
+
   async function handleSave() {
+    if (!isAscending) { setSaveError("Times must be in ascending order."); return; }
     setSaving(true); setSaveError(null);
     try { await automationsApi.update(rule.id, { enabled, config_json: cfg }); onSaved(); }
     catch (err) { setSaveError(err instanceof Error ? err.message : "Failed to save"); }
     finally { setSaving(false); }
   }
 
-  const timeLabels = ["6:00 PM", "7:00 PM", "8:00 PM", "9:00 PM", "10:00 PM", "11:00 PM"];
+  const firstTime = HOURS.find((h) => h.value === cfg.time_mapping[0])?.label ?? cfg.time_mapping[0];
+  const lastTime = HOURS.find((h) => h.value === cfg.time_mapping[cfg.time_mapping.length - 1])?.label ?? cfg.time_mapping[cfg.time_mapping.length - 1];
 
   return (
     <div className="rounded-lg border border-border">
@@ -674,6 +721,20 @@ function HotGamesCard({ rule, canEdit, onSaved }: { rule: AutomationRule; canEdi
           </FieldRow>
         </div>
 
+        {/* Frozen snapshot notice */}
+        <div className="rounded-md border border-blue-200 bg-blue-50/50 px-4 py-3">
+          <div className="flex items-start gap-2">
+            <Info className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-blue-900">Frozen Snapshot</p>
+              <p className="text-xs text-blue-700 mt-0.5">
+                When a scan returns the ranked Hot Games batch, that snapshot is frozen for the resulting drafts.
+                Content Queue edits on a Hot Games draft reuse the same snapshot and will not trigger a new API scan.
+              </p>
+            </div>
+          </div>
+        </div>
+
         <div>
           <SectionLabel>Checking Rules</SectionLabel>
           <FieldRow label="Check on">
@@ -689,32 +750,49 @@ function HotGamesCard({ rule, canEdit, onSaved }: { rule: AutomationRule; canEdi
 
         <div>
           <SectionLabel>Source Processing</SectionLabel>
-          <p className="text-xs text-muted-foreground mb-3">API returns top games by RTP from the source window. Ranking is frozen per scan.</p>
-          <FieldRow label="Source window">
-            <NumberInput value={cfg.source_window_minutes} onChange={(v) => updateCfg("source_window_minutes", v)} min={30} max={1440} suffix="min" disabled={disabled} />
+          <FieldRow label="Source Window" hint="Get top-performing games from the previous selected number of minutes.">
+            <Select value={String(cfg.source_window_minutes)} onValueChange={(v) => updateCfg("source_window_minutes", Number(v ?? 120) as HotGamesRuleConfig["source_window_minutes"])} disabled={disabled}>
+              <SelectTrigger className="w-[130px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {HOT_GAMES_SOURCE_WINDOWS.map((w) => <SelectItem key={w} value={String(w)}>{w} min</SelectItem>)}
+              </SelectContent>
+            </Select>
           </FieldRow>
-          <FieldRow label="Top games count">
-            <NumberInput value={cfg.top_games_count} onChange={(v) => updateCfg("top_games_count", v)} min={1} max={20} disabled={disabled} />
+          <FieldRow label="Hot Games Count">
+            <Select value={String(cfg.hot_games_count)} onValueChange={(v) => setHotGamesCount(Number(v ?? 6) as HotGamesRuleConfig["hot_games_count"])} disabled={disabled}>
+              <SelectTrigger className="w-[130px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {HOT_GAMES_COUNT_OPTIONS.map((c) => <SelectItem key={c} value={String(c)}>{c}</SelectItem>)}
+              </SelectContent>
+            </Select>
           </FieldRow>
         </div>
 
         <div>
-          <SectionLabel>Fixed Game Time Mapping</SectionLabel>
-          <p className="text-xs text-muted-foreground mb-3">Each ranked game is mapped to a fixed suggested play time. Times are fixed and never change.</p>
-          <div className="grid grid-cols-3 gap-2">
-            {cfg.fixed_time_mapping.map((t, i) => (
-              <div key={i} className="flex items-center gap-2 rounded-md border bg-muted/20 px-3 py-2">
-                <span className="text-xs font-medium text-muted-foreground">Top {i + 1}</span>
-                <span className="text-sm font-medium">{timeLabels[i] ?? t}</span>
-              </div>
-            ))}
+          <SectionLabel>Time Mapping</SectionLabel>
+          <p className="text-xs text-muted-foreground mb-3">Choose a suggested play time for each ranked game. Times must be in ascending order.</p>
+          <div className="space-y-2">
+            {cfg.time_mapping.map((t, i) => {
+              const prev = i > 0 ? cfg.time_mapping[i - 1] : null;
+              const rowInvalid = prev !== null && t <= prev;
+              return (
+                <div key={i} className="flex items-center gap-3">
+                  <span className="w-14 text-sm font-medium text-muted-foreground">Hot {i + 1}</span>
+                  <Select value={t} onValueChange={(v) => setMappingTime(i, v ?? t)} disabled={disabled}>
+                    <SelectTrigger className="w-[130px]"><SelectValue /></SelectTrigger>
+                    <SelectContent className="max-h-[240px]">{HOURS.map((h) => <SelectItem key={h.value} value={h.value}>{h.label}</SelectItem>)}</SelectContent>
+                  </Select>
+                  {rowInvalid && <span className="text-xs text-destructive">Times must be in ascending order.</span>}
+                </div>
+              );
+            })}
           </div>
         </div>
 
         <div>
           <SectionLabel>Output Format</SectionLabel>
           <div className="rounded-md border bg-muted/20 px-4 py-3 space-y-1 text-sm">
-            <p>1 post containing all {cfg.top_games_count} games (not separate posts)</p>
+            <p>1 post containing all {cfg.hot_games_count} games (not separate posts)</p>
             <p>Each game includes: game icon, provider icon, game name</p>
             <p>Purpose: invite users to play top-performing games at suggested times</p>
           </div>
@@ -722,9 +800,7 @@ function HotGamesCard({ rule, canEdit, onSaved }: { rule: AutomationRule; canEdi
 
         <div>
           <SectionLabel>Draft Creation</SectionLabel>
-          <FieldRow label="Draft delay after check" hint="Generate drafts this many minutes after the API check.">
-            <NumberInput value={cfg.draft_delay_minutes} onChange={(v) => updateCfg("draft_delay_minutes", v)} min={0} max={120} suffix="min" disabled={disabled} />
-          </FieldRow>
+          <p className="text-xs text-muted-foreground mb-3">Drafts are created immediately after a scan returns a valid snapshot.</p>
           <FieldRow label="Draft sample count">
             <NumberInput value={cfg.sample_count} onChange={(v) => updateCfg("sample_count", v)} min={1} max={10} disabled={disabled} />
           </FieldRow>
@@ -742,9 +818,10 @@ function HotGamesCard({ rule, canEdit, onSaved }: { rule: AutomationRule; canEdi
           <SectionLabel>Summary</SectionLabel>
           <div className="rounded-md border bg-muted/20 px-4 py-3 space-y-1 text-sm">
             <p>Check: {cfg.check_schedule.weekdays.map((d) => WEEKDAYS.find((w) => w.value === d)?.label).filter(Boolean).join(", ")} at {cfg.check_schedule.time}</p>
-            <p>Source: Top {cfg.top_games_count} RTP games from previous {cfg.source_window_minutes} min</p>
-            <p>Output: 1 post, fixed times {timeLabels[0]}–{timeLabels[timeLabels.length - 1]}</p>
-            <p>Drafts: {cfg.sample_count} sample{cfg.sample_count > 1 ? "s" : ""}, {cfg.draft_delay_minutes} min delay</p>
+            <p>Source: Top {cfg.hot_games_count} RTP games from previous {cfg.source_window_minutes} min</p>
+            <p>Output: 1 post, mapped times {firstTime} – {lastTime}</p>
+            <p>Drafts: {cfg.sample_count} sample{cfg.sample_count > 1 ? "s" : ""}, immediate after scan</p>
+            <p>Snapshot: frozen per scan (reused on Content Queue edits)</p>
           </div>
         </div>
 
