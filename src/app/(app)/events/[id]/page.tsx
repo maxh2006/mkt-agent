@@ -115,7 +115,7 @@ function initEditData(event: Event): EditData {
     theme: event.theme ?? "",
     target_audience: event.target_audience ?? "", cta: event.cta ?? "", tone: event.tone ?? "",
     platform_scope: event.platform_scope ?? [], notes_for_ai: event.notes_for_ai ?? "",
-    posting_frequency: pi?.frequency ?? "", posting_time: pi?.time ?? "15:00",
+    posting_frequency: pi?.frequency ?? "generate_now", posting_time: pi?.time ?? "15:00",
     posting_weekdays: pi?.weekdays ?? [], posting_month_days: pi?.month_days ?? [],
     auto_generate_posts: event.auto_generate_posts,
   };
@@ -147,7 +147,7 @@ export default function EventDetailPage() {
   function setField<K extends keyof EditData>(key: K, value: EditData[K]) { setEditData((p) => p ? { ...p, [key]: value } : p); }
 
   const editPostingConfig = useMemo((): PostingInstanceConfig | null => {
-    if (!editData?.posting_frequency) return null;
+    if (!editData?.posting_frequency || editData.posting_frequency === "generate_now") return null;
     const c: PostingInstanceConfig = { frequency: editData.posting_frequency as PostingInstanceConfig["frequency"], time: editData.posting_time };
     if (editData.posting_frequency === "weekly") c.weekdays = editData.posting_weekdays;
     if (editData.posting_frequency === "monthly") c.month_days = editData.posting_month_days;
@@ -174,7 +174,7 @@ export default function EventDetailPage() {
       };
       if (startDt) payload.start_at = new Date(startDt).toISOString();
       if (endDt) payload.end_at = new Date(endDt).toISOString();
-      if (editPostingConfig) payload.posting_instance_json = editPostingConfig;
+      payload.posting_instance_json = editPostingConfig;
       await eventsApi.update(id, payload);
       queryClient.invalidateQueries({ queryKey: ["event", id] });
       queryClient.invalidateQueries({ queryKey: ["events"] });
@@ -342,17 +342,17 @@ export default function EventDetailPage() {
               <>
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Frequency</label>
-                  <Select value={editData.posting_frequency || "none"} onValueChange={(v) => setField("posting_frequency", v === "none" ? "" : (v ?? ""))}>
+                  <Select value={editData.posting_frequency || "generate_now"} onValueChange={(v) => setField("posting_frequency", v ?? "generate_now")}>
                     <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
+                      <SelectItem value="generate_now">Generate Now</SelectItem>
                       <SelectItem value="daily">Daily</SelectItem>
                       <SelectItem value="weekly">Weekly</SelectItem>
                       <SelectItem value="monthly">Monthly</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
-                {editData.posting_frequency && (
+                {editData.posting_frequency && editData.posting_frequency !== "generate_now" && (
                   <>
                     <div className="space-y-1.5">
                       <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Time</label>
@@ -375,12 +375,14 @@ export default function EventDetailPage() {
                     )}
                   </>
                 )}
-                <div className="space-y-1.5">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input type="checkbox" checked={editData.auto_generate_posts} onChange={(e) => setField("auto_generate_posts", e.target.checked)} className="h-4 w-4 rounded border-input" />
-                    <span className="text-sm">Auto-generate drafts</span>
-                  </label>
-                </div>
+                {editData.posting_frequency !== "generate_now" && (
+                  <div className="space-y-1.5">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input type="checkbox" checked={editData.auto_generate_posts} onChange={(e) => setField("auto_generate_posts", e.target.checked)} className="h-4 w-4 rounded border-input" />
+                      <span className="text-sm">Auto-generate drafts</span>
+                    </label>
+                  </div>
+                )}
               </>
             ) : (
               <>

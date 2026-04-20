@@ -6,6 +6,7 @@ import { ok, Errors, sessionUser, assertCanEdit } from "@/lib/api";
 import { writeAuditLog, AuditAction } from "@/lib/audit";
 import { updateEventSchema } from "@/lib/validations/event";
 import { normalizeEvent } from "@/lib/event-status";
+import { Prisma } from "@/generated/prisma/client";
 
 export async function GET(
   _req: NextRequest,
@@ -54,7 +55,7 @@ export async function PATCH(
     return Errors.VALIDATION(parsed.error.issues[0]?.message ?? "Validation error");
   }
 
-  const { start_at, end_at, ...rest } = parsed.data;
+  const { start_at, end_at, posting_instance_json, ...rest } = parsed.data;
 
   const updated = await db.event.update({
     where: { id },
@@ -62,6 +63,9 @@ export async function PATCH(
       ...rest,
       ...(start_at !== undefined ? { start_at: new Date(start_at) } : {}),
       ...(end_at !== undefined ? { end_at: new Date(end_at) } : {}),
+      ...(posting_instance_json !== undefined
+        ? { posting_instance_json: posting_instance_json === null ? Prisma.JsonNull : posting_instance_json }
+        : {}),
     },
     include: {
       creator: { select: { id: true, name: true } },

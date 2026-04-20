@@ -78,7 +78,7 @@ const EMPTY: FormData = {
   theme: "",
   target_audience: "", cta: "", tone: "",
   platform_scope: [], notes_for_ai: "",
-  posting_frequency: "", posting_time: "15:00",
+  posting_frequency: "generate_now", posting_time: "15:00",
   posting_weekdays: [], posting_month_days: [],
   auto_generate_posts: false,
 };
@@ -150,7 +150,7 @@ export default function NewEventPage() {
   }
 
   const postingConfig = useMemo((): PostingInstanceConfig | null => {
-    if (!form.posting_frequency) return null;
+    if (!form.posting_frequency || form.posting_frequency === "generate_now") return null;
     const config: PostingInstanceConfig = {
       frequency: form.posting_frequency as PostingInstanceConfig["frequency"],
       time: form.posting_time,
@@ -196,6 +196,14 @@ export default function NewEventPage() {
       payload.auto_generate_posts = form.auto_generate_posts;
 
       const event = await eventsApi.create(payload);
+      if (form.posting_frequency === "generate_now") {
+        try { await eventsApi.generateDrafts(event.id); }
+        catch (err) {
+          setSubmitError(err instanceof Error ? `Event created but draft generation failed: ${err.message}` : "Draft generation failed");
+          router.push(`/events/${event.id}`);
+          return;
+        }
+      }
       router.push(`/events/${event.id}`);
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "Failed to create event");
@@ -366,10 +374,10 @@ export default function NewEventPage() {
         <SectionHeader title="Posting Schedule" />
 
         <LabeledField label="Frequency">
-          <Select value={form.posting_frequency || "none"} onValueChange={(v) => set("posting_frequency", v === "none" ? "" : (v ?? ""))} disabled={submitting}>
+          <Select value={form.posting_frequency || "generate_now"} onValueChange={(v) => set("posting_frequency", v ?? "generate_now")} disabled={submitting}>
             <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="none">None</SelectItem>
+              <SelectItem value="generate_now">Generate Now</SelectItem>
               <SelectItem value="daily">Daily</SelectItem>
               <SelectItem value="weekly">Weekly</SelectItem>
               <SelectItem value="monthly">Monthly</SelectItem>
@@ -377,7 +385,7 @@ export default function NewEventPage() {
           </Select>
         </LabeledField>
 
-        {form.posting_frequency && (
+        {form.posting_frequency && form.posting_frequency !== "generate_now" && (
           <>
             <LabeledField label="Posting Time">
               <Select value={form.posting_time} onValueChange={(v) => set("posting_time", v ?? "15:00")} disabled={submitting}>
@@ -412,19 +420,23 @@ export default function NewEventPage() {
           </>
         )}
 
-        <LabeledField label="Auto-generate drafts">
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input type="checkbox" checked={form.auto_generate_posts}
-              onChange={(e) => set("auto_generate_posts", e.target.checked)} disabled={submitting}
-              className="h-4 w-4 rounded border-input" />
-            <span className="text-sm">Automatically generate content drafts into Content Queue</span>
-          </label>
-        </LabeledField>
+        {form.posting_frequency !== "generate_now" && (
+          <LabeledField label="Auto-generate drafts">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={form.auto_generate_posts}
+                onChange={(e) => set("auto_generate_posts", e.target.checked)} disabled={submitting}
+                className="h-4 w-4 rounded border-input" />
+              <span className="text-sm">Automatically generate content drafts into Content Queue</span>
+            </label>
+          </LabeledField>
+        )}
 
         {/* Actions */}
         <div className="flex gap-2 pt-2">
           <Button type="submit" disabled={submitting}>
-            {submitting ? "Creating…" : "Create Campaign Event"}
+            {submitting
+              ? (form.posting_frequency === "generate_now" ? "Creating & generating…" : "Creating…")
+              : (form.posting_frequency === "generate_now" ? "Create Event & Generate Drafts Now" : "Create Campaign Event")}
           </Button>
           <Button type="button" variant="outline" onClick={() => router.back()} disabled={submitting}>
             Cancel

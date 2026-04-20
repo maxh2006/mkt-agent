@@ -57,7 +57,7 @@ export const createEventSchema = z
     tone: z.string().max(200).optional(),
     platform_scope: z.array(z.enum(platformValues)).optional(),
     notes_for_ai: z.string().max(2000).optional(),
-    posting_instance_json: postingInstanceSchema.optional(),
+    posting_instance_json: postingInstanceSchema.nullable().optional(),
     auto_generate_posts: z.boolean().optional(),
   })
   .refine(
@@ -81,7 +81,7 @@ export const updateEventSchema = z
     tone: z.string().max(200).optional(),
     platform_scope: z.array(z.enum(platformValues)).optional(),
     notes_for_ai: z.string().max(2000).optional(),
-    posting_instance_json: postingInstanceSchema.optional(),
+    posting_instance_json: postingInstanceSchema.nullable().optional(),
     auto_generate_posts: z.boolean().optional(),
   })
   .refine(

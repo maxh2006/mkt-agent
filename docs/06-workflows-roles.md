@@ -29,7 +29,7 @@
 5. operator approves and publishes
 
 ### Adhoc Event Flow
-1. operator creates event with campaign brief (target audience, CTA, tone, platform scope, AI notes). Create page shows a reference-only Sample Event Brief panel with 8 rows and a Generate Sample Prompt button — does not fill the form; required fields stay manual.
+1. operator creates event with campaign brief (target audience, CTA, tone, platform scope, AI notes). Create page shows a reference-only Sample Event Brief panel with 8 rows and a Generate Sample Prompt button — does not fill the form; required fields stay manual. Posting Schedule supports "Generate Now" (immediate draft generation into Content Queue, no recurrence) or Daily / Weekly / Monthly for recurrence-based occurrences.
 2. operator configures posting schedule (daily/weekly/monthly with time)
 3. event is created as active
 4. operator clicks "Generate Drafts" to create shell posts per occurrence × platform

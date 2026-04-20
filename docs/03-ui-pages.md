@@ -93,14 +93,16 @@ Structured form for adhoc campaigns. Events are AI-ready campaign briefs.
 Create form includes:
 - A. Event Details — title, type, theme, dates, objective, rules, reward
 - B. Campaign Brief — target audience, CTA, tone, platform scope, notes for AI
-- C. Posting Schedule — frequency (daily/weekly/monthly), time, day selection, recurrence preview
-- D. Auto-generate toggle
+- C. Posting Schedule — frequency: Generate Now / Daily / Weekly / Monthly. "Generate Now" hides recurrence controls and auto-generate toggle (it is the explicit intent).
+- D. Auto-generate toggle (hidden in Generate Now mode)
 
 Right-side panel on the Create page: **Sample Event Brief** — reference-only guidance.
 Shows 8 rows (Theme, Objective, Rules, Reward, Target Audience, CTA, Tone, Notes for AI)
 pulled from a hardcoded list of coherent example briefs. A "Generate Sample Prompt" button
 picks a new example on each click. The panel does NOT fill any real form fields;
 operators type their own values. Required field enforcement is unchanged.
+
+On the Create page, the primary button label is "Create Event & Generate Drafts Now" when Generate Now is selected; otherwise "Create Campaign Event". Submitting with Generate Now creates the event and immediately triggers draft generation into Content Queue for review.
 
 Detail page shows all sections with inline editing. "Generate Drafts" button creates shell posts in Content Queue from the posting schedule.
 

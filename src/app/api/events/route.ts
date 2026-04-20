@@ -6,6 +6,7 @@ import { ok, Errors, sessionUser, assertCanEdit } from "@/lib/api";
 import { writeAuditLog, AuditAction } from "@/lib/audit";
 import { createEventSchema, listEventsQuerySchema } from "@/lib/validations/event";
 import { normalizeEvents } from "@/lib/event-status";
+import { Prisma } from "@/generated/prisma/client";
 
 export async function GET(req: NextRequest) {
   const session = await auth();
@@ -69,7 +70,7 @@ export async function POST(req: NextRequest) {
     return Errors.VALIDATION(parsed.error.issues[0]?.message ?? "Validation error");
   }
 
-  const { start_at, end_at, ...rest } = parsed.data;
+  const { start_at, end_at, posting_instance_json, ...rest } = parsed.data;
 
   const event = await db.event.create({
     data: {
@@ -79,6 +80,9 @@ export async function POST(req: NextRequest) {
       status: "active",
       start_at: start_at ? new Date(start_at) : undefined,
       end_at: end_at ? new Date(end_at) : undefined,
+      ...(posting_instance_json !== undefined
+        ? { posting_instance_json: posting_instance_json === null ? Prisma.JsonNull : posting_instance_json }
+        : {}),
     },
     include: {
       creator: { select: { id: true, name: true } },

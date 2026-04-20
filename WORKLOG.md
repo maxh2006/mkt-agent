@@ -7,6 +7,45 @@
 ## Done Tasks
 
 ### 2026-04-18
+- Task: Events Posting Schedule — "Generate Now" option replacing "None"
+  - Status: Complete
+  - Files changed:
+    - src/app/(app)/events/new/page.tsx — dropdown now: Generate Now / Daily / Weekly / Monthly.
+      EMPTY.posting_frequency defaults to "generate_now". postingConfig useMemo returns null
+      for generate_now. Submit button label switches to "Create Event & Generate Drafts Now"
+      when Generate Now is selected. On submit with generate_now, after successful event
+      creation the page calls eventsApi.generateDrafts(event.id) before navigating.
+      Auto-generate checkbox hidden in generate_now mode (redundant).
+    - src/app/(app)/events/[id]/page.tsx — same 4-option dropdown. initEditData defaults to
+      "generate_now" when the loaded event has no posting_instance_json. saveEdit now always
+      sends posting_instance_json (null when generate_now).
+    - src/lib/validations/event.ts — posting_instance_json accepts null (.nullable().optional())
+      in both create and update schemas
+    - src/app/api/events/route.ts — POST handler converts posting_instance_json === null to
+      Prisma.JsonNull for the JSON column
+    - src/app/api/events/[id]/route.ts — PATCH handler does the same conversion
+    - src/app/api/events/[id]/generate-drafts/route.ts — when posting_instance_json is null
+      (Generate Now mode), uses a single immediate occurrence at now(). When present, uses
+      the existing recurrence path. start_at/end_at only required when a posting schedule exists.
+    - docs/03-ui-pages.md — documented 4 options + button label behavior
+    - docs/06-workflows-roles.md — Adhoc Event Flow notes Generate Now path
+  - How Generate Now works:
+    - UI state only — stored on the event as posting_instance_json = null
+    - On Create page submit: event is POSTed, then eventsApi.generateDrafts(id) is called,
+      then navigates to /events/[id]
+    - generate-drafts endpoint creates one shell post per platform at now() with
+      source_instance_key = the occurrence ISO. Drafts land in Content Queue for review.
+  - Validation changes:
+    - posting_instance_json nullable in both create and update schemas
+    - Recurrence-specific fields (weekdays/month_days) only enforced when daily/weekly/monthly
+      is selected. Generate Now requires no recurrence fields.
+    - generate-drafts endpoint: start_at/end_at only required for recurrence events.
+  - Button label behavior (Create page):
+    - "Create Event & Generate Drafts Now" when posting_frequency === "generate_now"
+    - "Create Campaign Event" when Daily / Weekly / Monthly selected
+    - Submitting state: "Creating & generating…" vs "Creating…"
+  - Edit page keeps its normal Save label (per spec — label change scoped to Create page).
+
 - Task: Create Event form — field-level helper text + 3 examples per field
   - Status: Complete
   - Files changed:

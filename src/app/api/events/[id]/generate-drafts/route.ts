@@ -24,20 +24,21 @@ export async function POST(
   });
   if (!event) return Errors.NOT_FOUND("Event");
 
-  if (!event.start_at || !event.end_at) {
-    return Errors.VALIDATION("Event must have start and end dates to generate drafts");
-  }
-
   const piConfig = parsePostingInstance(event.posting_instance_json);
-  if (!piConfig) {
-    return Errors.VALIDATION("Event must have a valid posting schedule");
+
+  // Recurrence mode requires start and end dates; Generate Now mode does not.
+  if (piConfig && (!event.start_at || !event.end_at)) {
+    return Errors.VALIDATION("Event with a posting schedule must have start and end dates to generate drafts");
   }
 
   const platforms = Array.isArray(event.platform_scope) && event.platform_scope.length > 0
     ? (event.platform_scope as string[])
     : ["facebook"];
 
-  const occurrences = generateOccurrences(piConfig, event.start_at, event.end_at);
+  // If there's a posting schedule → recurrence occurrences; otherwise (Generate Now) → one immediate occurrence.
+  const occurrences = piConfig
+    ? generateOccurrences(piConfig, event.start_at!, event.end_at!)
+    : [new Date()];
 
   const existingPosts = await db.post.findMany({
     where: { source_type: "event", source_id: event.id },
