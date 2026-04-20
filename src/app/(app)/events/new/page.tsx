@@ -22,6 +22,7 @@ import {
   joinDatetime,
 } from "@/components/events/event-datetime-picker";
 import { CheckboxGroup } from "@/components/ui/checkbox-group";
+import { SampleBriefPanel } from "@/components/events/sample-brief-panel";
 
 const PLATFORMS = [
   { value: "instagram", label: "Instagram" },
@@ -191,7 +192,7 @@ export default function NewEventPage() {
   }
 
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="max-w-6xl space-y-6">
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="sm" onClick={() => router.back()} className="shrink-0">
           <ArrowLeft className="h-4 w-4" /> Events
@@ -199,7 +200,8 @@ export default function NewEventPage() {
         <h1 className="text-xl font-semibold">New Campaign Event</h1>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-5">
+      <div className="grid gap-6 lg:grid-cols-3">
+      <form onSubmit={handleSubmit} className="space-y-5 lg:col-span-2">
         {submitError && (
           <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3">
             <p className="text-sm text-destructive">{submitError}</p>
@@ -360,6 +362,11 @@ export default function NewEventPage() {
           </Button>
         </div>
       </form>
+
+        <div className="lg:col-span-1">
+          <SampleBriefPanel />
+        </div>
+      </div>
     </div>
   );
 }

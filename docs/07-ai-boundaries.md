@@ -51,6 +51,17 @@ The system stores the output and lets humans review it.
 
 ---
 
+## Sample Brief Panel (Create Event page)
+
+The Create Event page shows a right-side Sample Event Brief panel for operator
+guidance. Samples come from a hardcoded list of 6 coherent example briefs — not
+from AI, not from BigQuery, not from the event record being created. The panel
+is reference-only; it does not fill the form, does not copy values into any
+event record, and is not sent as AI input at event creation time.
+Required form fields remain manual and mandatory.
+
+---
+
 ## Shared BigQuery Data Source
 
 Automation scans (Big Wins, Hot Games) read from the shared BigQuery dataset

@@ -96,6 +96,12 @@ Create form includes:
 - C. Posting Schedule — frequency (daily/weekly/monthly), time, day selection, recurrence preview
 - D. Auto-generate toggle
 
+Right-side panel on the Create page: **Sample Event Brief** — reference-only guidance.
+Shows 8 rows (Theme, Objective, Rules, Reward, Target Audience, CTA, Tone, Notes for AI)
+pulled from a hardcoded list of coherent example briefs. A "Generate Sample Prompt" button
+picks a new example on each click. The panel does NOT fill any real form fields;
+operators type their own values. Required field enforcement is unchanged.
+
 Detail page shows all sections with inline editing. "Generate Drafts" button creates shell posts in Content Queue from the posting schedule.
 
 Event statuses: active, ended, archived (no draft). Lifecycle auto-managed.

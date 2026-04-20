@@ -7,6 +7,35 @@
 ## Done Tasks
 
 ### 2026-04-18
+- Task: New Event page — Sample Brief guidance panel
+  - Status: Complete
+  - Files changed:
+    - src/lib/event-sample-briefs.ts (new) — 6 coherent sample briefs (Top Fans VIP Week,
+      Summer Deposit Boost, Slot Tournament Showdown, Lunar New Year Freeroll, Welcome Back
+      Reactivation, New Game Launch Hype). Each has 8 internally-consistent fields.
+      pickRandomSample() excludes previous index so clicks always change the sample.
+    - src/components/events/sample-brief-panel.tsx (new) — self-contained panel with 8-row
+      definition list, "Generate Sample Prompt" button, sticky positioning. No props,
+      no callbacks to parent. Local state only.
+    - src/app/(app)/events/new/page.tsx — widened container from max-w-2xl to max-w-6xl;
+      wrapped form + panel in a responsive `lg:grid lg:grid-cols-3` layout; form occupies
+      lg:col-span-2, sample panel occupies lg:col-span-1 with sticky behavior. On small
+      screens the panel stacks below the form. Form state, validation, and submit logic
+      unchanged.
+    - docs/03-ui-pages.md — described the panel and its reference-only nature
+    - docs/06-workflows-roles.md — added mention in Adhoc Event Flow
+    - docs/07-ai-boundaries.md — clarified panel is not AI-sourced and not used as AI input
+  - Sample table behavior:
+    - 8 rows: Theme, Objective, Rules, Reward, Target Audience, CTA, Tone, Notes for AI
+    - Values come from a hardcoded coherent brief (one concept per brief)
+    - Initial brief picked randomly on mount
+  - Button placement:
+    - Below the table, full-width, outline variant, Dices icon for visual cue
+    - Clicking picks a different brief (never repeats the currently-displayed one)
+  - Real fields not auto-filled: confirmed. The panel has no props, no callbacks,
+    no access to form state. Required fields (title + event_type) still enforced on submit.
+  - Docs updated: docs/03-ui-pages.md, docs/06-workflows-roles.md, docs/07-ai-boundaries.md
+
 - Task: Data source migration — shared BigQuery dataset (config-shape only)
   - Status: Complete (code side). Awaiting platform team grant + gcloud install on laptop.
   - Context: Platform team exposed shared BQ dataset (shared.users/transactions/game_rounds/games)
