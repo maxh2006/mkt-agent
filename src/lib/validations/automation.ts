@@ -33,8 +33,11 @@ const customRuleRangeSchema = z.object({
   increase_pct: z.number().min(0).max(1000),
 });
 
+// Data source: shared.game_rounds (user_id, bet_amount, payout_amount, win_multiplier, bet_at, game_code, status)
+//   LEFT JOIN shared.games (id=game_code, name, game_icon)
+//   LEFT JOIN shared.users (id=user_id, username subject to platform team exposing it, tags, brand_id)
+// Filter: status = 'settled' AND bet_at >= partition window. Multi-brand: scope by brand_id.
 export const bigWinRuleConfigSchema = z.object({
-  api_url: z.string().nullable().optional(),
   check_frequency: z.object({
     interval_hours: z.number().int().min(1).max(168),
   }),
@@ -65,7 +68,6 @@ export const bigWinRuleConfigSchema = z.object({
 export type BigWinRuleConfig = z.infer<typeof bigWinRuleConfigSchema>;
 
 export const DEFAULT_BIG_WIN_RULE_CONFIG: BigWinRuleConfig = {
-  api_url: null,
   check_frequency: { interval_hours: 6 },
   draft_cadence: { scan_delay_hours: 2, sample_count: 3 },
   default_rule: { min_payout: 500, min_multiplier: 10, logic: "OR" },
@@ -127,8 +129,11 @@ export const DEFAULT_ONGOING_PROMOTION_CONFIG: OnGoingPromotionRuleConfig = {
 export const HOT_GAMES_SOURCE_WINDOWS = [30, 60, 90, 120] as const;
 export const HOT_GAMES_COUNT_OPTIONS = [3, 4, 5, 6, 7, 8, 9, 10] as const;
 
+// Data source: shared.game_rounds (game_code, payout_amount, bet_amount, bet_at)
+//   aggregated to compute per-game RTP over source_window_minutes
+//   JOIN shared.games for display (name, game_icon, vendor)
+// Filter: bet_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL source_window_minutes MINUTE)
 export const hotGamesRuleConfigSchema = z.object({
-  api_url: z.string().nullable().optional(),
   check_schedule: z.object({
     weekdays: z.array(z.number().int().min(1).max(7)),
     time: z.string(),
@@ -151,7 +156,6 @@ export const hotGamesRuleConfigSchema = z.object({
 export type HotGamesRuleConfig = z.infer<typeof hotGamesRuleConfigSchema>;
 
 export const DEFAULT_HOT_GAMES_CONFIG: HotGamesRuleConfig = {
-  api_url: null,
   check_schedule: { weekdays: [2, 4, 6], time: "16:00" },
   source_window_minutes: 120,
   hot_games_count: 6,

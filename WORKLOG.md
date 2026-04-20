@@ -7,6 +7,45 @@
 ## Done Tasks
 
 ### 2026-04-18
+- Task: Data source migration — shared BigQuery dataset (config-shape only)
+  - Status: Complete (code side). Awaiting platform team grant + gcloud install on laptop.
+  - Context: Platform team exposed shared BQ dataset (shared.users/transactions/game_rounds/games)
+    updated hourly at :00 GMT+8. PII removed except username which is a display handle.
+    Multi-brand identity = (username, brand_id). Schema still evolving.
+  - Files changed:
+    - package.json / package-lock.json — installed @google-cloud/bigquery ^8.1.1
+    - .env.production.example — added BQ_PLATFORM_PROJECT_ID, BQ_DATASET, BQ_SERVICE_ACCOUNT_EMAIL
+    - src/lib/validations/automation.ts — removed api_url from bigWinRuleConfigSchema,
+      hotGamesRuleConfigSchema, and their defaults. Added inline source-mapping comments
+      pointing at shared.game_rounds/games/users.
+    - src/app/(app)/automations/page.tsx — replaced "Big Win API" + "Hot Games API" sections
+      with read-only "Data Source" info panels. Added ~1h delay note on Hot Games Source Window.
+      migrateBigWin + migrateHotGames drop legacy api_url silently.
+    - docs/00-architecture.md — added External Data Source — Shared BigQuery section
+    - docs/04-automations.md — added Data Source section (env vars, cost rules, schema volatility,
+      Big Wins + Hot Games field mapping, multi-brand identity). Removed api_url from
+      documented config shapes for Big Wins and Hot Games.
+    - docs/02-data-model.md — added External Tables section listing shared.* schema.
+    - docs/07-ai-boundaries.md — AI consumes pre-computed facts only, never raw queries.
+      Added username-as-display-handle note with brand_id scoping.
+  - Manual follow-ups for operator:
+    1. Install gcloud CLI on laptop (GoogleCloudSDKInstaller.exe for Windows)
+    2. gcloud auth login && gcloud auth application-default login
+    3. gcloud config set project mktagent-493404
+    4. gcloud services enable bigquery.googleapis.com
+    5. gcloud iam service-accounts create mkt-agent-bq --project=mktagent-493404
+       → email mkt-agent-bq@mktagent-493404.iam.gserviceaccount.com to platform team for dataViewer grant
+    6. Smoke test: node -e "new (require('@google-cloud/bigquery').BigQuery)({projectId:'mktagent-493404'}).query('SELECT 1 AS n').then(r=>console.log(r[0]))"
+    7. Join platform team's Telegram channel for schema change announcements
+    8. Set GCP monthly budget alert ($100 suggested)
+  - Known follow-ups (not implemented):
+    - Dedupe key options (win_id, transaction_id) don't match BQ — will realign when query layer lands
+    - Platform team needs to confirm shared.users.username is exposed (or add it)
+    - src/lib/bq/shared-schema.ts adapter module (single source of truth for column references)
+      will be created when query execution is implemented
+    - Daily health-check query to detect missing columns
+    - Service account JSON key + GOOGLE_APPLICATION_CREDENTIALS — generated only when query layer lands
+
 - Task: Hot Games tab refinement — dropdowns, ascending time mapping, frozen snapshot
   - Status: Complete
   - Files changed:

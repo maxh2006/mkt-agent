@@ -9,6 +9,34 @@ Use JSON fields only for flexible config sections.
 
 ---
 
+## External Tables (read-only, sourced from platform BigQuery)
+
+Schema is owned by the platform team. These are the BigQuery tables we read from
+for automation scans. Sync: hourly at :00 GMT+8. PII removed.
+
+- `shared.users` — id, brand_id, level, tags, country_code, telco, channel,
+  balance, total_deposit, total_withdrawal, deposit_count, withdrawal_count,
+  is_active, last_login_at, created_at, updated_at.
+  `username` is a display handle (not PII) — pending platform team confirmation.
+  Multi-brand: same username can exist across brands; identity is `(username, brand_id)`.
+
+- `shared.transactions` — user_id, type (deposit|withdrawal), status (always "completed"),
+  amount, balance_before, balance_after, created_at, finalized_at.
+  Wallet movements only. Game betting is in `shared.game_rounds`.
+
+- `shared.game_rounds` — user_id, brand_id, game_code, category,
+  bet_amount, payout_amount, ggr, valid_bet, win_multiplier (pre-computed integer),
+  status (pending|settled|refunded|reclaimed), bet_at, settled_at.
+
+- `shared.games` — id, vendor, tg_game_code, tg_game_provider,
+  name, display_name, category, rtp, game_icon (public URL), is_active.
+
+Schema is evolving — all column references in our code are centralized in a single
+adapter module (`src/lib/bq/shared-schema.ts`, to be created when query layer lands)
+so renames can be absorbed in one place.
+
+---
+
 ## Core Tables
 
 ### brands

@@ -72,6 +72,13 @@ Keep logic grouped by domain:
 ### Database
 PostgreSQL with Prisma.
 
+### External Data Source — Shared BigQuery
+Primary operational facts come from a shared BigQuery dataset maintained by the platform team.
+Tables: `shared.users`, `shared.transactions`, `shared.game_rounds`, `shared.games`.
+Sync: hourly at :00 GMT+8. PII removed. Read-only for us.
+Query execution billed to our own GCP project (`mktagent-493404`) — never the platform project.
+Schema is still evolving; see docs/04-automations.md for field mapping and volatility strategy.
+
 ### Jobs
 Scheduled jobs for rollups and lightweight background tasks.
 

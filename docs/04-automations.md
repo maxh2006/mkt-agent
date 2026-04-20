@@ -8,6 +8,55 @@ Matched rules create drafts in Content Queue for operator review.
 
 ---
 
+## Data Source
+
+Big Wins and Hot Games read from the shared BigQuery dataset provided by the platform team.
+On Going Promotions uses a separate API URL (not from BigQuery).
+
+**BigQuery dataset**
+- Tables: `shared.users`, `shared.transactions`, `shared.game_rounds`, `shared.games`
+- Sync: hourly at :00 GMT+8. ~1 hour delay from real time.
+- Read-only. PII removed (email, phone, real name, IP, KYC) — username is a display handle, not classified as PII.
+- Query execution billed to our GCP project (`mktagent-493404`). Platform team's project owns storage; we own query costs.
+
+**Env vars** (see `.env.production.example`):
+- `BQ_PLATFORM_PROJECT_ID` — platform team's GCP project ID
+- `BQ_DATASET` — always `"shared"`
+- `BQ_SERVICE_ACCOUNT_EMAIL` — our service account, granted `roles/bigquery.dataViewer` by platform team
+
+**Cost/constraint rules**
+- Never `SELECT *`. List columns explicitly.
+- Always use partition-friendly filters: `WHERE bet_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL N MINUTE)`.
+- Queries must run in our own project (use `projectId: "mktagent-493404"` in SDK).
+- Never use `information_schema.columns` for dynamic column discovery.
+- Set a GCP monthly budget alert ($100 recommended).
+
+**Schema volatility**
+Platform is still being built. Columns may be renamed or added.
+- Schema changes are announced in the platform team's Telegram channel with 1-week advance notice.
+- All column references should be centralized (later: `src/lib/bq/shared-schema.ts`) so drift can be absorbed in one place.
+- A daily health-check query should verify expected columns exist.
+
+---
+
+### Big Wins field mapping
+- payout threshold → `shared.game_rounds.payout_amount`
+- multiplier threshold → `shared.game_rounds.win_multiplier` (pre-computed integer)
+- status filter → `status = 'settled'`
+- game icon → `shared.games.game_icon` (public URL)
+- username → `shared.users.username` scoped by `brand_id` (pending platform team confirmation; see follow-ups). Masked via `maskUsername()` before display.
+- dedupe key: current config options (`win_id`, `transaction_id`) do not map directly to `shared.game_rounds` columns — flagged as a follow-up, likely derived from `user_id + bet_at + payout_amount`.
+
+### Hot Games field mapping
+- per-game RTP aggregated from `shared.game_rounds` over `source_window_minutes`
+- joined to `shared.games` for name, icon, vendor
+- partition-friendly filter on `bet_at`
+
+### Multi-brand identity
+The same username (e.g. `maxtest`) can exist across brands. The effective identity is `(username, brand_id)`. All joins and dedupes must be brand-scoped.
+
+---
+
 ## Tab 1: Big Wins
 
 Batch snapshot mode — system checks source data periodically.
@@ -15,7 +64,6 @@ Batch snapshot mode — system checks source data periodically.
 ### Config Shape
 ```json
 {
-  "api_url": null,
   "check_frequency": { "interval_hours": 6 },
   "draft_cadence": { "scan_delay_hours": 2, "sample_count": 3 },
   "default_rule": { "min_payout": 500, "min_multiplier": 10, "logic": "OR" },
@@ -92,7 +140,6 @@ Top-performing games by RTP, single-post output.
 ### Config Shape
 ```json
 {
-  "api_url": null,
   "check_schedule": { "weekdays": [2, 4, 6], "time": "16:00" },
   "source_window_minutes": 120,
   "hot_games_count": 6,

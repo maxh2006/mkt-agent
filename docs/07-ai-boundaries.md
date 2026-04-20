@@ -51,6 +51,26 @@ The system stores the output and lets humans review it.
 
 ---
 
+## Shared BigQuery Data Source
+
+Automation scans (Big Wins, Hot Games) read from the shared BigQuery dataset
+maintained by the platform team. AI consumes pre-computed facts — not raw queries.
+
+- AI receives a structured packet assembled by the backend from BQ rows.
+- AI never executes SQL, never sees raw rows, never fetches data itself.
+- Column references are centralized in a single adapter. Schema changes are
+  absorbed there, not in the AI input layer.
+
+### Username in Big Wins content
+Username is a display handle chosen by the user (not PII under the guide's
+definition). Big Wins default-rule drafts use the source `username` from
+`shared.users`, scoped by `brand_id`, then apply `maskUsername()` before display.
+Custom-rule drafts continue to use generated random usernames.
+Effective identity for deduplication is `(username, brand_id)` since the same
+username can exist across brands.
+
+---
+
 ## Hot Games Frozen Snapshot
 
 Hot Games drafts store a frozen ranked-games snapshot in Post.generation_context_json at

@@ -241,8 +241,9 @@ function migrateBigWin(raw: Record<string, unknown>): BigWinRuleConfig {
         logic: ((rawDefault.logic as "OR" | "AND") ?? d.default_rule.logic),
       }
     : d.default_rule;
+  // Note: legacy api_url field (if present in raw) is intentionally dropped.
+  // Big Wins now reads from shared BigQuery dataset via global env config.
   return {
-    api_url: (raw.api_url as string) ?? d.api_url,
     check_frequency: checkFreq,
     draft_cadence: cadence,
     default_rule: defaultRule,
@@ -269,8 +270,9 @@ function migrateHotGames(raw: Record<string, unknown>): HotGamesRuleConfig {
   let mapping = Array.isArray(rawMapping) ? rawMapping : d.time_mapping;
   if (mapping.length > validCount) mapping = mapping.slice(0, validCount);
   while (mapping.length < validCount) mapping = [...mapping, "00:00"];
+  // Note: legacy api_url field (if present in raw) is intentionally dropped.
+  // Hot Games now reads from shared BigQuery dataset via global env config.
   return {
-    api_url: (raw.api_url as string) ?? d.api_url,
     check_schedule: (raw.check_schedule as HotGamesRuleConfig["check_schedule"]) ?? d.check_schedule,
     source_window_minutes: validWindow,
     hot_games_count: validCount,
@@ -334,10 +336,14 @@ function BigWinCard({ rule, canEdit, onSaved }: { rule: AutomationRule; canEdit:
         {saveError && <div className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2"><p className="text-sm text-destructive">{saveError}</p></div>}
 
         <div>
-          <SectionLabel>Big Win API</SectionLabel>
-          <FieldRow label="Big Win API URL" hint="Used to fetch Big Win data for this brand.">
-            <TextInput value={cfg.api_url ?? ""} onChange={(v) => updateCfg("api_url", v || null)} placeholder="https://api.example.com/big-wins" disabled={disabled} />
-          </FieldRow>
+          <SectionLabel>Data Source</SectionLabel>
+          <div className="rounded-md border bg-muted/20 px-4 py-3 space-y-1 text-sm">
+            <p className="font-medium">
+              Source: <code className="text-xs bg-background px-1 py-0.5 rounded border">shared.game_rounds</code> ⋈ <code className="text-xs bg-background px-1 py-0.5 rounded border">shared.games</code> ⋈ <code className="text-xs bg-background px-1 py-0.5 rounded border">shared.users</code>
+            </p>
+            <p className="text-xs text-muted-foreground">Provided by platform team&apos;s BigQuery dataset (hourly sync, ~1h delay).</p>
+            <p className="text-xs text-muted-foreground">Connection configured globally via environment variables.</p>
+          </div>
         </div>
 
         <div>
@@ -715,10 +721,14 @@ function HotGamesCard({ rule, canEdit, onSaved }: { rule: AutomationRule; canEdi
         {saveError && <div className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2"><p className="text-sm text-destructive">{saveError}</p></div>}
 
         <div>
-          <SectionLabel>Hot Games API</SectionLabel>
-          <FieldRow label="Hot Games API URL" hint="Used to fetch the top-performing games.">
-            <TextInput value={cfg.api_url ?? ""} onChange={(v) => updateCfg("api_url", v || null)} placeholder="https://api.example.com/hot-games" disabled={disabled} />
-          </FieldRow>
+          <SectionLabel>Data Source</SectionLabel>
+          <div className="rounded-md border bg-muted/20 px-4 py-3 space-y-1 text-sm">
+            <p className="font-medium">
+              Source: <code className="text-xs bg-background px-1 py-0.5 rounded border">shared.game_rounds</code> (aggregated by game) ⋈ <code className="text-xs bg-background px-1 py-0.5 rounded border">shared.games</code>
+            </p>
+            <p className="text-xs text-muted-foreground">Provided by platform team&apos;s BigQuery dataset (hourly sync, ~1h delay).</p>
+            <p className="text-xs text-muted-foreground">Connection configured globally via environment variables.</p>
+          </div>
         </div>
 
         {/* Frozen snapshot notice */}
@@ -750,6 +760,9 @@ function HotGamesCard({ rule, canEdit, onSaved }: { rule: AutomationRule; canEdi
 
         <div>
           <SectionLabel>Source Processing</SectionLabel>
+          <p className="text-xs text-muted-foreground mb-3">
+            Data has a ~1-hour delay. The &quot;previous N minutes&quot; window is relative to the latest BQ sync timestamp, not wall-clock time.
+          </p>
           <FieldRow label="Source Window" hint="Get top-performing games from the previous selected number of minutes.">
             <Select value={String(cfg.source_window_minutes)} onValueChange={(v) => updateCfg("source_window_minutes", Number(v ?? 120) as HotGamesRuleConfig["source_window_minutes"])} disabled={disabled}>
               <SelectTrigger className="w-[130px]"><SelectValue /></SelectTrigger>
