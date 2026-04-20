@@ -7,6 +7,26 @@
 ## Done Tasks
 
 ### 2026-04-18
+- Task: Create Event form — field-level helper text + 3 examples per field
+  - Status: Complete
+  - Files changed:
+    - src/app/(app)/events/new/page.tsx — widened LabeledField hint type from string
+      to React.ReactNode. Added a small FieldHint component that renders one line of
+      helper text followed by a bulleted list of 3 short examples. Wired a FieldHint
+      into each of the 8 target fields.
+  - Fields now showing helper text + 3 examples (confirmed):
+    1. Theme
+    2. Objective
+    3. Rules
+    4. Reward
+    5. Target Audience
+    6. CTA
+    7. Tone
+    8. Notes for AI
+  - Sample Event Brief panel unchanged.
+  - Validation logic unchanged.
+  - No auto-fill — helpers are static text only.
+
 - Task: New Event page — Sample Brief guidance panel
   - Status: Complete
   - Files changed:

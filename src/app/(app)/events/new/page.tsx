@@ -98,7 +98,7 @@ function validate(data: FormData): FieldErrors {
 }
 
 function LabeledField({ label, required, error, hint, children }: {
-  label: string; required?: boolean; error?: string; hint?: string; children: React.ReactNode;
+  label: string; required?: boolean; error?: string; hint?: React.ReactNode; children: React.ReactNode;
 }) {
   return (
     <div className="space-y-1.5">
@@ -106,8 +106,21 @@ function LabeledField({ label, required, error, hint, children }: {
         {label}{required && <span className="ml-0.5 text-destructive">*</span>}
       </label>
       {children}
-      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+      {hint && (typeof hint === "string"
+        ? <p className="text-xs text-muted-foreground">{hint}</p>
+        : <div className="text-xs text-muted-foreground">{hint}</div>)}
       {error && <p className="text-xs text-destructive">{error}</p>}
+    </div>
+  );
+}
+
+function FieldHint({ text, examples }: { text: string; examples: string[] }) {
+  return (
+    <div className="space-y-1">
+      <p>{text}</p>
+      <ul className="ml-4 list-disc space-y-0.5 text-muted-foreground/80">
+        {examples.map((ex, i) => <li key={i}>{ex}</li>)}
+      </ul>
     </div>
   );
 }
@@ -225,7 +238,14 @@ export default function NewEventPage() {
               </SelectContent>
             </Select>
           </LabeledField>
-          <LabeledField label="Theme">
+          <LabeledField label="Theme" hint={<FieldHint
+            text="The creative angle or seasonal hook that shapes visuals and copy."
+            examples={[
+              "VIP Loyalty Appreciation",
+              "Lunar New Year Celebration",
+              "Summer Deposit Boost",
+            ]}
+          />}>
             <input type="text" value={form.theme} onChange={(e) => set("theme", e.target.value)}
               maxLength={255} placeholder="e.g. Summer Promotion" className={inputClass} disabled={submitting} />
           </LabeledField>
@@ -246,19 +266,40 @@ export default function NewEventPage() {
           </LabeledField>
         </div>
 
-        <LabeledField label="Objective">
+        <LabeledField label="Objective" hint={<FieldHint
+          text="What business outcome this event should drive."
+          examples={[
+            "Drive deposit volume over a 10-day summer window",
+            "Reward top VIPs and strengthen retention mid-month",
+            "Win back players who have not logged in for 30–90 days",
+          ]}
+        />}>
           <textarea value={form.objective} onChange={(e) => set("objective", e.target.value)}
             maxLength={1000} rows={3} placeholder="What is the goal of this event?" className={textareaClass} disabled={submitting} />
           <p className="text-xs text-muted-foreground text-right">{form.objective.length}/1000</p>
         </LabeledField>
 
-        <LabeledField label="Rules">
+        <LabeledField label="Rules" hint={<FieldHint
+          text="Eligibility, entry mechanics, and terms that gate who qualifies."
+          examples={[
+            "Single deposit of ₱1,000+ during the promo window. 20x wagering on slots.",
+            "Top 10 by total wagered bets from Mon 00:00 to Sun 23:59 win.",
+            "New accounts registered during the holiday week. One entry per person.",
+          ]}
+        />}>
           <textarea value={form.rules} onChange={(e) => set("rules", e.target.value)}
             maxLength={2000} rows={3} placeholder="Eligibility criteria, entry rules, terms…" className={textareaClass} disabled={submitting} />
           <p className="text-xs text-muted-foreground text-right">{form.rules.length}/2000</p>
         </LabeledField>
 
-        <LabeledField label="Reward">
+        <LabeledField label="Reward" hint={<FieldHint
+          text="What winners receive — cash, bonus, free spins, or prize pool breakdown."
+          examples={[
+            "50% deposit bonus up to ₱5,000",
+            "1st ₱50,000 · 2nd–3rd ₱20,000 · 4th–10th ₱5,000",
+            "₱300 no-deposit reactivation bonus + 50 free spins",
+          ]}
+        />}>
           <input type="text" value={form.reward} onChange={(e) => set("reward", e.target.value)}
             maxLength={500} placeholder="e.g. $500 bonus, Free spins" className={inputClass} disabled={submitting} />
         </LabeledField>
@@ -266,17 +307,38 @@ export default function NewEventPage() {
         {/* ─── Campaign Brief ─────────────────────────────────────── */}
         <SectionHeader title="Campaign Brief" />
 
-        <LabeledField label="Target Audience" hint="Who is this event for?">
+        <LabeledField label="Target Audience" hint={<FieldHint
+          text="Who the content should speak to. Be specific about segment + activity level."
+          examples={[
+            "VIP level 5+ players with a deposit in the last 30 days",
+            "Slot-focused players active in the last 14 days",
+            "Lapsed players with no activity in 30–90 days",
+          ]}
+        />}>
           <textarea value={form.target_audience} onChange={(e) => set("target_audience", e.target.value)}
             maxLength={500} rows={2} placeholder="e.g. VIP players, new depositors, all active players" className={textareaClass} disabled={submitting} />
         </LabeledField>
 
         <div className="grid grid-cols-2 gap-4">
-          <LabeledField label="CTA">
+          <LabeledField label="CTA" hint={<FieldHint
+            text="The primary action you want the reader to take."
+            examples={[
+              "Play now to climb the leaderboard",
+              "Deposit now and double your play",
+              "Claim your ₱300 — we miss you",
+            ]}
+          />}>
             <input type="text" value={form.cta} onChange={(e) => set("cta", e.target.value)}
               maxLength={200} placeholder="e.g. Deposit Now, Join Today" className={inputClass} disabled={submitting} />
           </LabeledField>
-          <LabeledField label="Tone">
+          <LabeledField label="Tone" hint={<FieldHint
+            text="The voice the copy should use."
+            examples={[
+              "Exclusive, premium, high-energy",
+              "Bright, summery, urgent without being pushy",
+              "Warm, personal, low-pressure",
+            ]}
+          />}>
             <input type="text" value={form.tone} onChange={(e) => set("tone", e.target.value)}
               maxLength={200} placeholder="e.g. Exciting, Urgent, Friendly" className={inputClass} disabled={submitting} />
           </LabeledField>
@@ -287,7 +349,14 @@ export default function NewEventPage() {
             onChange={(v) => set("platform_scope", v as string[])} disabled={submitting} />
         </LabeledField>
 
-        <LabeledField label="Notes for AI" hint="Additional instructions for AI content generation">
+        <LabeledField label="Notes for AI" hint={<FieldHint
+          text="Extra guidance that shapes how the AI writes the copy."
+          examples={[
+            "Use Filipino-English mix, keep wagering rules secondary to the headline",
+            "Lead with the no-deposit bonus, avoid deposit asks in the primary message",
+            "Treat like a product launch — game name and provider should dominate",
+          ]}
+        />}>
           <textarea value={form.notes_for_ai} onChange={(e) => set("notes_for_ai", e.target.value)}
             maxLength={2000} rows={3} placeholder="e.g. Use Filipino-English mix, highlight the 100x multiplier, avoid mentioning competitor brands…"
             className={textareaClass} disabled={submitting} />
