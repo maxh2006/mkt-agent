@@ -1,16 +1,22 @@
-import type { ManusDispatchPayload, ManusDispatchResult } from "./types";
+import type { ManusDispatchPayload, ManusDispatchResult, ManusErrorCode } from "./types";
 
 /**
  * dispatchToManus — handoff boundary between our dispatcher and the Manus worker.
  *
- * Current state: placeholder. If MANUS_AGENT_ENDPOINT is not set, logs the payload
- * and returns `{ accepted: true, dry_run: true }` so the rest of the pipeline can be
- * exercised without a live Manus. When the endpoint is configured, performs a POST
- * with MANUS_API_KEY as bearer auth.
+ * If MANUS_AGENT_ENDPOINT is not set, logs the payload and returns
+ * `{ accepted: true, dry_run: true }` so the rest of the pipeline can be
+ * exercised without a live Manus. When the endpoint is configured, performs
+ * a POST with MANUS_API_KEY as bearer auth.
  *
- * Contract (stable): given a ManusDispatchPayload, return a ManusDispatchResult.
- * The dispatcher MUST NOT look beyond this result — per-platform success/failure
- * arrives asynchronously via a future callback route (out of scope here).
+ * Contract (stable, finalized MVP protocol — see docs/00-architecture.md):
+ *   Request body:  ManusDispatchPayload
+ *   Response body on 2xx:  { accepted: true, external_ref?: string }
+ *   Response body on non-2xx (or thrown): mapped to
+ *     { accepted: false, error: string, error_code?: ManusErrorCode }
+ *
+ * Per-platform success/failure does NOT come from this response — it arrives
+ * asynchronously via the callback route (`POST /api/manus/callback`). This
+ * function only reports whether Manus accepted the job.
  */
 export async function dispatchToManus(payload: ManusDispatchPayload): Promise<ManusDispatchResult> {
   const endpoint = process.env.MANUS_AGENT_ENDPOINT;
@@ -35,24 +41,34 @@ export async function dispatchToManus(payload: ManusDispatchPayload): Promise<Ma
       body: JSON.stringify(payload),
     });
 
+    const body = (await res.json().catch(() => ({}))) as {
+      external_ref?: string;
+      error?: string;
+      error_code?: ManusErrorCode;
+    };
+
     if (!res.ok) {
-      const text = await res.text().catch(() => "");
       return {
         accepted: false,
         dry_run: false,
-        error: `Manus responded ${res.status}: ${text.slice(0, 200)}`,
+        error:
+          body.error ??
+          `Manus responded ${res.status}`,
+        error_code: body.error_code,
       };
     }
 
-    // The real Manus response shape is TBD. For now we extract an optional
-    // external_ref if present, otherwise just accept.
-    const body = (await res.json().catch(() => ({}))) as { external_ref?: string };
-    return { accepted: true, dry_run: false, external_ref: body.external_ref };
+    return {
+      accepted: true,
+      dry_run: false,
+      external_ref: body.external_ref,
+    };
   } catch (err) {
     return {
       accepted: false,
       dry_run: false,
       error: err instanceof Error ? err.message : "Manus handoff failed",
+      error_code: "NETWORK_ERROR",
     };
   }
 }

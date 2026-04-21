@@ -6,6 +6,7 @@ import { ok, Errors, sessionUser, assertCanApprove } from "@/lib/api";
 import { writeAuditLog, AuditAction } from "@/lib/audit";
 import { isValidTransition } from "@/lib/post-status";
 import { schedulePostSchema } from "@/lib/validations/post";
+import { ensureDeliveriesForPost } from "@/lib/manus/delivery-creator";
 
 /**
  * POST /api/posts/[id]/schedule
@@ -53,6 +54,10 @@ export async function POST(
       scheduled_at: scheduledAt,
     },
   });
+
+  await ensureDeliveriesForPost(
+    { id: updated.id, platform: updated.platform, scheduled_at: updated.scheduled_at },
+  );
 
   void writeAuditLog({
     brand_id: ctx.brand!.id,

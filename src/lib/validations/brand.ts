@@ -2,43 +2,53 @@ import { z } from "zod";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const optionalUrl = z
-  .string()
-  .max(2048)
-  .optional()
-  .or(z.literal(""));
+const optionalUrl = z.string().trim().max(2048).optional();
+const optionalText = (maxLen: number) => z.string().trim().max(maxLen).optional();
 
-const optionalHex = z
+const hex = z
   .string()
-  .regex(/^#[0-9a-fA-F]{6}$/, "Must be a hex color (e.g. #FF0000)")
-  .optional()
-  .or(z.literal(""));
+  .regex(/^#[0-9a-fA-F]{6}$/, "Must be a hex color (e.g. #FF0000)");
+const optionalHex = hex.optional();
 
-// ─── A. Basic Identity ─────────────────────────────────────────────────────────
+// ─── A. Basic Identity ────────────────────────────────────────────────────────
+//
+// Identity holds the brand's visible-name fields + colors. The Brand
+// Positioning Statement is surfaced in the Identity tab UI but stored under
+// `voice_settings_json.positioning` alongside other AI context fields — this
+// avoids a schema migration and keeps all AI inputs colocated.
+// Logo URLs moved to `design_settings_json.logos.{main,square,horizontal,vertical}`
+// for the same reason.
 
 export const brandIdentitySchema = z.object({
-  name: z.string().min(1, "Brand name is required").max(255),
-  domain: z.string().max(255).optional().or(z.literal("")),
-  logo_url: optionalUrl,
-  primary_color: optionalHex,
-  secondary_color: optionalHex,
-  accent_color: optionalHex,
+  name: z.string().trim().min(1, "Brand name is required").max(255),
+  domain: z.string().trim().min(1, "Domain is required").max(255),
+  primary_color: hex,
+  secondary_color: hex,
+  accent_color: hex,
   active: z.boolean().default(true),
 });
 
 export type BrandIdentity = z.infer<typeof brandIdentitySchema>;
 
 // ─── B. Integration Settings ──────────────────────────────────────────────────
+//
+// Architecture context (2026-04-21):
+// - Big Wins + Hot Games are backed by the SHARED BigQuery dataset (global,
+//   not per-brand). The fields here are for operator-facing source mapping
+//   notes only — not a full BigQuery config.
+// - Running Promotions still comes from a per-brand API (api_base_url +
+//   promo_list_endpoint).
+// Legacy fields `big_win_endpoint`, `hot_games_endpoint`, generic `notes`
+// are dropped from the form but left out of the schema — PATCH route
+// replaces the entire JSON blob on save, so old values naturally disappear.
 
 export const integrationSettingsSchema = z.object({
   integration_enabled: z.boolean().default(false),
   api_base_url: optionalUrl,
-  external_brand_code: z.string().max(100).optional().or(z.literal("")),
-  big_win_endpoint: z.string().max(500).optional().or(z.literal("")),
-  promo_list_endpoint: z.string().max(500).optional().or(z.literal("")),
+  external_brand_code: optionalText(100),
+  promo_list_endpoint: optionalText(500),
   tracking_link_base: optionalUrl,
-  hot_games_endpoint: z.string().max(500).optional().or(z.literal("")),
-  notes: z.string().max(2000).optional().or(z.literal("")),
+  source_mapping_notes: optionalText(2000),
 });
 
 export type IntegrationSettings = z.infer<typeof integrationSettingsSchema>;
@@ -47,11 +57,9 @@ export const DEFAULT_INTEGRATION_SETTINGS: IntegrationSettings = {
   integration_enabled: false,
   api_base_url: "",
   external_brand_code: "",
-  big_win_endpoint: "",
   promo_list_endpoint: "",
   tracking_link_base: "",
-  hot_games_endpoint: "",
-  notes: "",
+  source_mapping_notes: "",
 };
 
 // ─── C. Voice & Tone ──────────────────────────────────────────────────────────
@@ -73,22 +81,6 @@ export const CTA_STYLE_LABELS: Record<string, string> = {
   urgent: "Urgent — FOMO-driven",
 };
 
-export const LANGUAGE_STYLES = ["english_only", "mostly_english", "balanced_taglish", "mostly_taglish"] as const;
-export const LANGUAGE_STYLE_LABELS: Record<string, string> = {
-  english_only: "English only",
-  mostly_english: "Mostly English, some Tagalog",
-  balanced_taglish: "Balanced Taglish",
-  mostly_taglish: "Mostly Taglish",
-};
-
-export const TAGLISH_RATIOS = ["full_english", "mostly_english", "balanced", "mostly_taglish"] as const;
-export const TAGLISH_RATIO_LABELS: Record<string, string> = {
-  full_english: "Full English",
-  mostly_english: "Mostly English",
-  balanced: "Balanced mix",
-  mostly_taglish: "Mostly Taglish",
-};
-
 export const EMOJI_LEVELS = ["none", "minimal", "moderate", "heavy"] as const;
 export const EMOJI_LEVEL_LABELS: Record<string, string> = {
   none: "None",
@@ -97,74 +89,139 @@ export const EMOJI_LEVEL_LABELS: Record<string, string> = {
   heavy: "Heavy (emoji-forward)",
 };
 
+// Voice schema carries the AI base-profile for each brand.
+// - positioning: Brand Positioning Statement (surfaced in the Identity tab
+//   UI but stored here so the AI prompt builder finds it alongside other
+//   voice signals).
+// - language_style / language_style_sample: replace the old
+//   language_style/taglish_ratio enum pair. Free-text so operators can
+//   describe the exact mix they want; sample gives AI an imitation anchor.
+// - audience_persona + notes_for_ai: AI tone calibration + nuance bucket.
+// - banned_topics: category-level guardrails; sibling to banned_phrases
+//   (word-level).
 export const voiceSettingsSchema = z.object({
-  tone: z.enum(TONES).optional(),
-  cta_style: z.enum(CTA_STYLES).optional(),
-  language_style: z.enum(LANGUAGE_STYLES).optional(),
-  taglish_ratio: z.enum(TAGLISH_RATIOS).optional(),
-  emoji_level: z.enum(EMOJI_LEVELS).optional(),
-  banned_phrases: z.array(z.string().max(100)).max(50).optional(),
-  default_hashtags: z.array(z.string().max(100)).max(30).optional(),
+  positioning: z
+    .string()
+    .trim()
+    .min(50, "Positioning statement must be at least 50 characters")
+    .max(200, "Positioning statement must be at most 200 characters"),
+  tone: z.enum(TONES),
+  cta_style: z.enum(CTA_STYLES),
+  emoji_level: z.enum(EMOJI_LEVELS),
+  language_style: z
+    .string()
+    .trim()
+    .min(1, "Language style is required")
+    .max(200),
+  language_style_sample: z
+    .string()
+    .trim()
+    .min(1, "Language style sample is required")
+    .max(500),
+  audience_persona: z
+    .string()
+    .trim()
+    .min(1, "Audience persona is required")
+    .max(500),
+  notes_for_ai: z
+    .string()
+    .trim()
+    .min(1, "Notes for AI is required")
+    .max(1000),
+  banned_phrases: z.array(z.string().trim().min(1).max(100)).max(50).optional(),
+  banned_topics: z.array(z.string().trim().min(1).max(100)).max(30).optional(),
+  default_hashtags: z.array(z.string().trim().min(1).max(100)).max(30).optional(),
 });
 
 export type VoiceSettings = z.infer<typeof voiceSettingsSchema>;
 
 export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
+  positioning: "",
   tone: "casual",
   cta_style: "direct",
-  language_style: "mostly_english",
-  taglish_ratio: "mostly_english",
   emoji_level: "minimal",
+  language_style: "",
+  language_style_sample: "",
+  audience_persona: "",
+  notes_for_ai: "",
   banned_phrases: [],
+  banned_topics: [],
   default_hashtags: [],
 };
 
 // ─── D. Design Elements ───────────────────────────────────────────────────────
+//
+// Empty strings are NOT silently stored — fields are optional, not
+// ".or(literal(''))"-coerced. AI prompt builder should skip undefined/null
+// fields rather than shipping empty strings.
+
+export const brandLogosSchema = z.object({
+  main: z.string().trim().url().optional().or(z.literal("")),
+  square: z.string().trim().url().optional().or(z.literal("")),
+  horizontal: z.string().trim().url().optional().or(z.literal("")),
+  vertical: z.string().trim().url().optional().or(z.literal("")),
+}).partial();
+
+export const benchmarkAssetSchema = z.object({
+  id: z.string().min(1),
+  url: z.string().trim().min(1, "Asset URL is required").max(2048),
+  label: z.string().trim().max(200).optional(),
+  notes: z.string().trim().max(1000).optional(),
+});
+
+export type BenchmarkAsset = z.infer<typeof benchmarkAssetSchema>;
 
 export const designSettingsSchema = z.object({
-  design_theme_notes: z.string().max(2000).optional().or(z.literal("")),
-  preferred_visual_style: z.string().max(500).optional().or(z.literal("")),
-  headline_style: z.string().max(500).optional().or(z.literal("")),
-  button_style: z.string().max(500).optional().or(z.literal("")),
-  promo_text_style: z.string().max(500).optional().or(z.literal("")),
-  color_usage_notes: z.string().max(2000).optional().or(z.literal("")),
+  design_theme_notes: optionalText(2000),
+  preferred_visual_style: optionalText(500),
+  headline_style: optionalText(500),
+  button_style: optionalText(500),
+  promo_text_style: optionalText(500),
+  color_usage_notes: optionalText(2000),
+  logos: brandLogosSchema.optional(),
+  benchmark_assets: z.array(benchmarkAssetSchema).max(20).optional(),
 });
 
 export type DesignSettings = z.infer<typeof designSettingsSchema>;
+export type BrandLogos = z.infer<typeof brandLogosSchema>;
 
 export const DEFAULT_DESIGN_SETTINGS: DesignSettings = {
-  design_theme_notes: "",
-  preferred_visual_style: "",
-  headline_style: "",
-  button_style: "",
-  promo_text_style: "",
-  color_usage_notes: "",
+  design_theme_notes: undefined,
+  preferred_visual_style: undefined,
+  headline_style: undefined,
+  button_style: undefined,
+  promo_text_style: undefined,
+  color_usage_notes: undefined,
+  logos: { main: "", square: "", horizontal: "", vertical: "" },
+  benchmark_assets: [],
 };
 
 // ─── E. Sample Captions ───────────────────────────────────────────────────────
 
 export const sampleCaptionSchema = z.object({
   id: z.string().min(1),
-  title: z.string().max(200).optional().or(z.literal("")),
-  type: z.string().max(100).optional().or(z.literal("")),
-  text: z.string().max(5000),
-  notes: z.string().max(1000).optional().or(z.literal("")),
+  title: z.string().trim().min(1, "Title is required").max(200),
+  type: z.string().trim().max(100).optional(),
+  text: z.string().trim().min(1, "Caption text is required").max(5000),
+  notes: z.string().trim().max(1000).optional(),
 });
 
 export type SampleCaption = z.infer<typeof sampleCaptionSchema>;
 
 export const sampleCaptionsSchema = z.array(sampleCaptionSchema).max(50);
 
-// ─── Create / Update combined schemas ────────────────────────────────────────
+// ─── Create / Update combined schemas ─────────────────────────────────────────
 
 export const createBrandSchema = z.object({
   identity: brandIdentitySchema,
   integration: integrationSettingsSchema.optional(),
-  voice: voiceSettingsSchema.optional(),
+  voice: voiceSettingsSchema,
   design: designSettingsSchema.optional(),
   sample_captions: sampleCaptionsSchema.optional(),
 });
 
+// Updates allow partial identity (individual column tweaks) but voice
+// stays required-in-shape once you touch it.
 export const updateBrandSchema = z.object({
   identity: brandIdentitySchema.partial().optional(),
   integration: integrationSettingsSchema.optional(),

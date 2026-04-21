@@ -27,13 +27,26 @@ AI cannot:
 AI should receive small structured packets.
 Do not send full raw logs.
 
-Example concept:
-- brand context
+Context layers (base → override):
+1. **Brand Management** — the base AI profile for each brand, authored by
+   admin on the Brand Management page. Fields: `positioning`, `tone`,
+   `cta_style`, `emoji_level`, `language_style` + `language_style_sample`,
+   `audience_persona`, `notes_for_ai`, `banned_phrases[]`, `banned_topics[]`,
+   `default_hashtags[]`, `logos`, colors, design notes, sample captions.
+   All generation calls start from this layer.
+2. **Adhoc Event brief** — overrides the brand layer on conflict when the
+   post is event-derived. Fields: `theme`, `objective`, `rules`, `reward`,
+   `target_audience`, `cta`, `tone`, `platform_scope`, `notes_for_ai`,
+   `posting_instance_json`.
+
+Example packet shape:
+- brand context (from Brand Management, base layer)
 - post type
 - platform
 - source facts already computed by backend
-- tone preferences
-- CTA style
+- tone preferences (brand default, possibly overridden by event)
+- CTA style (brand default, possibly overridden by event)
+- (for event-derived posts) event brief layer
 
 ---
 
@@ -60,6 +73,9 @@ AI is never invoked at publish or retry time:
 - approval does not trigger regeneration
 - retry does not regenerate content
 - per-platform retry resends the same payload produced at generation/refinement time
+- the Manus callback route (`POST /api/manus/callback`) only updates delivery
+  rows and reconciles `Post.status` — it never calls the AI layer, regenerates
+  content, re-approves, or re-runs source logic
 
 Publishing failures (platform rejection, auth error, rate limit) surface in the
 delivery modal with readable error text. Operators retry at the platform level;
@@ -68,6 +84,17 @@ the AI layer is not re-entered.
 ---
 
 ## Content Queue Refinement Constraints
+
+Refinement is available ONLY in review-side statuses — **draft**,
+**pending_approval**, **rejected**. Once a post is approved (and therefore
+scheduled) its content is locked; refinement is not allowed in
+`scheduled` / `publishing` / `posted` / `partial` / `failed`. This is the
+MVP policy (see docs/06-workflows-roles.md). There is no Return to Review
+flow in MVP.
+
+Because content is locked after approval, the AI layer is never re-entered
+for an approved post — on retry, the same approved payload is resent
+without regeneration, and no approved-payload snapshot is needed.
 
 When an operator opens the Refine Post modal from Content Queue, refinement
 instructions may alter **visual style, tone, urgency, and presentation only**.

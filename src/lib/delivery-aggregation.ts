@@ -1,8 +1,6 @@
-import type { PlatformDelivery } from "@/lib/posts-api";
-
 /**
  * Aggregation rules from per-platform deliveries to post-level status.
- * Used for visibility and (later) by a backend reconciler.
+ * Used for visibility and by the backend callback reconciler.
  *
  * Rules:
  * - any delivery still publishing → post is `publishing`
@@ -10,6 +8,9 @@ import type { PlatformDelivery } from "@/lib/posts-api";
  * - all delivered `posted` → `posted`
  * - all delivered `failed` → `failed`
  * - mix of posted + failed (no in-flight) → `partial`
+ *
+ * Input is structural — pass Prisma rows directly from the server or the
+ * client-facing PlatformDelivery type; only `status` is read.
  */
 export type AggregatedPostStatus =
   | "scheduled"
@@ -19,7 +20,7 @@ export type AggregatedPostStatus =
   | "failed";
 
 export function computePostStatusFromDeliveries(
-  deliveries: PlatformDelivery[],
+  deliveries: Array<{ status: string }>,
 ): AggregatedPostStatus | null {
   if (deliveries.length === 0) return null;
 

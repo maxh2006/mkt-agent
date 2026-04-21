@@ -47,6 +47,9 @@ export const AuditAction = {
   POST_SCHEDULED: "post.scheduled",
   POST_PUBLISHED: "post.published",
 
+  // Deliveries (Manus publishing)
+  DELIVERY_RETRIED: "delivery.retried",
+
   // Channels
   CHANNEL_CREATED: "channel.created",
   CHANNEL_UPDATED: "channel.updated",

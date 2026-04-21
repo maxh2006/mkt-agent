@@ -57,6 +57,14 @@ Columns:
   (e.g. "Sample 1/3"). Siblings also share a thin colored left border for subtle visual grouping.
 
 Edit modal (renamed to "Refine Post"):
+- Available only for review-side statuses: **Draft**, **Pending Approval**,
+  **Rejected**. Approved posts are locked and cannot be refined in MVP
+  (see docs/06-workflows-roles.md for policy).
+- Row-level gating: the Refine action button is hidden on rows whose status
+  is outside the allow-list.
+- Modal-level gating: as a defense-in-depth, the modal itself detects
+  non-allowed statuses and renders a locked explainer panel
+  ("Approved posts cannot be refined in MVP…") instead of the refinement form.
 - Locked Context panel at the top shows source type, event title (if applicable), schedule summary,
   Hot Games snapshot summary (if applicable), and a source-specific reminder.
 - Instruction textarea + universal note: "You may refine visual style, tone, and presentation.
@@ -80,8 +88,13 @@ Delivery Status modal:
   retry_count on failure.
 - Retry button appears per failed row. A "Retry All Failed" footer button appears
   when more than one delivery has failed.
-- Retry resets a delivery to `queued` and bumps `retry_count`. It reuses the same
-  approved content payload — no regeneration, no re-approval.
+- Retry resets a delivery to `queued` with `scheduled_for = now()`, bumps
+  `retry_count`, clears `last_error`, and writes a `delivery.retried` audit
+  entry. It reuses the same approved content payload — no regeneration, no
+  re-approval. Cloud Scheduler picks up the requeued delivery on the next
+  dispatcher tick.
+- A short helper note under the deliveries table reinforces the same-payload
+  guarantee whenever there is at least one failed delivery.
 - When no delivery rows exist yet (post freshly scheduled, Manus hasn't dispatched),
   the modal shows an informational empty state.
 
@@ -172,16 +185,76 @@ Lightweight internal metrics only.
 Per-brand account connections and status.
 
 ### Brand Management
-Admin-only module. Shows a list of all brands with search and active/inactive filter.
-Each brand card shows: name, active status, domain, API base URL, integration badge, color swatches, last updated.
-"Add Brand" and "Edit" open a tabbed form dialog with five sections:
-- A. Identity — name, domain, logo_url, primary/secondary/accent colors, active toggle
-- B. Integration — integration_enabled, api_base_url, external_brand_code, big_win_endpoint, promo_list_endpoint, tracking_link_base, hot_games_endpoint, notes
-- C. Voice & Tone — tone, cta_style, language_style, taglish_ratio, emoji_level, banned_phrases, default_hashtags
-- D. Design — design_theme_notes, preferred_visual_style, headline_style, button_style, promo_text_style, color_usage_notes
-- E. Sample Captions — repeater of { title, type, text, notes }
+Admin-only module. Shows a list of all brands.
 
-Admin role only can create or edit brands. Non-admin roles are read-only (Brand Management page not shown in nav for non-admins — accessed via brand switcher only).
+**This page is the base AI profile for each brand.** Adhoc event briefs
+override brand rules when there is a conflict. A short callout at the top of
+the Add/Edit dialog restates this; the main page header says the same.
+
+Filters:
+- Search by name (server-side, case-insensitive)
+- Status (Select) — `Status: All` (default), `Status: Active`, `Status: Inactive`
+- Brand multi-select (DropdownMenu with checkbox rows) — default `All Brands`; multi-select narrows the visible list client-side
+
+Each brand card shows: name, active status, integration badge, positioning
+statement (truncated to 2 lines), domain, API base URL, color swatches,
+last updated.
+
+"Add Brand" and "Edit" open a tabbed form dialog with five tabs. Required
+fields are marked with `*`; the form jumps to the offending tab on validation
+error.
+
+- **A. Identity**
+  - Brand Name (required) — e.g. "Lucky Casino"
+  - Domain (required) — e.g. `luckycasino.com`
+  - Brand Positioning Statement (required, 50–200 chars) — single-sentence
+    positioning anchor used as the default rule on every AI generation call.
+    Stored in `voice_settings_json.positioning`.
+  - Logos — 4 slots (Main / Square / Horizontal / Vertical) with drag-and-drop
+    upload zones. Client-side validation: PNG only, ≥500×500, ≤5 MB. Previews
+    render from FileReader. **Direct file storage is not wired in this build**
+    — a URL text input under each zone is what actually persists. Helper
+    constraints callout + per-zone description explain the four intended uses.
+  - Brand Colors (required) — Primary / Secondary / Accent hex pickers with a
+    helper line explaining these drive brand identity, image design tone,
+    and CTA / emphasis / layout accents.
+  - Active brand toggle.
+- **B. Integration**
+  - Integration enabled toggle.
+  - **BigQuery Details** (callout explaining shared global source):
+    External Brand ID / Source Brand Code, Source Mapping Notes — both
+    optional. No per-brand BigQuery endpoints; Big Wins and Hot Games read
+    from the shared dataset.
+  - **API Details**: API Base URL, Promo List Endpoint (Running Promotions
+    still fetch per-brand from the brand's own API), Tracking Link Base URL.
+- **C. Voice & Tone** — the AI base rule. All required except the tag lists.
+  - Tone (Select, required)
+  - CTA Style (Select, required)
+  - Emoji Level (Select, required)
+  - Language Style (free text, required) — replaces old enum; describe the
+    exact mix (e.g. "Casual Taglish", "English only")
+  - Language Style Sample (required) — one sentence in the desired voice
+    the AI will imitate
+  - Audience Persona (required) — who the brand talks to
+  - Notes for AI (required) — nuance bucket for guidance that doesn't fit
+    above fields
+  - Banned Phrases (tag input) — word-level blocks
+  - Banned Topics (tag input) — category-level guardrails (new in 2026-04-21)
+  - Default Hashtags (tag input)
+- **D. Design**
+  - Six free-text notes: design theme, preferred visual style, headline style,
+    button / CTA style, promo text style, color usage notes. Empty strings
+    are no longer silently stored — unset fields are omitted from the JSON.
+  - Benchmark Assets repeater — upload banner samples / mascots / recurring
+    visual cues for AI image reference. Same upload-storage caveat as logos:
+    the URL input persists, drag-drop is preview-only in this build.
+- **E. Sample Captions** — repeater of `{ title, type, text, notes }`.
+  `title` and `text` are now **required**. A per-card Clone button copies an
+  existing caption as a template for faster entry.
+
+Admin role only can create or edit brands. Non-admin roles are read-only
+(Brand Management page not shown in nav for non-admins — accessed via brand
+switcher only).
 
 ### Users & Roles
 Simple role assignment with brand scope.

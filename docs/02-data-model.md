@@ -49,10 +49,11 @@ so renames can be absorbed in one place.
 - domain
 - active
 - settings_json (legacy, kept for compat)
-- integration_settings_json — api_base_url, external_brand_code, big_win_endpoint, promo_list_endpoint, tracking_link_base, hot_games_endpoint, integration_enabled, notes
-- voice_settings_json — tone, cta_style, language_style, taglish_ratio, emoji_level, banned_phrases, default_hashtags
-- design_settings_json — design_theme_notes, preferred_visual_style, headline_style, button_style, promo_text_style, color_usage_notes
-- sample_captions_json — array of { id, title, type, text, notes }
+- logo_url (legacy — superseded by design_settings_json.logos.main; kept as read-only fallback for brands created before 2026-04-21)
+- integration_settings_json — { integration_enabled, api_base_url, external_brand_code, promo_list_endpoint, tracking_link_base, source_mapping_notes }. Big Wins + Hot Games are sourced from the shared global BigQuery dataset (not per-brand), so there are no per-brand BQ endpoint fields. Legacy fields `big_win_endpoint`, `hot_games_endpoint`, and generic `notes` are dropped on save.
+- voice_settings_json — { positioning, tone, cta_style, emoji_level, language_style (free text), language_style_sample, audience_persona, notes_for_ai, banned_phrases[], banned_topics[], default_hashtags[] }. **This is the brand's base AI profile.** `positioning` is surfaced in the Identity tab UI but stored here alongside other AI context. Legacy enum `taglish_ratio` is dropped on save; legacy `language_style` enum values are preserved as free-text strings.
+- design_settings_json — { design_theme_notes, preferred_visual_style, headline_style, button_style, promo_text_style, color_usage_notes, logos: { main, square, horizontal, vertical }, benchmark_assets: [{ id, url, label?, notes? }] }. Logo URLs replace the legacy top-level `logo_url`. Empty-string fallbacks are no longer written — unset fields are omitted from the JSON so the AI prompt builder skips them cleanly.
+- sample_captions_json — array of { id, title, type, text, notes }. `title` and `text` are required.
 - created_at
 - updated_at
 
@@ -226,15 +227,35 @@ transitions `pending_approval` directly to `scheduled`. Existing DB rows with
 `20260421200000_approved_to_scheduled`.
 
 ### delivery_status (new)
-- queued
-- scheduled
-- publishing
-- posted
-- failed
+- queued — immediate delivery, eligible for the next dispatcher pass
+- scheduled — future delivery, waiting for `scheduled_for` to pass
+- publishing — dispatcher has claimed it and handed payload to Manus
+- posted — Manus reported platform success
+- failed — Manus reported platform failure; operator can retry (resets to queued)
 
 ### post_platform_deliveries (new)
-Per-platform delivery record for a Post. Written when a publish job is dispatched
-to Manus. Retried at the platform level without regenerating content.
+Per-platform delivery record for a Post. Created when a post enters the
+delivery lifecycle (approve / schedule) via
+`src/lib/manus/delivery-creator.ts#ensureDeliveriesForPost()`. Retried at the
+platform level without regenerating content.
+
+`last_error` storage: on failed callbacks the callback route formats it as
+`"[CODE] human message"` when Manus sends `error_code`, otherwise verbatim
+message. Canonical codes (`ManusErrorCode`) live in `src/lib/manus/types.ts`
+and are documented in `docs/00-architecture.md` under "Manus protocol —
+finalized contract". No separate `error_code` DB column in MVP.
+
+`external_ref` (Manus-side job reference) is NOT persisted in MVP — it
+flows through the dispatch response and (optionally) callback for log
+correlation only. `external_post_id` (platform-side post id) IS persisted,
+set on the first successful `posted` callback.
+
+Initial status depends on `scheduled_for`:
+- `scheduled_for <= now` → `queued` (picked up on the next dispatcher pass)
+- `scheduled_for > now`  → `scheduled` (waits; the dispatcher claims both
+  `queued` and `scheduled` rows whose `scheduled_for` has arrived)
+
+Idempotent creation: unique `(post_id, platform)` + `createMany({ skipDuplicates: true })`.
 - id
 - post_id (FK to posts, cascade delete)
 - platform (Platform enum)

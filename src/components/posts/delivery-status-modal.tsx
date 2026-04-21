@@ -127,11 +127,12 @@ export function DeliveryStatusModal({ postId, open, onClose }: DeliveryStatusMod
               <p className="text-sm text-muted-foreground">No delivery records yet.</p>
               <p className="text-xs text-muted-foreground/80">
                 {targetPlatform
-                  ? `This post targets ${targetPlatform}. Per-platform delivery rows appear when Manus begins publishing.`
-                  : "Per-platform delivery rows appear when Manus begins publishing."}
+                  ? `This post targets ${targetPlatform}. Delivery rows are created at approval; this post has not been approved yet.`
+                  : "Delivery rows are created at approval; this post has not been approved yet."}
               </p>
             </div>
           ) : (
+            <>
             <div className="rounded-md border overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="bg-muted/40">
@@ -187,6 +188,14 @@ export function DeliveryStatusModal({ postId, open, onClose }: DeliveryStatusMod
                 </tbody>
               </table>
             </div>
+            {anyFailed && (
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                Retry resends the same approved content to the failed platform.
+                It does not regenerate content or require re-approval. Manus
+                reattempts on the next dispatcher tick.
+              </p>
+            )}
+            </>
           )}
         </div>
 

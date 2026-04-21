@@ -1,6 +1,6 @@
 "use client";
 
-import { cloneElement, useState, useId } from "react";
+import { cloneElement, useState, useId, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import { brandsApi, type Brand } from "@/lib/brands-api";
@@ -10,13 +10,13 @@ import {
   DEFAULT_DESIGN_SETTINGS,
   TONES, TONE_LABELS,
   CTA_STYLES, CTA_STYLE_LABELS,
-  LANGUAGE_STYLES, LANGUAGE_STYLE_LABELS,
-  TAGLISH_RATIOS, TAGLISH_RATIO_LABELS,
   EMOJI_LEVELS, EMOJI_LEVEL_LABELS,
   type IntegrationSettings,
   type VoiceSettings,
   type DesignSettings,
   type SampleCaption,
+  type BenchmarkAsset,
+  type BrandLogos,
 } from "@/lib/validations/brand";
 import { Button } from "@/components/ui/button";
 import {
@@ -34,6 +34,13 @@ import {
 } from "@/components/ui/select";
 import { Plus, Pencil, Globe, Plug, Palette, X, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  LogoUploadZone,
+  LogoUploadConstraints,
+  LOGO_SLOTS,
+} from "@/components/brands/logo-upload-zone";
+import { BenchmarkAssets } from "@/components/brands/benchmark-assets";
+import { BrandMultiselect } from "@/components/brands/brand-multiselect";
 
 // ─── Permission ───────────────────────────────────────────────────────────────
 
@@ -51,6 +58,10 @@ function formatDate(iso: string) {
   });
 }
 
+// Read-tolerant coercions: accept old shape (logo_url top-level,
+// taglish_ratio, big_win_endpoint, hot_games_endpoint, generic `notes`)
+// and map it onto the new shape so existing brands continue to open.
+
 function coerceIntegration(raw: unknown): IntegrationSettings {
   if (!raw || typeof raw !== "object") return { ...DEFAULT_INTEGRATION_SETTINGS };
   const r = raw as Record<string, unknown>;
@@ -58,31 +69,64 @@ function coerceIntegration(raw: unknown): IntegrationSettings {
     integration_enabled: Boolean(r.integration_enabled ?? false),
     api_base_url: String(r.api_base_url ?? ""),
     external_brand_code: String(r.external_brand_code ?? ""),
-    big_win_endpoint: String(r.big_win_endpoint ?? ""),
     promo_list_endpoint: String(r.promo_list_endpoint ?? ""),
     tracking_link_base: String(r.tracking_link_base ?? ""),
-    hot_games_endpoint: String(r.hot_games_endpoint ?? ""),
-    notes: String(r.notes ?? ""),
+    source_mapping_notes: String(r.source_mapping_notes ?? r.notes ?? ""),
   };
 }
 
 function coerceVoice(raw: unknown): VoiceSettings {
   if (!raw || typeof raw !== "object") return { ...DEFAULT_VOICE_SETTINGS };
   const r = raw as Record<string, unknown>;
+
+  // Legacy: language_style used to be an enum. Keep whatever string is
+  // there; operator can refine to the new freeform format on first save.
+  const legacyLanguage = typeof r.language_style === "string" ? r.language_style : "";
+
   return {
+    positioning: String(r.positioning ?? ""),
     tone: (r.tone as VoiceSettings["tone"]) ?? DEFAULT_VOICE_SETTINGS.tone,
     cta_style: (r.cta_style as VoiceSettings["cta_style"]) ?? DEFAULT_VOICE_SETTINGS.cta_style,
-    language_style: (r.language_style as VoiceSettings["language_style"]) ?? DEFAULT_VOICE_SETTINGS.language_style,
-    taglish_ratio: (r.taglish_ratio as VoiceSettings["taglish_ratio"]) ?? DEFAULT_VOICE_SETTINGS.taglish_ratio,
     emoji_level: (r.emoji_level as VoiceSettings["emoji_level"]) ?? DEFAULT_VOICE_SETTINGS.emoji_level,
+    language_style: legacyLanguage,
+    language_style_sample: String(r.language_style_sample ?? ""),
+    audience_persona: String(r.audience_persona ?? ""),
+    notes_for_ai: String(r.notes_for_ai ?? ""),
     banned_phrases: Array.isArray(r.banned_phrases) ? (r.banned_phrases as string[]) : [],
+    banned_topics: Array.isArray(r.banned_topics) ? (r.banned_topics as string[]) : [],
     default_hashtags: Array.isArray(r.default_hashtags) ? (r.default_hashtags as string[]) : [],
   };
 }
 
-function coerceDesign(raw: unknown): DesignSettings {
-  if (!raw || typeof raw !== "object") return { ...DEFAULT_DESIGN_SETTINGS };
-  const r = raw as Record<string, unknown>;
+interface DesignFormState {
+  design_theme_notes: string;
+  preferred_visual_style: string;
+  headline_style: string;
+  button_style: string;
+  promo_text_style: string;
+  color_usage_notes: string;
+  logos: { main: string; square: string; horizontal: string; vertical: string };
+  benchmark_assets: BenchmarkAsset[];
+}
+
+function coerceDesign(raw: unknown, legacyLogoUrl: string | null): DesignFormState {
+  const r = (raw && typeof raw === "object") ? (raw as Record<string, unknown>) : {};
+  const rawLogos = (r.logos && typeof r.logos === "object") ? (r.logos as Record<string, unknown>) : {};
+  // One-way migration: surface the legacy top-level logo_url column as
+  // design.logos.main if that slot isn't already filled.
+  const mainFromLogos = String(rawLogos.main ?? "");
+  const mergedMain = mainFromLogos || legacyLogoUrl || "";
+
+  const assetsRaw = Array.isArray(r.benchmark_assets) ? (r.benchmark_assets as Array<Record<string, unknown>>) : [];
+  const benchmark_assets: BenchmarkAsset[] = assetsRaw
+    .filter((a) => typeof a.url === "string" && a.url.trim().length > 0)
+    .map((a, idx) => ({
+      id: typeof a.id === "string" && a.id ? a.id : `legacy-${idx}`,
+      url: String(a.url),
+      label: typeof a.label === "string" ? a.label : "",
+      notes: typeof a.notes === "string" ? a.notes : "",
+    }));
+
   return {
     design_theme_notes: String(r.design_theme_notes ?? ""),
     preferred_visual_style: String(r.preferred_visual_style ?? ""),
@@ -90,23 +134,92 @@ function coerceDesign(raw: unknown): DesignSettings {
     button_style: String(r.button_style ?? ""),
     promo_text_style: String(r.promo_text_style ?? ""),
     color_usage_notes: String(r.color_usage_notes ?? ""),
+    logos: {
+      main: mergedMain,
+      square: String(rawLogos.square ?? ""),
+      horizontal: String(rawLogos.horizontal ?? ""),
+      vertical: String(rawLogos.vertical ?? ""),
+    },
+    benchmark_assets,
   };
 }
 
 function coerceCaptions(raw: unknown): SampleCaption[] {
-  return Array.isArray(raw)
-    ? (raw as SampleCaption[]).filter((c) => c && typeof c.text === "string")
-    : [];
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((c): c is Record<string, unknown> => !!c && typeof c === "object")
+    .map((c, idx) => ({
+      id: typeof c.id === "string" && c.id ? c.id : `legacy-${idx}`,
+      title: typeof c.title === "string" ? c.title : "",
+      type: typeof c.type === "string" ? c.type : "",
+      text: typeof c.text === "string" ? c.text : "",
+      notes: typeof c.notes === "string" ? c.notes : "",
+    }));
+}
+
+// Turn a form-state DesignFormState (all strings) into the on-wire shape
+// for the API. Empty strings become undefined so the AI prompt builder
+// doesn't receive meaningless blanks.
+function designToPayload(d: DesignFormState): DesignSettings {
+  const logos: BrandLogos = {};
+  if (d.logos.main.trim()) logos.main = d.logos.main.trim();
+  if (d.logos.square.trim()) logos.square = d.logos.square.trim();
+  if (d.logos.horizontal.trim()) logos.horizontal = d.logos.horizontal.trim();
+  if (d.logos.vertical.trim()) logos.vertical = d.logos.vertical.trim();
+
+  const strOrUndef = (s: string) => (s.trim() ? s.trim() : undefined);
+  const cleanedAssets = d.benchmark_assets
+    .filter((a) => a.url.trim().length > 0)
+    .map((a) => ({
+      id: a.id,
+      url: a.url.trim(),
+      label: strOrUndef(a.label ?? ""),
+      notes: strOrUndef(a.notes ?? ""),
+    }));
+
+  return {
+    design_theme_notes: strOrUndef(d.design_theme_notes),
+    preferred_visual_style: strOrUndef(d.preferred_visual_style),
+    headline_style: strOrUndef(d.headline_style),
+    button_style: strOrUndef(d.button_style),
+    promo_text_style: strOrUndef(d.promo_text_style),
+    color_usage_notes: strOrUndef(d.color_usage_notes),
+    logos: Object.keys(logos).length > 0 ? logos : undefined,
+    benchmark_assets: cleanedAssets.length > 0 ? cleanedAssets : undefined,
+  };
+}
+
+function integrationToPayload(i: IntegrationSettings): IntegrationSettings {
+  const strOrUndef = (s: string | undefined) => (s && s.trim() ? s.trim() : undefined);
+  return {
+    integration_enabled: i.integration_enabled,
+    api_base_url: strOrUndef(i.api_base_url),
+    external_brand_code: strOrUndef(i.external_brand_code),
+    promo_list_endpoint: strOrUndef(i.promo_list_endpoint),
+    tracking_link_base: strOrUndef(i.tracking_link_base),
+    source_mapping_notes: strOrUndef(i.source_mapping_notes),
+  };
 }
 
 // ─── Small shared UI pieces ───────────────────────────────────────────────────
 
-function FieldLabel({ children, required }: { children: React.ReactNode; required?: boolean }) {
+function FieldLabel({
+  children,
+  required,
+  hint,
+}: {
+  children: React.ReactNode;
+  required?: boolean;
+  hint?: string;
+}) {
   return (
-    <label className="text-sm font-medium">
-      {children}
-      {required && <span className="ml-0.5 text-destructive">*</span>}
-    </label>
+    <div className="space-y-0.5">
+      <label className="text-sm font-medium">
+        {children}
+        {required && <span className="ml-0.5 text-destructive">*</span>}
+      </label>
+      {hint && <p className="text-xs text-muted-foreground leading-relaxed">{hint}</p>}
+    </div>
   );
 }
 
@@ -150,7 +263,7 @@ function IntegrationBadge({ enabled }: { enabled: boolean }) {
   );
 }
 
-// ─── Tag input (banned phrases / default hashtags) ────────────────────────────
+// ─── Tag input (banned phrases / banned topics / default hashtags) ────────────
 
 function TagInput({
   value,
@@ -219,15 +332,17 @@ function ColorField({
   value,
   onChange,
   disabled,
+  required,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   disabled?: boolean;
+  required?: boolean;
 }) {
   return (
     <div className="space-y-1">
-      <FieldLabel>{label}</FieldLabel>
+      <FieldLabel required={required}>{label}</FieldLabel>
       <div className="flex items-center gap-2">
         <input
           type="color"
@@ -244,16 +359,6 @@ function ColorField({
           maxLength={7}
           disabled={disabled}
         />
-        {value && (
-          <button
-            type="button"
-            onClick={() => onChange("")}
-            disabled={disabled}
-            className="text-muted-foreground hover:text-foreground"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        )}
       </div>
     </div>
   );
@@ -266,14 +371,13 @@ type TabId = "identity" | "integration" | "voice" | "design" | "captions";
 interface FormState {
   name: string;
   domain: string;
-  logo_url: string;
   primary_color: string;
   secondary_color: string;
   accent_color: string;
   active: boolean;
   integration: IntegrationSettings;
   voice: VoiceSettings;
-  design: DesignSettings;
+  design: DesignFormState;
   captions: SampleCaption[];
 }
 
@@ -281,14 +385,22 @@ function emptyForm(): FormState {
   return {
     name: "",
     domain: "",
-    logo_url: "",
     primary_color: "",
     secondary_color: "",
     accent_color: "",
     active: true,
     integration: { ...DEFAULT_INTEGRATION_SETTINGS },
     voice: { ...DEFAULT_VOICE_SETTINGS },
-    design: { ...DEFAULT_DESIGN_SETTINGS },
+    design: {
+      design_theme_notes: "",
+      preferred_visual_style: "",
+      headline_style: "",
+      button_style: "",
+      promo_text_style: "",
+      color_usage_notes: "",
+      logos: { main: "", square: "", horizontal: "", vertical: "" },
+      benchmark_assets: [],
+    },
     captions: [],
   };
 }
@@ -297,14 +409,13 @@ function brandToForm(b: Brand): FormState {
   return {
     name: b.name,
     domain: b.domain ?? "",
-    logo_url: b.logo_url ?? "",
     primary_color: b.primary_color ?? "",
     secondary_color: b.secondary_color ?? "",
     accent_color: b.accent_color ?? "",
     active: b.active,
     integration: coerceIntegration(b.integration_settings_json),
     voice: coerceVoice(b.voice_settings_json),
-    design: coerceDesign(b.design_settings_json),
+    design: coerceDesign(b.design_settings_json, b.logo_url),
     captions: coerceCaptions(b.sample_captions_json),
   };
 }
@@ -338,28 +449,44 @@ function BrandFormDialog({
     setForm((f) => ({ ...f, [key]: value }));
   }
 
-  function setIntegration(key: keyof IntegrationSettings, value: unknown) {
+  function setIntegration<K extends keyof IntegrationSettings>(key: K, value: IntegrationSettings[K]) {
     setForm((f) => ({ ...f, integration: { ...f.integration, [key]: value } }));
   }
 
-  function setVoice(key: keyof VoiceSettings, value: unknown) {
+  function setVoice<K extends keyof VoiceSettings>(key: K, value: VoiceSettings[K]) {
     setForm((f) => ({ ...f, voice: { ...f.voice, [key]: value } }));
   }
 
-  function setDesign(key: keyof DesignSettings, value: string) {
+  function setDesignText<K extends keyof Omit<DesignFormState, "logos" | "benchmark_assets">>(key: K, value: string) {
     setForm((f) => ({ ...f, design: { ...f.design, [key]: value } }));
+  }
+
+  function setLogo(key: keyof DesignFormState["logos"], value: string) {
+    setForm((f) => ({
+      ...f,
+      design: { ...f.design, logos: { ...f.design.logos, [key]: value } },
+    }));
+  }
+
+  function setBenchmarkAssets(value: BenchmarkAsset[]) {
+    setForm((f) => ({ ...f, design: { ...f.design, benchmark_assets: value } }));
   }
 
   // Sample captions helpers
   function addCaption() {
-    const newCaption: SampleCaption = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      title: "",
-      type: "",
-      text: "",
-      notes: "",
-    };
-    setForm((f) => ({ ...f, captions: [...f.captions, newCaption] }));
+    setForm((f) => ({
+      ...f,
+      captions: [
+        ...f.captions,
+        {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          title: "",
+          type: "",
+          text: "",
+          notes: "",
+        },
+      ],
+    }));
   }
 
   function updateCaption(idx: number, key: keyof SampleCaption, value: string) {
@@ -374,25 +501,86 @@ function BrandFormDialog({
     setForm((f) => ({ ...f, captions: f.captions.filter((_, i) => i !== idx) }));
   }
 
+  function cloneCaption(idx: number) {
+    setForm((f) => {
+      const src = f.captions[idx];
+      if (!src) return f;
+      return {
+        ...f,
+        captions: [
+          ...f.captions,
+          {
+            ...src,
+            id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            title: src.title ? `${src.title} (copy)` : "",
+          },
+        ],
+      };
+    });
+  }
+
+  // Validation — surface the first violation and jump to its tab.
+  function validateAndJump(): string | null {
+    const v = form;
+    // Identity
+    if (!v.name.trim()) { setTab("identity"); return "Brand name is required"; }
+    if (!v.domain.trim()) { setTab("identity"); return "Domain is required"; }
+    const hexRe = /^#[0-9a-fA-F]{6}$/;
+    if (!hexRe.test(v.primary_color)) { setTab("identity"); return "Primary color must be a hex (e.g. #FF0000)"; }
+    if (!hexRe.test(v.secondary_color)) { setTab("identity"); return "Secondary color must be a hex"; }
+    if (!hexRe.test(v.accent_color)) { setTab("identity"); return "Accent color must be a hex"; }
+    const positioning = v.voice.positioning.trim();
+    if (positioning.length < 50) { setTab("identity"); return "Brand Positioning Statement must be at least 50 characters"; }
+    if (positioning.length > 200) { setTab("identity"); return "Brand Positioning Statement must be at most 200 characters"; }
+    // Voice
+    if (!v.voice.tone) { setTab("voice"); return "Tone is required"; }
+    if (!v.voice.cta_style) { setTab("voice"); return "CTA Style is required"; }
+    if (!v.voice.emoji_level) { setTab("voice"); return "Emoji Level is required"; }
+    if (!v.voice.language_style.trim()) { setTab("voice"); return "Language Style is required"; }
+    if (!v.voice.language_style_sample.trim()) { setTab("voice"); return "Language Style Sample is required"; }
+    if (!v.voice.audience_persona.trim()) { setTab("voice"); return "Audience Persona is required"; }
+    if (!v.voice.notes_for_ai.trim()) { setTab("voice"); return "Notes for AI is required"; }
+    // Captions — title required when caption exists
+    for (let i = 0; i < v.captions.length; i++) {
+      const c = v.captions[i];
+      if (!c.title?.trim()) { setTab("captions"); return `Sample caption ${i + 1}: title is required`; }
+      if (!c.text.trim()) { setTab("captions"); return `Sample caption ${i + 1}: caption text is required`; }
+    }
+    return null;
+  }
+
   async function handleSave() {
-    if (!form.name.trim()) { setError("Brand name is required"); setTab("identity"); return; }
+    const problem = validateAndJump();
+    if (problem) { setError(problem); return; }
     setSaving(true);
     setError(null);
     try {
       const payload = {
         identity: {
           name: form.name.trim(),
-          domain: form.domain || undefined,
-          logo_url: form.logo_url || undefined,
-          primary_color: form.primary_color || undefined,
-          secondary_color: form.secondary_color || undefined,
-          accent_color: form.accent_color || undefined,
+          domain: form.domain.trim(),
+          primary_color: form.primary_color,
+          secondary_color: form.secondary_color,
+          accent_color: form.accent_color,
           active: form.active,
         },
-        integration: form.integration,
-        voice: form.voice,
-        design: form.design,
-        sample_captions: form.captions,
+        integration: integrationToPayload(form.integration),
+        voice: {
+          ...form.voice,
+          positioning: form.voice.positioning.trim(),
+          language_style: form.voice.language_style.trim(),
+          language_style_sample: form.voice.language_style_sample.trim(),
+          audience_persona: form.voice.audience_persona.trim(),
+          notes_for_ai: form.voice.notes_for_ai.trim(),
+        },
+        design: designToPayload(form.design),
+        sample_captions: form.captions.map((c) => ({
+          ...c,
+          title: (c.title ?? "").trim(),
+          text: c.text.trim(),
+          type: c.type?.trim() || undefined,
+          notes: c.notes?.trim() || undefined,
+        })),
       };
       if (brand) {
         await brandsApi.update(brand.id, payload);
@@ -416,6 +604,14 @@ function BrandFormDialog({
     { id: "captions", label: "Sample Captions" },
   ];
 
+  const voiceDropdowns = [
+    { key: "tone" as const, label: "Tone", options: TONES, labels: TONE_LABELS },
+    { key: "cta_style" as const, label: "CTA Style", options: CTA_STYLES, labels: CTA_STYLE_LABELS },
+    { key: "emoji_level" as const, label: "Emoji Level", options: EMOJI_LEVELS, labels: EMOJI_LEVEL_LABELS },
+  ];
+
+  const positioningLen = form.voice.positioning.trim().length;
+
   return (
     <>
       {/* Trigger rendered outside Dialog to avoid nested-button issues (Base UI) */}
@@ -426,6 +622,11 @@ function BrandFormDialog({
           <DialogHeader>
             <DialogTitle>{brand ? `Edit — ${brand.name}` : "Add Brand"}</DialogTitle>
           </DialogHeader>
+
+          {/* AI precedence note */}
+          <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-1.5 text-xs text-muted-foreground shrink-0">
+            These settings form the <span className="font-medium text-foreground">base AI profile</span> for this brand. Adhoc Event briefs override brand rules on conflict.
+          </div>
 
           {/* Tab bar */}
           <div className="flex gap-0.5 border-b overflow-x-auto shrink-0">
@@ -452,42 +653,94 @@ function BrandFormDialog({
 
               {/* ── A. Identity ── */}
               {tab === "identity" && (
-                <div className="space-y-4">
-                  <div className="space-y-1">
-                    <FieldLabel required>Brand Name</FieldLabel>
-                    <input
-                      className={inputCls}
-                      value={form.name}
-                      onChange={(e) => set("name", e.target.value)}
-                      placeholder="e.g. Lucky Casino PH"
-                      disabled={saving}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <FieldLabel>Domain</FieldLabel>
-                    <input
-                      className={inputCls}
-                      value={form.domain}
-                      onChange={(e) => set("domain", e.target.value)}
-                      placeholder="e.g. luckycasino.ph"
-                      disabled={saving}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <FieldLabel>Logo URL</FieldLabel>
-                    <input
-                      className={inputCls}
-                      value={form.logo_url}
-                      onChange={(e) => set("logo_url", e.target.value)}
-                      placeholder="https://..."
-                      disabled={saving}
-                    />
+                <div className="space-y-5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <FieldLabel required>Brand Name</FieldLabel>
+                      <input
+                        className={inputCls}
+                        value={form.name}
+                        onChange={(e) => set("name", e.target.value)}
+                        placeholder="e.g. Lucky Casino"
+                        disabled={saving}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <FieldLabel required>Domain</FieldLabel>
+                      <input
+                        className={inputCls}
+                        value={form.domain}
+                        onChange={(e) => set("domain", e.target.value)}
+                        placeholder="e.g. luckycasino.com"
+                        disabled={saving}
+                      />
+                    </div>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-4">
-                    <ColorField label="Primary Color" value={form.primary_color} onChange={(v) => set("primary_color", v)} disabled={saving} />
-                    <ColorField label="Secondary Color" value={form.secondary_color} onChange={(v) => set("secondary_color", v)} disabled={saving} />
-                    <ColorField label="Accent Color" value={form.accent_color} onChange={(v) => set("accent_color", v)} disabled={saving} />
+                  <div className="space-y-1">
+                    <FieldLabel
+                      required
+                      hint="Single-sentence positioning anchor used as the default rule for every AI generation call. 50–200 characters."
+                    >
+                      Brand Positioning Statement
+                    </FieldLabel>
+                    <textarea
+                      className={textareaCls}
+                      rows={2}
+                      value={form.voice.positioning}
+                      onChange={(e) => setVoice("positioning", e.target.value)}
+                      placeholder="e.g. Premium gaming platform for millennials"
+                      disabled={saving}
+                    />
+                    <p className={cn(
+                      "text-xs",
+                      positioningLen > 0 && (positioningLen < 50 || positioningLen > 200)
+                        ? "text-destructive"
+                        : "text-muted-foreground",
+                    )}>
+                      {positioningLen} / 200 characters {positioningLen > 0 && positioningLen < 50 && "(min 50)"}
+                    </p>
+                  </div>
+
+                  {/* Logos */}
+                  <div className="space-y-3">
+                    <div>
+                      <p className="text-sm font-medium">Logos</p>
+                      <p className="text-xs text-muted-foreground">
+                        Upload four logo formats so the AI can pick the right layout per placement.
+                      </p>
+                    </div>
+                    <LogoUploadConstraints />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {LOGO_SLOTS.map((slot) => (
+                        <LogoUploadZone
+                          key={slot.key}
+                          label={slot.label}
+                          helperText={slot.helper}
+                          value={form.design.logos[slot.key]}
+                          onChange={(url) => setLogo(slot.key, url)}
+                          disabled={saving}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Colors */}
+                  <div className="space-y-2">
+                    <div className="flex items-start gap-2">
+                      <Palette className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                      <div>
+                        <p className="text-sm font-medium">Brand Colors</p>
+                        <p className="text-xs text-muted-foreground">
+                          Define brand identity, the design tone of generated images, and CTA / emphasis / layout accents.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-4">
+                      <ColorField label="Primary" required value={form.primary_color} onChange={(v) => set("primary_color", v)} disabled={saving} />
+                      <ColorField label="Secondary" required value={form.secondary_color} onChange={(v) => set("secondary_color", v)} disabled={saving} />
+                      <ColorField label="Accent" required value={form.accent_color} onChange={(v) => set("accent_color", v)} disabled={saving} />
+                    </div>
                   </div>
 
                   <div className="flex items-center gap-3">
@@ -503,7 +756,7 @@ function BrandFormDialog({
                       Active brand
                     </label>
                     <span className="text-xs text-muted-foreground">
-                      Inactive brands are hidden from the brand switcher
+                      Inactive brands are hidden from the brand switcher.
                     </span>
                   </div>
                 </div>
@@ -511,7 +764,7 @@ function BrandFormDialog({
 
               {/* ── B. Integration ── */}
               {tab === "integration" && (
-                <div className="space-y-4">
+                <div className="space-y-5">
                   <div className="flex items-center gap-3">
                     <label className="flex items-center gap-2 cursor-pointer select-none text-sm font-medium">
                       <input
@@ -525,56 +778,96 @@ function BrandFormDialog({
                     </label>
                   </div>
 
-                  {[
-                    { key: "api_base_url" as const, label: "API Base URL", placeholder: "https://api.brand.com" },
-                    { key: "external_brand_code" as const, label: "External Brand Code", placeholder: "BRAND_001" },
-                    { key: "big_win_endpoint" as const, label: "Big Win Endpoint", placeholder: "/v1/big-wins" },
-                    { key: "promo_list_endpoint" as const, label: "Promo List Endpoint", placeholder: "/v1/promotions" },
-                    { key: "tracking_link_base" as const, label: "Tracking Link Base URL", placeholder: "https://track.brand.com" },
-                    { key: "hot_games_endpoint" as const, label: "Hot Games Endpoint (optional)", placeholder: "/v1/hot-games" },
-                  ].map(({ key, label, placeholder }) => (
-                    <div key={key} className="space-y-1">
-                      <FieldLabel>{label}</FieldLabel>
-                      <input
-                        className={inputCls}
-                        value={String(form.integration[key] ?? "")}
-                        onChange={(e) => setIntegration(key, e.target.value)}
-                        placeholder={placeholder}
-                        disabled={saving}
-                      />
+                  {/* BigQuery callout */}
+                  <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2 space-y-1">
+                    <p className="text-sm font-medium">BigQuery Details</p>
+                    <p className="text-xs text-muted-foreground">
+                      Big Wins and Hot Games read from the <span className="font-medium">shared global BigQuery dataset</span>.
+                      The fields here are brand-level mapping/reference only — not a per-brand BigQuery setup.
+                    </p>
+                    <div className="pt-1 space-y-3">
+                      <div className="space-y-1">
+                        <FieldLabel hint="How this brand appears in the shared dataset (e.g. brand_id value, slug, or code). Optional.">
+                          External Brand ID / Source Brand Code
+                        </FieldLabel>
+                        <input
+                          className={inputCls}
+                          value={form.integration.external_brand_code ?? ""}
+                          onChange={(e) => setIntegration("external_brand_code", e.target.value)}
+                          placeholder="e.g. LUCKY01"
+                          disabled={saving}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <FieldLabel hint="Internal mapping notes — any quirks of how this brand's rows appear in the shared dataset. Optional.">
+                          Source Mapping Notes
+                        </FieldLabel>
+                        <textarea
+                          className={textareaCls}
+                          rows={2}
+                          value={form.integration.source_mapping_notes ?? ""}
+                          onChange={(e) => setIntegration("source_mapping_notes", e.target.value)}
+                          placeholder="e.g. Uses legacy brand_id 7 in shared.users; username handle lives in display_name."
+                          disabled={saving}
+                        />
+                      </div>
                     </div>
-                  ))}
+                  </div>
 
-                  <div className="space-y-1">
-                    <FieldLabel>Notes</FieldLabel>
-                    <textarea
-                      className={textareaCls}
-                      rows={3}
-                      value={form.integration.notes ?? ""}
-                      onChange={(e) => setIntegration("notes", e.target.value)}
-                      placeholder="Internal notes about this integration..."
-                      disabled={saving}
-                    />
+                  {/* API callout */}
+                  <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2 space-y-1">
+                    <p className="text-sm font-medium">API Details</p>
+                    <p className="text-xs text-muted-foreground">
+                      Running Promotions are fetched per brand from the brand&apos;s own API.
+                    </p>
+                    <div className="pt-1 space-y-3">
+                      <div className="space-y-1">
+                        <FieldLabel>API Base URL</FieldLabel>
+                        <input
+                          className={inputCls}
+                          value={form.integration.api_base_url ?? ""}
+                          onChange={(e) => setIntegration("api_base_url", e.target.value)}
+                          placeholder="https://api.luckycasino.com"
+                          disabled={saving}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <FieldLabel>Promo List Endpoint</FieldLabel>
+                        <input
+                          className={inputCls}
+                          value={form.integration.promo_list_endpoint ?? ""}
+                          onChange={(e) => setIntegration("promo_list_endpoint", e.target.value)}
+                          placeholder="/v1/promotions"
+                          disabled={saving}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <FieldLabel hint="Base URL used when generating trackable links in posted content.">
+                          Tracking Link Base URL
+                        </FieldLabel>
+                        <input
+                          className={inputCls}
+                          value={form.integration.tracking_link_base ?? ""}
+                          onChange={(e) => setIntegration("tracking_link_base", e.target.value)}
+                          placeholder="https://track.luckycasino.com"
+                          disabled={saving}
+                        />
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}
 
               {/* ── C. Voice & Tone ── */}
               {tab === "voice" && (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    {[
-                      { key: "tone" as const, label: "Tone", options: TONES, labels: TONE_LABELS },
-                      { key: "cta_style" as const, label: "CTA Style", options: CTA_STYLES, labels: CTA_STYLE_LABELS },
-                      { key: "language_style" as const, label: "Language Style", options: LANGUAGE_STYLES, labels: LANGUAGE_STYLE_LABELS },
-                      { key: "taglish_ratio" as const, label: "Taglish Ratio", options: TAGLISH_RATIOS, labels: TAGLISH_RATIO_LABELS },
-                      { key: "emoji_level" as const, label: "Emoji Level", options: EMOJI_LEVELS, labels: EMOJI_LEVEL_LABELS },
-                    ].map(({ key, label, options, labels }) => (
+                <div className="space-y-5">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    {voiceDropdowns.map(({ key, label, options, labels }) => (
                       <div key={key} className="space-y-1">
-                        <FieldLabel>{label}</FieldLabel>
+                        <FieldLabel required>{label}</FieldLabel>
                         <Select
                           value={(form.voice[key] as string) ?? ""}
-                          onValueChange={(v) => setVoice(key, v || undefined)}
+                          onValueChange={(v) => setVoice(key, v as VoiceSettings[typeof key])}
                           disabled={saving}
                         >
                           <SelectTrigger className="w-full">
@@ -592,24 +885,112 @@ function BrandFormDialog({
                     ))}
                   </div>
 
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <FieldLabel
+                        required
+                        hint="How this brand speaks. Free-form: describe the exact mix you want."
+                      >
+                        Language Style
+                      </FieldLabel>
+                      <input
+                        className={inputCls}
+                        value={form.voice.language_style}
+                        onChange={(e) => setVoice("language_style", e.target.value)}
+                        placeholder="e.g. Casual Taglish; or: English only"
+                        disabled={saving}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <FieldLabel
+                        required
+                        hint="Write one sentence in your preferred language style. The AI will imitate it."
+                      >
+                        Language Style Sample
+                      </FieldLabel>
+                      <textarea
+                        className={textareaCls}
+                        rows={2}
+                        value={form.voice.language_style_sample}
+                        onChange={(e) => setVoice("language_style_sample", e.target.value)}
+                        placeholder="e.g. Swipe mo na lang — sulit ang deposit mo today!"
+                        disabled={saving}
+                      />
+                    </div>
+                  </div>
+
                   <div className="space-y-1">
-                    <FieldLabel>Banned Phrases</FieldLabel>
-                    <p className="text-xs text-muted-foreground">Words or phrases to avoid in generated content.</p>
-                    <TagInput
-                      value={form.voice.banned_phrases ?? []}
-                      onChange={(v) => setVoice("banned_phrases", v)}
-                      placeholder="Type a phrase and press Enter or Add"
+                    <FieldLabel
+                      required
+                      hint="Who are we talking to? Age range, lifestyle, gaming habits — AI uses this to calibrate tone."
+                    >
+                      Audience Persona
+                    </FieldLabel>
+                    <textarea
+                      className={textareaCls}
+                      rows={3}
+                      value={form.voice.audience_persona}
+                      onChange={(e) => setVoice("audience_persona", e.target.value)}
+                      placeholder="e.g. Age 25–35, urban professionals, price-conscious, familiar with online gaming."
                       disabled={saving}
                     />
                   </div>
 
                   <div className="space-y-1">
-                    <FieldLabel>Default Hashtags</FieldLabel>
-                    <p className="text-xs text-muted-foreground">Hashtags to include by default in posts.</p>
+                    <FieldLabel
+                      required
+                      hint="Nuance bucket. Guidance that doesn't fit the structured fields above — tone reminders, dos, don'ts, brand-specific voice notes."
+                    >
+                      Notes for AI
+                    </FieldLabel>
+                    <textarea
+                      className={textareaCls}
+                      rows={4}
+                      value={form.voice.notes_for_ai}
+                      onChange={(e) => setVoice("notes_for_ai", e.target.value)}
+                      placeholder={[
+                        "e.g.",
+                        "- Avoid sounding too salesy",
+                        "- Emphasize trust and simplicity",
+                        "- Keep tone premium but friendly",
+                        "- Never overhype",
+                      ].join("\n")}
+                      disabled={saving}
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <FieldLabel hint="Specific words and phrases to avoid in generated content.">
+                      Banned Phrases
+                    </FieldLabel>
+                    <TagInput
+                      value={form.voice.banned_phrases ?? []}
+                      onChange={(v) => setVoice("banned_phrases", v)}
+                      placeholder="e.g. guaranteed, get rich quick"
+                      disabled={saving}
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <FieldLabel hint="Category-level guardrails. Broader than banned phrases — e.g. a whole topic the AI should never touch.">
+                      Banned Topics
+                    </FieldLabel>
+                    <TagInput
+                      value={form.voice.banned_topics ?? []}
+                      onChange={(v) => setVoice("banned_topics", v)}
+                      placeholder="e.g. political content, religion, explicit content"
+                      disabled={saving}
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <FieldLabel hint="Hashtags appended by default on generated posts. Include the # prefix.">
+                      Default Hashtags
+                    </FieldLabel>
                     <TagInput
                       value={form.voice.default_hashtags ?? []}
                       onChange={(v) => setVoice("default_hashtags", v)}
-                      placeholder="#hashtag"
+                      placeholder="e.g. #LuckyCasino #DailyPromos #Jackpot"
                       disabled={saving}
                     />
                   </div>
@@ -618,27 +999,66 @@ function BrandFormDialog({
 
               {/* ── D. Design ── */}
               {tab === "design" && (
-                <div className="space-y-4">
+                <div className="space-y-5">
                   {[
-                    { key: "design_theme_notes" as const, label: "Design Theme Notes", rows: 3, placeholder: "Overall visual theme, mood board references, style direction..." },
-                    { key: "preferred_visual_style" as const, label: "Preferred Visual Style", rows: 2, placeholder: "e.g. Bold gradients, minimal flat design..." },
-                    { key: "headline_style" as const, label: "Headline Style", rows: 2, placeholder: "e.g. All-caps, sentence case, with emoji prefix..." },
-                    { key: "button_style" as const, label: "Button / CTA Style", rows: 2, placeholder: "e.g. Rounded pill, bright yellow, uppercase text..." },
-                    { key: "promo_text_style" as const, label: "Promo Text Style", rows: 2, placeholder: "e.g. Short punchy lines, highlight numbers in bold..." },
-                    { key: "color_usage_notes" as const, label: "Color Usage Notes", rows: 3, placeholder: "When to use primary vs accent, contrast requirements..." },
+                    {
+                      key: "design_theme_notes" as const,
+                      label: "Design Theme Notes",
+                      rows: 3,
+                      placeholder: "e.g. Bold golds, gradient overlays, casino-night vibe. Avoid pastels.",
+                    },
+                    {
+                      key: "preferred_visual_style" as const,
+                      label: "Preferred Visual Style",
+                      rows: 2,
+                      placeholder: "e.g. Bold gradients, minimal flat design, high-contrast photo backgrounds.",
+                    },
+                    {
+                      key: "headline_style" as const,
+                      label: "Headline Style",
+                      rows: 2,
+                      placeholder: "e.g. All-caps, sentence case, with emoji prefix.",
+                    },
+                    {
+                      key: "button_style" as const,
+                      label: "Button / CTA Style",
+                      rows: 2,
+                      placeholder: "e.g. Rounded pill, bright yellow, uppercase text.",
+                    },
+                    {
+                      key: "promo_text_style" as const,
+                      label: "Promo Text Style",
+                      rows: 2,
+                      placeholder: "e.g. Short punchy lines. Highlight numbers in bold.",
+                    },
+                    {
+                      key: "color_usage_notes" as const,
+                      label: "Color Usage Notes",
+                      rows: 3,
+                      placeholder: "e.g. Primary on backgrounds; accent reserved for CTAs and win numbers.",
+                    },
                   ].map(({ key, label, rows, placeholder }) => (
                     <div key={key} className="space-y-1">
                       <FieldLabel>{label}</FieldLabel>
                       <textarea
                         className={textareaCls}
                         rows={rows}
-                        value={form.design[key] ?? ""}
-                        onChange={(e) => setDesign(key, e.target.value)}
+                        value={form.design[key]}
+                        onChange={(e) => setDesignText(key, e.target.value)}
                         placeholder={placeholder}
                         disabled={saving}
                       />
                     </div>
                   ))}
+
+                  <div className="pt-2 border-t">
+                    <p className="mb-2 text-sm font-medium">Benchmark Assets</p>
+                    <BenchmarkAssets
+                      value={form.design.benchmark_assets}
+                      onChange={setBenchmarkAssets}
+                      disabled={saving}
+                    />
+                  </div>
                 </div>
               )}
 
@@ -646,7 +1066,7 @@ function BrandFormDialog({
               {tab === "captions" && (
                 <div className="space-y-4">
                   <p className="text-sm text-muted-foreground">
-                    Add reference captions that represent this brand's voice. Used as few-shot examples for AI generation.
+                    Add reference captions that represent this brand&apos;s voice. Used as few-shot examples for AI generation.
                   </p>
 
                   {form.captions.length === 0 && (
@@ -661,23 +1081,35 @@ function BrandFormDialog({
                         <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                           Caption {idx + 1}
                         </span>
-                        <button
-                          type="button"
-                          onClick={() => removeCaption(idx)}
-                          disabled={saving}
-                          className="text-muted-foreground hover:text-destructive"
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => cloneCaption(idx)}
+                            disabled={saving}
+                            className="text-xs text-muted-foreground hover:text-foreground px-1.5"
+                            title="Clone this caption"
+                          >
+                            Clone
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeCaption(idx)}
+                            disabled={saving}
+                            className="text-muted-foreground hover:text-destructive"
+                            title="Remove caption"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        </div>
                       </div>
-                      <div className="grid grid-cols-2 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div className="space-y-1">
-                          <FieldLabel>Title</FieldLabel>
+                          <FieldLabel required>Title</FieldLabel>
                           <input
                             className={inputCls}
                             value={cap.title ?? ""}
                             onChange={(e) => updateCaption(idx, "title", e.target.value)}
-                            placeholder="e.g. Big Win Post"
+                            placeholder="e.g. Big Win post"
                             disabled={saving}
                           />
                         </div>
@@ -699,17 +1131,19 @@ function BrandFormDialog({
                           rows={3}
                           value={cap.text}
                           onChange={(e) => updateCaption(idx, "text", e.target.value)}
-                          placeholder="Write the example caption here..."
+                          placeholder="Write the example caption here…"
                           disabled={saving}
                         />
                       </div>
                       <div className="space-y-1">
-                        <FieldLabel>Notes</FieldLabel>
+                        <FieldLabel hint="Why this caption works — key elements used, tone cue, etc.">
+                          Notes
+                        </FieldLabel>
                         <input
                           className={inputCls}
                           value={cap.notes ?? ""}
                           onChange={(e) => updateCaption(idx, "notes", e.target.value)}
-                          placeholder="Why this caption works, key elements used..."
+                          placeholder="e.g. Short CTA, single emoji, highlights prize amount"
                           disabled={saving}
                         />
                       </div>
@@ -755,6 +1189,7 @@ function BrandCard({
   onUpdated: () => void;
 }) {
   const integration = coerceIntegration(brand.integration_settings_json);
+  const voice = coerceVoice(brand.voice_settings_json);
 
   return (
     <div className="flex items-start justify-between gap-4 rounded-lg border bg-card px-5 py-4">
@@ -765,6 +1200,13 @@ function BrandCard({
           <StatusBadge active={brand.active} />
           <IntegrationBadge enabled={integration.integration_enabled} />
         </div>
+
+        {/* Positioning statement preview */}
+        {voice.positioning && (
+          <p className="text-xs text-muted-foreground line-clamp-2">
+            {voice.positioning}
+          </p>
+        )}
 
         {/* Meta row */}
         <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
@@ -821,17 +1263,26 @@ export default function BrandsPage() {
   const canEdit = isAdmin(session?.user?.role);
 
   const [search, setSearch] = useState("");
-  const [activeFilter, setActiveFilter] = useState<"" | "true" | "false">("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "true" | "false">("all");
+  const [selectedBrandIds, setSelectedBrandIds] = useState<string[]>([]);
 
   const { data: brands, isLoading, isError, error } = useQuery({
-    queryKey: ["brands", search, activeFilter],
+    queryKey: ["brands", search, statusFilter],
     queryFn: () =>
       brandsApi.list({
         search: search || undefined,
-        active: activeFilter || undefined,
+        active: statusFilter === "all" ? undefined : statusFilter,
       }),
     retry: false,
   });
+
+  // Client-side multi-brand filter layered on top of server-filtered results.
+  const visibleBrands = useMemo(() => {
+    if (!brands) return [];
+    if (selectedBrandIds.length === 0) return brands;
+    const picked = new Set(selectedBrandIds);
+    return brands.filter((b) => picked.has(b.id));
+  }, [brands, selectedBrandIds]);
 
   function invalidate() {
     queryClient.invalidateQueries({ queryKey: ["brands"] });
@@ -847,7 +1298,7 @@ export default function BrandsPage() {
         <div>
           <h1 className="text-2xl font-semibold">Brand Management</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Manage all brands, their integrations, and content settings.
+            Manage all brands. These settings form the base AI profile for each brand — adhoc event briefs override on conflict.
           </p>
         </div>
         {canEdit && (
@@ -874,19 +1325,27 @@ export default function BrandsPage() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
+
         <Select
-          value={activeFilter || "__all__"}
-          onValueChange={(v) => setActiveFilter(!v || v === "__all__" ? "" : (v as "true" | "false"))}
+          value={statusFilter}
+          onValueChange={(v) => setStatusFilter(v as "all" | "true" | "false")}
         >
-          <SelectTrigger className="w-40">
-            <SelectValue placeholder="All statuses" />
+          <SelectTrigger className="w-[160px]">
+            <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="__all__">All statuses</SelectItem>
-            <SelectItem value="true">Active only</SelectItem>
-            <SelectItem value="false">Inactive only</SelectItem>
+            <SelectItem value="all">Status: All</SelectItem>
+            <SelectItem value="true">Status: Active</SelectItem>
+            <SelectItem value="false">Status: Inactive</SelectItem>
           </SelectContent>
         </Select>
+
+        <BrandMultiselect
+          brands={brands ?? []}
+          selected={selectedBrandIds}
+          onChange={setSelectedBrandIds}
+          disabled={isLoading || !brands || brands.length === 0}
+        />
       </div>
 
       {/* States */}
@@ -904,20 +1363,24 @@ export default function BrandsPage() {
         </div>
       )}
 
-      {!isLoading && !isError && brands?.length === 0 && (
+      {!isLoading && !isError && visibleBrands.length === 0 && (
         <div className="rounded-lg border border-dashed py-12 text-center">
-          <p className="text-sm text-muted-foreground">No brands found.</p>
-          {canEdit && (
+          <p className="text-sm text-muted-foreground">
+            {brands && brands.length > 0 && selectedBrandIds.length > 0
+              ? "No brands match the current filter."
+              : "No brands found."}
+          </p>
+          {canEdit && brands && brands.length === 0 && (
             <p className="mt-1 text-xs text-muted-foreground">
-              Click "Add Brand" to create your first brand.
+              Click &quot;Add Brand&quot; to create your first brand.
             </p>
           )}
         </div>
       )}
 
-      {!isLoading && !isError && brands && brands.length > 0 && (
+      {!isLoading && !isError && visibleBrands.length > 0 && (
         <div className="space-y-3">
-          {brands.map((brand) => (
+          {visibleBrands.map((brand) => (
             <BrandCard
               key={brand.id}
               brand={brand}
@@ -926,7 +1389,7 @@ export default function BrandsPage() {
             />
           ))}
           <p className="text-xs text-muted-foreground text-right">
-            {brands.length} brand{brands.length !== 1 ? "s" : ""}
+            Showing {visibleBrands.length} of {brands?.length ?? 0} brand{(brands?.length ?? 0) !== 1 ? "s" : ""}
           </p>
         </div>
       )}

@@ -23,7 +23,8 @@ export default auth((req) => {
 });
 
 export const config = {
-  // api/jobs/* routes use their own secret-based auth (e.g. MANUS_DISPATCH_SECRET),
-  // so they bypass the session auth middleware here.
-  matcher: ["/((?!api/auth|api/jobs|_next/static|_next/image|favicon.ico).*)"],
+  // api/jobs/* and api/manus/* routes use their own secret-based auth
+  // (MANUS_DISPATCH_SECRET, MANUS_WEBHOOK_SECRET), so they bypass the session
+  // auth middleware here.
+  matcher: ["/((?!api/auth|api/jobs|api/manus|_next/static|_next/image|favicon.ico).*)"],
 };

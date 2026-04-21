@@ -102,11 +102,13 @@ export async function POST(req: NextRequest) {
   const brand = await db.brand.create({
     data: {
       name: identity.name,
-      domain: identity.domain || null,
-      logo_url: identity.logo_url || null,
-      primary_color: identity.primary_color || null,
-      secondary_color: identity.secondary_color || null,
-      accent_color: identity.accent_color || null,
+      domain: identity.domain,
+      // logo_url (top-level column) is legacy; logos now live in
+      // design_settings_json.logos. Left null on create.
+      logo_url: null,
+      primary_color: identity.primary_color,
+      secondary_color: identity.secondary_color,
+      accent_color: identity.accent_color,
       active: identity.active ?? true,
       integration_settings_json: integration ?? {},
       voice_settings_json: voice ?? {},

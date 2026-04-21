@@ -18,6 +18,12 @@ interface EditPostModalProps {
   onClose: () => void;
 }
 
+// MVP policy: NO REFINE AFTER APPROVAL. Refine is available only in
+// review-side states. Once a post is approved and enters the delivery
+// lifecycle it is locked — no refinement, no regeneration, no re-approval.
+// See docs/06-workflows-roles.md and docs/07-ai-boundaries.md.
+const REFINE_ALLOWED_STATUSES = new Set(["draft", "pending_approval", "rejected"]);
+
 interface ContentSection { label: string; value: string; }
 
 function buildContentSections(post: Post): ContentSection[] {
@@ -93,6 +99,42 @@ export function EditPostModal({ post, open, onClose }: EditPostModalProps) {
   const sections = buildContentSections(post);
   const sourceLabel = post.source_type ? (SOURCE_LABELS[post.source_type] ?? post.source_type) : null;
   const reminder = sourceReminder(post.source_type);
+  const refineAllowed = REFINE_ALLOWED_STATUSES.has(post.status);
+
+  // Defensive lockout: if the modal is opened for a post that is no longer in
+  // a review-side state (approved → scheduled/publishing/posted/partial/failed,
+  // or any other non-allowed status), refuse to show the refinement form.
+  // MVP policy — see docs/06-workflows-roles.md.
+  if (!refineAllowed) {
+    return (
+      <Dialog open={open} onOpenChange={handleOpenChange}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Refine Post</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="rounded-md border border-border bg-muted/30 px-4 py-4 flex items-start gap-3">
+              <Lock className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+              <div className="space-y-1">
+                <p className="text-sm font-medium">This post is locked</p>
+                <p className="text-xs text-muted-foreground">
+                  Approved posts cannot be refined in MVP. Refinement is
+                  available only while a post is in Draft, Pending Approval,
+                  or Rejected.
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Current status: <span className="font-medium">{post.status}</span>
+                </p>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={onClose}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>

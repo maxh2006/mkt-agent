@@ -1,10 +1,634 @@
 # WORKLOG.md
 
+## Project Roadmap
+
+See [ROADMAP.md](ROADMAP.md) for the structured master roadmap (phases,
+definitions of done, execution priority, core product rules). Read it alongside
+this file at the start of any session.
+
+Current execution priority (per ROADMAP.md):
+1. Finish Manus publishing lifecycle (Phase 2)
+2. Finalize BigQuery/API source layer (Phase 3)
+3. Build AI content generator agent (Phase 4)
+4. Automate draft creation flows (Phase 5)
+5. Close learning loop (Phase 6)
+6. Continue secondary audits/polish (Phases 1 & 7)
+
 ## Ongoing Tasks
 
 
 
 ## Done Tasks
+
+### 2026-04-21
+- Task: Phase 1 — Refactor Brand Management as the base AI profile for each brand
+  - Status: Complete
+  - Product rule locked: Brand Management = default/base AI instruction
+    layer. Adhoc Event brief overrides brand rules on conflict.
+  - Files changed:
+    - src/lib/validations/brand.ts — schema overhaul:
+      - **Identity**: `name` + `domain` required; hex colors required; `logo_url`
+        removed (logos moved to design). Brand Positioning lives in voice (see
+        below).
+      - **Voice**: new required fields — `positioning` (50–200 chars), `tone`,
+        `cta_style`, `emoji_level`, `language_style` (free text, replaces old
+        enum), `language_style_sample`, `audience_persona`, `notes_for_ai`.
+        Legacy `taglish_ratio` enum + LANGUAGE_STYLES / TAGLISH_RATIOS constants
+        removed. Added `banned_topics` (sibling to banned_phrases).
+      - **Design**: dropped `.or(z.literal(""))` fallbacks (empty strings no
+        longer silently stored). Added `logos: { main, square, horizontal,
+        vertical }` + `benchmark_assets: BenchmarkAsset[]`.
+      - **Sample Captions**: `title` + `text` now required.
+    - src/lib/brands-api.ts — updated Brand type (added legacy `logo_url`
+      pass-through field), BrandIdentityInput, BrandCreateInput (voice
+      required on create), BrandUpdateInput.
+    - src/app/api/brands/route.ts — POST creates with `domain` non-null and
+      `logo_url: null` explicitly (legacy column cleared on new brands).
+    - src/app/api/brands/[id]/route.ts — PATCH no longer writes top-level
+      `logo_url` column (logos now in design_settings_json).
+    - src/components/brands/brand-multiselect.tsx (new) — DropdownMenu-based
+      multi-select with CheckboxItem rows. "All Brands" row clears selection;
+      default empty array means "no filter applied".
+    - src/components/brands/logo-upload-zone.tsx (new) — drag-drop + click
+      upload slot with client-side validation (PNG, ≥500×500, ≤5 MB via
+      FileReader + Image decode). Preview is client-memory only; a URL text
+      input beside each zone is what actually persists (storage not wired
+      yet). Also exports `LOGO_SLOTS` (the 4 slot definitions) and
+      `LogoUploadConstraints` (shared callout).
+    - src/components/brands/benchmark-assets.tsx (new) — repeater of
+      benchmark/reference images with per-card drag-drop preview + URL
+      persistence. Same storage caveat as logos.
+    - src/app/(app)/brands/page.tsx — full refactor (page + dialog):
+      - Main-page filters: search + Status select ("Status: All / Active /
+        Inactive") + Brand multi-select (default "All Brands", client-side
+        filter on already-fetched list)
+      - Card: now shows positioning preview under brand name (truncated 2 lines)
+      - Dialog: AI-precedence callout at the top ("These settings form the
+        base AI profile for this brand. Adhoc Event briefs override brand
+        rules on conflict.")
+      - Identity tab: name, domain, Brand Positioning Statement (50–200 chars
+        with live counter), 4 logo slots, 3 colors with helper, active toggle
+      - Integration tab: BigQuery Details callout (shared global source —
+        only External Brand ID + Source Mapping Notes) + API Details (API Base
+        URL, Promo List Endpoint, Tracking Link Base)
+      - Voice & Tone tab: Tone / CTA Style / Emoji Level (dropdowns, compact
+        row) + Language Style (free text) + Language Style Sample + Audience
+        Persona + Notes for AI + Banned Phrases + Banned Topics + Default
+        Hashtags (all with concrete placeholders)
+      - Design tab: 6 design notes + Benchmark Assets repeater
+      - Captions tab: title+text required, per-card Clone button
+      - Save validates + jumps to the offending tab on error
+  - Main-page filter changes:
+    - Search input (pre-existing, unchanged)
+    - Status dropdown — labels now "Status: All" / "Status: Active" /
+      "Status: Inactive" (operators immediately recognize it as the status filter)
+    - Brand multi-select dropdown — new; default "All Brands"; multi-select
+      narrows visible cards client-side
+    - Card count footer now reads "Showing N of M brands" when filtering
+  - Identity / Integration / Voice / Design / Sample-Caption changes — see
+    Files changed above.
+  - Required fields enforced on save (UI validation jumps to tab):
+    - Brand Name, Domain
+    - Brand Positioning Statement (50–200 chars)
+    - Primary / Secondary / Accent Color (hex format)
+    - Tone, CTA Style, Emoji Level
+    - Language Style, Language Style Sample
+    - Audience Persona, Notes for AI
+    - Sample Captions: title + text required per entry (only when a caption
+      is added)
+    - Logo uploads stay **optional** — storage backend isn't wired, so we
+      don't block save on unconfigured URL fields.
+  - Upload behavior — implemented vs placeholder:
+    - **Implemented now**: drag-drop + click-to-select file picker, full
+      client-side PNG/dim/size validation, in-memory preview via FileReader,
+      URL text input fallback that actually persists. Helper callouts on both
+      Identity tab and Benchmark Assets section state the interim state
+      ("Direct upload storage is not yet wired — paste a hosted URL to
+      persist. Preview images are client-side only.")
+    - **Placeholder / future**: actual object-store upload endpoint
+      (S3/GCS/R2). When it lands, the URL fallback input can be hidden
+      without any schema change — `design.logos.*` and
+      `design.benchmark_assets[].url` are already the persistence targets.
+  - Backward compatibility:
+    - `coerceVoice` reads legacy rows tolerantly (`language_style` enum values
+      become free-text; `taglish_ratio` ignored; positioning + new fields
+      start empty and prompt the operator to fill them on first edit)
+    - `coerceDesign` surfaces the legacy top-level `logo_url` column as
+      `design.logos.main` on form load if that slot is empty (one-way
+      migration — overwritten on next save)
+    - `coerceIntegration` maps legacy `notes` → `source_mapping_notes`;
+      dropped endpoint fields (`big_win_endpoint`, `hot_games_endpoint`)
+      are silently omitted on save
+  - AI precedence rule: documented in docs/06-workflows-roles.md (new "AI
+    Context Precedence" section above Approval Rules) and docs/07-ai-boundaries.md
+    (Input Contract expanded with base → override layer model). Brand is the
+    base layer; Event overrides on conflict for event-derived posts.
+  - Docs updated: docs/02-data-model.md (Brand fields rewritten to match new
+    JSON shapes + legacy notes), docs/03-ui-pages.md (Brand Management section
+    rewritten to match new tabs + filters + upload caveat), docs/06-workflows-roles.md
+    (AI Context Precedence section added), docs/07-ai-boundaries.md (Input
+    Contract layered model).
+  - Typecheck clean (`npx tsc --noEmit`).
+  - Follow-ups deferred to later tasks:
+    - Actual file upload backend for logos + benchmark assets (S3/GCS/R2 +
+      POST /api/uploads endpoint + drag-drop wiring)
+    - Phase 4: wire the Brand Management JSON into the AI prompt builder
+      (Brand → base layer, Event → override layer)
+
+### 2026-04-21
+
+### 2026-04-21
+- Task: Phase 2 — Finalize Manus external response protocol
+  - Status: Complete
+  - Scope: lock contract shapes + error taxonomy; tighten types, schema,
+    and docs so the dispatcher → Manus → callback loop has zero ambiguity.
+    No behavioral changes.
+  - Files changed:
+    - src/lib/manus/types.ts — added:
+      - `ManusErrorCode` string union (8 canonical classes)
+      - `error_code?: ManusErrorCode` on `ManusDispatchResult`
+      - New `ManusCallbackPayload` interface mirroring the Zod schema at
+        the callback route (for server-side callers + test harnesses)
+      - Expanded JSDoc on all four exported types spelling out the
+        contract pointers to docs/00-architecture.md
+    - src/lib/manus/client.ts — refactored response parsing to read
+      `{ external_ref?, error?, error_code? }` from Manus's body on both
+      2xx (accept path) and non-2xx (reject path). Network errors now map
+      to `error_code: "NETWORK_ERROR"`. Doc comment updated to reflect
+      finalized contract.
+    - src/lib/manus/dispatcher.ts — log line now includes `external_ref`
+      on accepted dispatches and `code=<ManusErrorCode>` on failed handoffs.
+    - src/app/api/manus/callback/route.ts:
+      - Zod schema accepts `error_code?: z.string()` and
+        `external_ref?: z.string()` — intentionally plain strings, not
+        Zod-enums, so unknown codes don't reject the callback (forward compat)
+      - New `formatLastError(message, code)` helper produces
+        `"[CODE] message"` when code is present, `"message"` otherwise,
+        `"Unknown error"` as fallback
+      - Full-failure branch uses the formatter
+      - Idempotent-failed branch now preserves stored `last_error` when
+        Manus re-sends a callback with no error info (fixed: previously
+        could clobber stored last_error with null in that edge case)
+      - Callback log line appends `error_code=<C>` and `external_ref=<R>`
+        when provided
+    - docs/00-architecture.md:
+      - Callback "Contract" bullet updated to include `error_code` +
+        `external_ref` with the forward-compat note
+      - Full failure update rule now documents the `[CODE] message` format
+      - New "Manus protocol — finalized contract" subsection covering:
+        dispatch response shape, callback payload shape, correlation keys
+        (delivery_id primary; external_ref Manus-side; external_post_id
+        platform-side), full error taxonomy listing, last_error storage
+        convention, idempotency expectations, out-of-scope items
+    - docs/02-data-model.md — `post_platform_deliveries` entry documents
+      the `[CODE] message` format for `last_error` and the explicit
+      non-persistence of `external_ref` in MVP
+    - docs/06-workflows-roles.md — approval flow step 6 notes that failed
+      callbacks may carry `error_code` and how it's stored
+    - ROADMAP.md — Phase 2 items 1–8 all marked done with date references;
+      added a "Phase 2 status: all items resolved" closing line with note
+      that the remaining go-live work (wiring real `MANUS_AGENT_ENDPOINT`,
+      HTTPS upgrade) is operational, not product scope
+  - Final dispatch response shape (`ManusDispatchResult`):
+    ```
+    { accepted: boolean,
+      dry_run: boolean,
+      external_ref?: string,   // Manus-side job reference (optional, on accept)
+      error?: string,          // human-readable, on reject
+      error_code?: ManusErrorCode }  // machine-readable class, on reject
+    ```
+  - Final callback payload shape (`ManusCallbackPayload`):
+    ```
+    { delivery_id: string,           // REQUIRED primary correlation key
+      post_id?: string,              // validated cross-check
+      platform?: Platform,           // validated cross-check
+      outcome: "posted" | "failed",  // REQUIRED
+      external_post_id?: string,     // posted — platform-side id
+      error?: string,                // failed — human-readable
+      error_code?: string,           // failed — machine-readable (ManusErrorCode)
+      external_ref?: string,         // pass-through log correlation
+      attempted_at?: string }        // ISO datetime, defaults to server now()
+    ```
+  - `external_ref` convention:
+    - Manus-side job reference, returned by Manus on the dispatch response
+      and optionally echoed in the callback
+    - Distinct from `external_post_id` (platform-side post identifier set
+      on successful posted callback)
+    - Currently flows through the dispatcher log and callback log only;
+      NOT persisted to `post_platform_deliveries` in MVP. Explicit future
+      gap: add a column when Manus goes live and cross-system correlation
+      becomes operationally necessary
+  - Error taxonomy chosen (`ManusErrorCode` union in `src/lib/manus/types.ts`):
+    AUTH_ERROR, NETWORK_ERROR, PLATFORM_REJECTED, RATE_LIMITED,
+    INVALID_PAYLOAD, MEDIA_ERROR, TEMPORARY_UPSTREAM_ERROR, UNKNOWN_ERROR.
+    Codes outside the canonical set are accepted without rejection —
+    forward compatibility.
+  - Code/type adjustments summary:
+    - types.ts: new union + new interface + expanded JSDocs (no renames)
+    - client.ts: unified body parsing across 2xx/non-2xx; network errors
+      tagged `NETWORK_ERROR`
+    - dispatcher.ts: log-line enrichment only (no logic change)
+    - callback/route.ts: two new optional fields + last_error formatter +
+      fix for edge case (empty repeat-failed callback preserving stored error)
+  - Docs updated: 00-architecture.md (major), 02-data-model.md (minor),
+    06-workflows-roles.md (minor). 03-ui-pages.md + 07-ai-boundaries.md
+    unchanged — current wording stays correct.
+  - **Phase 2 status:** all 10 ROADMAP items resolved (8 implemented, 2
+    decided/deferred as policy). Remaining "go-live" operational work
+    (real Manus endpoint, secret rotation, HTTPS upgrade) is tracked in
+    docs/08-deployment.md and is not Phase 2 product scope.
+
+- Task: Phase 2 — Lock in MVP policy: NO REFINE AFTER APPROVAL
+  - Status: Complete
+  - Policy locked:
+    - Refine allowed ONLY in review-side statuses: `draft`, `pending_approval`,
+      `rejected`
+    - Refine FORBIDDEN in delivery-side statuses: `scheduled`, `publishing`,
+      `posted`, `partial`, `failed`. (Approved is metadata-only and not editable.)
+    - No Return to Review flow in MVP — approved posts cannot be sent back
+      to review. Operator recourse on a post-approval mistake: let delivery
+      complete and create a new post
+    - Approved-payload snapshot **deferred** because content is locked after
+      approval — the dispatcher safely reads live Post fields at dispatch time
+      and on retry. Revisit only if the no-refine-after-approval policy is
+      ever reversed
+    - Retry reuses the same approved content (already implemented)
+  - Files changed:
+    - src/components/posts/edit-post-modal.tsx — defense-in-depth lockout.
+      Added `REFINE_ALLOWED_STATUSES = {draft, pending_approval, rejected}`
+      constant and a top-of-render guard: when opened for a non-allowed
+      status the modal renders a locked explainer panel instead of the
+      refinement form. Copy: "Approved posts cannot be refined in MVP.
+      Refinement is available only while a post is in Draft, Pending
+      Approval, or Rejected." Current status shown inline so the operator
+      understands why.
+    - docs/00-architecture.md — new paragraph under the Manus publishing
+      section explicitly stating the MVP policy, the allowed vs forbidden
+      status sets, and the architectural consequence: approved-payload
+      snapshotting is not required under this policy.
+    - docs/03-ui-pages.md — Refine modal description now names the allowed
+      statuses explicitly, notes row-level button gating, and notes the
+      modal-level defensive lockout.
+    - docs/06-workflows-roles.md — Refinement section expanded with a
+      "Refinement scope — MVP policy (locked 2026-04-21)" block covering
+      the rule, the explicit no-Return-to-Review stance, and the snapshot
+      deferral rationale.
+    - docs/07-ai-boundaries.md — Content Queue Refinement Constraints
+      preface adds the allowed-statuses rule, no-Return-to-Review note, and
+      confirms the AI layer is never re-entered for approved content.
+    - ROADMAP.md — Phase 2 items 9 and 10 struck through and annotated:
+      item 9 resolved (NO), item 10 deferred under the locked policy.
+  - Where refine is now blocked (defense-in-depth):
+    1. Queue page row-level — Refine button hidden unless status ∈
+       `EDITABLE_STATUSES = {draft, pending_approval, rejected}`
+       (pre-existing; verified correct during audit)
+    2. Post detail page inline Edit — `canEditStatus` restricts to
+       `{draft, rejected}` (stricter than modal; compliant)
+    3. EditPostModal itself — new defensive render guard locks out any
+       non-allowed status even if opened programmatically
+    4. Server PATCH `/api/posts/[id]` — already gated to
+       `{draft, rejected}` only; returns 422 otherwise (pre-existing)
+  - Allowed refine statuses (canonical):
+    - `draft` — operator edits before submission
+    - `pending_approval` — reviewer refines before approving
+    - `rejected` — author fixes issues before resubmitting
+  - Docs updated: 00-architecture.md, 03-ui-pages.md, 06-workflows-roles.md,
+    07-ai-boundaries.md, plus ROADMAP.md for the item resolution.
+  - Confirmation: approved-payload snapshot is **DEFERRED** under this
+    policy. If the policy is ever reversed (refine-after-approval allowed),
+    snapshotting would need to land before enabling that flow so Manus
+    doesn't dispatch a mutated payload on retry.
+
+- Task: Phase 2 — Real retry redispatch for failed platform deliveries
+  - Status: Complete
+  - Files changed:
+    - src/lib/audit.ts — added `AuditAction.DELIVERY_RETRIED = "delivery.retried"`
+      under a new "Deliveries (Manus publishing)" section.
+    - src/app/api/posts/[id]/deliveries/[platform]/retry/route.ts — hardened:
+      - Drops the stale `TODO: signal the Manus dispatcher (follow-up work)`
+        comment (Cloud Scheduler + dispatcher pickup is live now)
+      - Sets `scheduled_for = now()` on retry so the DB row explicitly states
+        "pick this up on the next dispatcher tick" (was: row kept its old
+        past scheduled_for, functionally equivalent but semantically fuzzy)
+      - Writes a `writeAuditLog(DELIVERY_RETRIED)` entry per retry call with
+        before/after snapshot of status, retry_count, last_error, scheduled_for,
+        plus post_id and platform in the after-snapshot
+      - Refreshed the doc comment to describe current operational reality
+        (Cloud Scheduler picks it up on next tick)
+    - src/components/posts/delivery-status-modal.tsx — added a small
+      same-payload helper note under the deliveries table whenever at least
+      one failed delivery is present:
+      "Retry resends the same approved content to the failed platform. It
+       does not regenerate content or require re-approval. Manus reattempts
+       on the next dispatcher tick."
+    - docs/00-architecture.md — Dispatcher retry sentence now names the retry
+      endpoint, the scheduled_for reset, the audit entry, and Cloud Scheduler
+      as the automatic pickup path.
+    - docs/03-ui-pages.md — Delivery Status modal bullet updated to reflect
+      new state-change set + audit entry + Cloud Scheduler pickup; new bullet
+      mentions the helper note.
+    - docs/06-workflows-roles.md — Retries section adds the API route, state
+      transition, audit entry, Cloud Scheduler pickup behavior, and the
+      brand_manager+ gate.
+    - docs/07-ai-boundaries.md — unchanged (existing wording is still correct).
+  - How retry now works end-to-end:
+    1. Manus callback flips a delivery to `failed` with `last_error`
+    2. Parent Post reconciled to `failed` (or `partial` in multi-platform posts)
+    3. Operator opens Delivery Status modal, sees the failed row + helper note
+    4. Operator clicks Retry → `POST /api/posts/[id]/deliveries/[platform]/retry`
+    5. Route validates role (brand_manager+), brand scope, delivery is `failed`
+    6. Route updates delivery: `status=queued`, `scheduled_for=now()`,
+       `retry_count++`, `last_error=null`. Worker stays `"manus"`.
+    7. Audit log entry `delivery.retried` written with before/after snapshot
+    8. Next Cloud Scheduler tick (≤2 min) → dispatcher's atomic claim picks up
+       the queued row, flips to `publishing`, hands payload to Manus
+    9. Manus callback brings outcome back → delivery + parent Post reconcile
+  - State changes on retry (summary):
+    - status           failed → queued
+    - scheduled_for    → now()
+    - retry_count      += 1
+    - last_error       → null
+    - worker           preserved ("manus")
+  - Retry All Failed: supported via the client-side loop in the modal — it
+    calls the per-platform endpoint once per failed delivery (one audit entry
+    per delivery). No bulk endpoint added; current single-platform-per-post
+    model means typical retry = 1 delivery, so a bulk route would be API
+    surface without a current use case. Revisit if multi-platform posts become
+    common.
+  - Same-payload guarantee (today):
+    - Dispatcher reads live Post fields at dispatch time
+    - Current policy (per docs/07-ai-boundaries.md + ROADMAP Phase 2 item 8)
+      does not allow refine-after-approval
+    - As long as that policy holds, retry resends the exact approved payload
+      with no regeneration and no re-approval
+    - If refine-after-approval is ever allowed, approved-payload snapshot
+      (ROADMAP Phase 2 item 10) becomes required to preserve this guarantee
+  - Safety properties:
+    - Retrying a `posted` delivery → 422 "Only failed deliveries can be retried"
+    - Retrying an unknown delivery → 404
+    - Retrying across brands (wrong active brand) → 403 / 404
+    - Repeated retry clicks before response returns: bounded — worst case
+      `retry_count` increments by 2 instead of 1. Acceptable (pre-existing).
+  - Docs updated: docs/00-architecture.md, docs/03-ui-pages.md,
+    docs/06-workflows-roles.md. docs/02-data-model.md unchanged (all relevant
+    fields already documented).
+  - Remaining Phase 2 follow-ups (still open per ROADMAP):
+    - Approved-payload snapshot (only needed if refine-after-approval lands)
+    - Finalize Manus external response protocol (error taxonomy, external_ref)
+    - Refine-after-approval decision itself
+    - Auto-retry / exponential backoff — not planned for MVP
+
+- Task: Phase 2 — Provisioned Cloud Scheduler job in GCP (dev-mode config)
+  - Status: Complete
+  - GCP actions taken:
+    - Enabled `cloudscheduler.googleapis.com` on project `mktagent-493404`
+    - Created HTTP scheduler job `mkt-agent-dispatch` in `asia-east2`:
+      - URI: `http://34.92.70.250/api/jobs/dispatch` (raw HTTP — dev trade-off;
+        see `docs/08-deployment.md` "Current dev configuration" callout)
+      - Schedule: `*/2 * * * *` (every 2 minutes)
+      - Timezone: `Asia/Manila`
+      - Method: POST; body: `{}`; content-type header set
+      - Auth header: `x-dispatch-secret=<MANUS_DISPATCH_SECRET>`
+      - Attempt deadline: 60s; retry defaults
+    - App Engine region anchor **not required** in `asia-east2` (modern CS)
+    - Verified via force-run + scheduled tick: `state=ENABLED`,
+      `lastAttemptTime` populated, `status={}` (= success), and
+      `sudo pm2 logs mkt-agent` on the VM shows matching
+      `[manus-dispatcher] claimed=0 batch=25` lines every 2 minutes.
+  - Files changed:
+    - docs/08-deployment.md — added "Current dev configuration" callout noting
+      the raw-HTTP target, dispatch secret in clear text, upgrade path
+      (domain + HTTPS + secret rotation + single `gcloud scheduler jobs update`),
+      and the operational note that prod app PM2 is owned by root
+      (`sudo pm2 logs mkt-agent`).
+  - Follow-ups (deferred, not blocking Phase 2):
+    - Before real Manus traffic: move target URL to HTTPS (Cloudflare proxy
+      or Let's Encrypt), rotate `MANUS_DISPATCH_SECRET`, update the scheduler
+      job's URI + header
+    - Clean up the stray `max` / `moloh` user PM2 daemons on the VM (cosmetic;
+      prod app is owned by root's PM2 and is fine)
+
+- Task: Phase 2 — GCP Cloud Scheduler readiness for /api/jobs/dispatch
+  - Status: Complete
+  - Files changed:
+    - src/app/api/jobs/dispatch/route.ts — hardened:
+      - Missing `MANUS_DISPATCH_SECRET` now returns 503 (was 422 VALIDATION).
+        Aligns with the callback route pattern + correct HTTP semantics — CS
+        retries 5xx automatically, so the job self-heals once the env is set.
+      - Secret header compare is now constant-time (`crypto.timingSafeEqual`
+        on equal-length buffers) to avoid byte-by-byte timing leakage.
+      - Updated doc comment to point at `docs/08-deployment.md`.
+    - docs/08-deployment.md (new) — ops/deployment runbook. Sections:
+      - Production target (VM location, app path, deploy script pointers)
+      - Cloud Scheduler contract table (method/URL/header/frequency/timezone)
+      - `gcloud scheduler jobs create http` command to create the job
+      - Secret rotation command (`jobs update http --update-headers`)
+      - Pre-flight checklist before enabling the scheduler
+      - Manual smoke test `curl` + expected response shape + semantics
+      - Verification paths (Cloud Console, PM2 logs, end-to-end flow)
+      - Pause/resume commands
+      - Env vars checklist for production
+    - docs/00-architecture.md — Dispatcher subsection gets a short pointer
+      to `docs/08-deployment.md` for scheduler setup + the self-heal behavior.
+  - Cloud Scheduler contract (production):
+    - Method: `POST`
+    - URL: `https://<your-domain>/api/jobs/dispatch`
+    - Header: `x-dispatch-secret: <MANUS_DISPATCH_SECRET>`
+    - Body: empty
+    - Frequency: `*/2 * * * *` (every 2 minutes, recommended default)
+    - Timezone: `Asia/Manila`
+    - Attempt deadline: 60s
+    - Retry: CS defaults (5xx auto-retried; 401 does not)
+  - Recommended frequency: `*/2` = every 2 minutes. Tunable 1–5 minutes based
+    on scheduled-post latency tolerance. Cost is negligible at this cadence.
+  - Setup instructions added (in `docs/08-deployment.md`):
+    - Single idempotent `gcloud scheduler jobs create http` command
+    - Region: `asia-east2` (matches the VM zone `asia-east2-c`)
+    - Project: `mktagent-493404` (same GCP project used by BigQuery)
+  - Helper scripts/commands added: none separate — the runbook includes
+    copy-pasteable `gcloud` commands. A dedicated shell script would be
+    infra overbuild for a one-time setup.
+  - Code hardening tweaks:
+    - 422 → 503 for unconfigured secret
+    - Constant-time secret compare
+  - Docs updated: docs/08-deployment.md (new), docs/00-architecture.md
+    (Dispatcher subsection pointer).
+  - Remaining Phase 2 follow-ups (still open per ROADMAP):
+    - Actual retry redispatch wiring beyond the "reset to queued" placeholder
+    - Finalize Manus external response protocol (error taxonomy,
+      external_ref conventions)
+    - Refine-after-approval decision + approved-payload snapshot
+
+### 2026-04-21
+- Task: Phase 2 — Manus callback / webhook + post reconciliation
+  - Status: Complete
+  - Files changed:
+    - src/app/api/manus/callback/route.ts (new) — `POST /api/manus/callback`.
+      Verifies HMAC-SHA256 signature over raw body with `MANUS_WEBHOOK_SECRET`,
+      parses a Zod-validated payload, looks up the delivery by `delivery_id`,
+      applies the outcome idempotently, then reconciles parent Post.status.
+      Bypasses session middleware (see src/proxy.ts exclusion).
+    - src/lib/manus/signature.ts (new) — `verifyManusSignature(rawBody, header, secret)`.
+      Reads `x-manus-signature: sha256=<hex>`, computes HMAC-SHA256, compares
+      constant-time via `crypto.timingSafeEqual`. All failure modes return false
+      without leaking which one.
+    - src/lib/manus/reconcile.ts (new) — `reconcilePostStatus(postId)`. Loads
+      the post's deliveries, runs `computePostStatusFromDeliveries()`, then
+      updates `Post.status` if changed. Also sets `Post.posted_at` (= max of
+      delivery posted_at across posted deliveries) when the post transitions
+      to `posted` and posted_at was null. Invalid status transitions are logged
+      as warnings but still applied — Manus is authoritative on outcomes.
+    - src/lib/delivery-aggregation.ts — input type loosened from
+      `PlatformDelivery[]` (client-facing) to minimal structural
+      `Array<{ status: string }>` so server code can pass Prisma rows directly.
+      Removed the `PlatformDelivery` import. All existing call sites still work
+      via structural compatibility.
+    - src/proxy.ts — matcher widened to also exclude `api/manus` from the
+      session-auth middleware, matching the `api/jobs` pattern.
+    - .env.production.example — added `MANUS_WEBHOOK_SECRET` with header
+      contract comment.
+    - docs/00-architecture.md — new "Callback / webhook" subsection below the
+      Dispatcher section; replaces the old "callback route (not in this task)"
+      placeholder wording.
+    - docs/06-workflows-roles.md — approval flow steps 6 & 7 now describe the
+      implemented callback + reconciler (was "follow-up work" before).
+    - docs/07-ai-boundaries.md — Manus publishing boundary explicitly calls out
+      that the callback route never re-enters the AI layer.
+  - Route path: `POST /api/manus/callback` (single outcome per request).
+  - Callback payload:
+    ```
+    { delivery_id: string,          // primary correlation key
+      post_id?: string,             // optional validation cross-check
+      platform?: "instagram"|...,   // optional validation cross-check
+      outcome: "posted" | "failed",
+      external_post_id?: string,    // success
+      error?: string,               // failure
+      attempted_at?: string }       // ISO datetime; defaults to now()
+    ```
+  - Security / signature approach:
+    - HMAC-SHA256 over raw request body with `MANUS_WEBHOOK_SECRET`.
+    - Header: `x-manus-signature: sha256=<hex>` (lowercase hex).
+    - Fail-closed: 503 when secret is unset; 401 on invalid/missing signature.
+    - Constant-time compare via `crypto.timingSafeEqual`.
+    - Next step (future task): rotate secret via env change; no code change.
+  - Idempotency handling (matrix by current delivery status × incoming outcome):
+    - posted + posted → no-op; backfill `external_post_id` if currently null
+    - posted + failed → **refused** (don't regress success); 200 with
+      `refused=true` so Manus stops retrying; parent reconciliation skipped
+    - failed + failed → update `last_error` + `publish_attempted_at` only if
+      the error message differs; `retry_count` untouched (operator-driven)
+    - failed + posted → flip to posted (Manus internal retry succeeded)
+    - queued/scheduled/publishing + posted → full success update
+    - queued/scheduled/publishing + failed → full failure update
+  - Delivery row updates:
+    - Success: `status=posted`, `posted_at=attempted_at`,
+      `publish_attempted_at ??= attempted_at`, set `external_post_id`,
+      clear `last_error`
+    - Failure: `status=failed`, `publish_attempted_at=attempted_at`,
+      `last_error=payload.error ?? "Unknown error"`
+    - `worker` kept as "manus"; never regenerates content, re-approves, or
+      re-runs source logic
+  - Parent-post reconciliation trigger:
+    - After any delivery state change (skipped on refused/no-op), the route
+      calls `reconcilePostStatus(delivery.post_id)`
+    - Reconciler reads all deliveries for the post, computes via
+      `computePostStatusFromDeliveries()`, updates `Post.status` if changed,
+      and sets `Post.posted_at` on the first transition to `posted`
+  - Small helper change:
+    - `computePostStatusFromDeliveries()` input type loosened to
+      `{ status: string }[]` so it's safely usable from server (Prisma rows)
+      without pulling in the client-facing `PlatformDelivery` type
+  - Error responses:
+    - 503 — `MANUS_WEBHOOK_SECRET` not configured
+    - 401 — invalid / missing signature
+    - 400 — invalid JSON or schema violation (with per-issue details)
+    - 404 — `delivery_id` not found
+    - 409 — `post_id` / `platform` in payload mismatch the delivery row
+    - 200 — applied or idempotent, body:
+      `{ ok, idempotent, refused, delivery_id, post_id, platform, applied_status, post_status }`
+  - Observability: one `[manus-callback]` log line per request with
+    delivery_id, platform, outcome, post_id, sig_ok, idempotent, refused,
+    post_status. Warnings on signature fail / delivery-not-found / mismatch /
+    posted→failed refusal / non-standard post transitions.
+  - Docs updated: docs/00-architecture.md, docs/06-workflows-roles.md,
+    docs/07-ai-boundaries.md. docs/02-data-model.md unchanged (all needed
+    fields were already on `post_platform_deliveries`).
+  - Remaining Phase 2 follow-ups (still open per ROADMAP):
+    - Actual retry redispatch wiring beyond the "reset to queued" placeholder
+    - GCP Cloud Scheduler setup for `/api/jobs/dispatch`
+    - Finalize Manus external response protocol (error taxonomy,
+      external_ref conventions)
+    - Refine-after-approval decision + approved-payload snapshot
+
+### 2026-04-21
+- Task: Phase 2 — Create PostPlatformDelivery rows at approval / scheduling time
+  - Status: Complete
+  - Files changed:
+    - src/lib/manus/delivery-creator.ts (new) — `ensureDeliveriesForPost(post, now?)`.
+      Inserts one PostPlatformDelivery for `(post.id, post.platform)`, chooses
+      status based on `scheduled_for > now` (`scheduled`) vs `<= now` (`queued`),
+      sets `worker = "manus"`. Idempotent: uses `createMany({ skipDuplicates: true })`
+      against the existing `@@unique([post_id, platform])` constraint.
+    - src/app/api/posts/[id]/approve/route.ts — after the post transitions to
+      `scheduled`, calls `ensureDeliveriesForPost()`. This is the main lifecycle
+      entry point (approval moves `pending_approval` → `scheduled` directly and
+      now also seeds the delivery row).
+    - src/app/api/posts/[id]/schedule/route.ts — also calls
+      `ensureDeliveriesForPost()` after the post moves to `scheduled`. The
+      endpoint enforces `scheduled_at` is in the future, so the new delivery
+      row is always inserted as `status = 'scheduled'` from this path.
+    - src/lib/manus/dispatcher.ts — claim SQL widened from `status = 'queued'`
+      to `status IN ('queued','scheduled')`. Future-dated `scheduled` rows
+      transition directly to `publishing` when `scheduled_for` passes — no
+      intermediate flip needed.
+    - src/components/posts/delivery-status-modal.tsx — empty-state copy
+      updated: "Delivery rows are created at approval; this post has not been
+      approved yet" (replaces the stale "appear when Manus begins publishing"
+      message — rows now exist from the moment approve/schedule runs).
+    - docs/00-architecture.md — new "Delivery rows — creation path" subsection
+      above the Dispatcher section; Dispatcher subsection updated for the new
+      claim predicate and the scheduled → publishing transition.
+    - docs/02-data-model.md — `delivery_status` enum values documented with
+      their operational meaning; `post_platform_deliveries` entry now describes
+      when rows are written (approve/schedule) and the `queued` vs `scheduled`
+      split.
+    - docs/06-workflows-roles.md — approval flow expanded: new step 4 describes
+      delivery-row creation via `ensureDeliveriesForPost()`; subsequent steps
+      renumbered. Dispatcher step notes the `status IN ('queued','scheduled')`
+      claim predicate.
+  - Where delivery rows are created:
+    - `POST /api/posts/[id]/approve` — post enters lifecycle via approval
+    - `POST /api/posts/[id]/schedule` — post scheduled explicitly (also a
+      lifecycle entry point for the legacy `approved` → `scheduled` path)
+  - Immediate vs future scheduled handling:
+    - Immediate (`scheduled_at` missing or `<= now`): delivery inserted as
+      `queued` with `scheduled_for = now()` — picked on the next dispatcher pass
+    - Future (`scheduled_at > now`): delivery inserted as `scheduled` with
+      `scheduled_for = post.scheduled_at` — invisible to the dispatcher until
+      its time arrives, then claimed alongside queued rows and transitioned to
+      `publishing`
+  - How duplicate delivery rows are prevented:
+    - Existing `@@unique([post_id, platform])` constraint on
+      `post_platform_deliveries` + Prisma `createMany({ skipDuplicates: true })`.
+      Re-calling approve or schedule on an already-scheduled post does NOT
+      duplicate deliveries (it would also fail status-transition validation
+      first — `scheduled → scheduled` isn't a legal transition).
+  - Dispatcher changes:
+    - One-line predicate widening from `status = 'queued'` to
+      `status IN ('queued','scheduled')`. Same atomic
+      `FOR UPDATE SKIP LOCKED` + `UPDATE ... RETURNING` pattern. No behavior
+      change for existing queued rows; scheduled rows just become eligible when
+      `scheduled_for <= now()`.
+  - Explicitly out of scope (remain in ROADMAP Phase 2):
+    - Manus callback / webhook route
+    - Post-level status reconciliation via
+      `computePostStatusFromDeliveries()`
+    - Wiring actual retry redispatch (the placeholder retry route already
+      resets to `queued`; the next dispatcher pass now picks it up — proved by
+      this change)
+    - Cloud Scheduler setup for `/api/jobs/dispatch`
+    - Signed callback verification
+    - Approved payload snapshot (only needed if refine-after-approval lands)
 
 ### 2026-04-21
 - Task: Manus dispatcher foundation

@@ -3,16 +3,25 @@ import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { getActiveBrand } from "@/lib/active-brand";
 import { ok, Errors, sessionUser, assertCanApprove } from "@/lib/api";
+import { writeAuditLog, AuditAction } from "@/lib/audit";
 
 /**
  * POST /api/posts/[id]/deliveries/[platform]/retry
  *
- * Placeholder retry endpoint. Resets a failed delivery back to `queued` and
- * bumps retry_count. The actual Manus dispatcher (follow-up work) picks it up
- * from the queued state and attempts delivery again. Retry reuses the SAME
- * approved content payload — no regeneration, no re-approval, no source re-run.
+ * Operator retry for a failed platform delivery. Resets the delivery back to
+ * `queued` with `scheduled_for = now()` so it's picked up on the next Manus
+ * dispatcher tick (Cloud Scheduler fires every 2 minutes in production, see
+ * docs/08-deployment.md). Retry reuses the SAME approved content payload —
+ * no regeneration, no re-approval, no source re-run.
  *
- * Requires brand_manager or admin role.
+ * State changes:
+ *   status           failed → queued
+ *   scheduled_for    → now()
+ *   retry_count      += 1
+ *   last_error       → null
+ *   worker           preserved ("manus")
+ *
+ * Requires brand_manager or admin role. Writes an audit log entry per call.
  */
 export async function POST(
   _req: NextRequest,
@@ -43,17 +52,38 @@ export async function POST(
     return Errors.VALIDATION("Only failed deliveries can be retried");
   }
 
+  const now = new Date();
   const updated = await db.postPlatformDelivery.update({
     where: { id: delivery.id },
     data: {
       status: "queued",
+      scheduled_for: now,
       retry_count: delivery.retry_count + 1,
       last_error: null,
     },
   });
 
-  // TODO: signal the Manus dispatcher (follow-up work). For now the queued state
-  // is the only handoff — a future worker poll or webhook picks it up.
+  void writeAuditLog({
+    brand_id: ctx.brand!.id,
+    user_id: user.id,
+    action: AuditAction.DELIVERY_RETRIED,
+    entity_type: "post_platform_delivery",
+    entity_id: delivery.id,
+    before: {
+      status: delivery.status,
+      retry_count: delivery.retry_count,
+      last_error: delivery.last_error,
+      scheduled_for: delivery.scheduled_for,
+    },
+    after: {
+      status: updated.status,
+      retry_count: updated.retry_count,
+      last_error: updated.last_error,
+      scheduled_for: updated.scheduled_for,
+      post_id: id,
+      platform,
+    },
+  });
 
   return ok(updated);
 }

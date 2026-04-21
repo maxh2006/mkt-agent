@@ -21,13 +21,14 @@ This is not a fully autonomous agent. Backend code computes facts. AI only turns
 Claude Code must follow this order every session:
 
 1. Read `WORKLOG.md` first
-2. Read `docs/00-architecture.md`
-3. Read only the task-relevant docs from `docs/`
-4. Update `WORKLOG.md` before starting implementation
-5. Implement the task
-6. Update `WORKLOG.md` after finishing implementation
+2. Read `ROADMAP.md` for the structured master roadmap (phases, priority, rules)
+3. Read `docs/00-architecture.md`
+4. Read only the task-relevant docs from `docs/`
+5. Update `WORKLOG.md` before starting implementation
+6. Implement the task
+7. Update `WORKLOG.md` after finishing implementation
 
-Never skip `WORKLOG.md`.
+Never skip `WORKLOG.md` or `ROADMAP.md`.
 
 ---
 

@@ -69,6 +69,17 @@
 
 ---
 
+## AI Context Precedence
+
+AI content generation reads layered context in this order (later overrides earlier on conflict):
+
+1. **Brand Management (default / base layer)** — positioning, voice, language style + sample, audience persona, notes for AI, banned phrases + topics, hashtags, colors, logos, sample captions. This is the admin-maintained base AI profile for each brand.
+2. **Adhoc Event brief** — theme, objective, rules, reward, target audience, CTA, tone, platform scope, notes for AI. When an event-derived post is being generated/refined, event fields override brand fields wherever both specify the same attribute.
+
+The precedence is documented here and in `docs/07-ai-boundaries.md`. It does not need to be surfaced loudly in the UI beyond a small "base AI profile; events override" note at the top of the Brand Management edit dialog.
+
+---
+
 ## Approval Rules
 
 - human approval required in MVP before publish
@@ -105,22 +116,58 @@ Approval flow:
 1. operator approves
 2. backoffice records approved_at / approved_by and sets status = scheduled
 3. scheduled_at defaults to now() if operator didn't pre-schedule
-4. Manus dispatcher (POST /api/jobs/dispatch, cron-driven) picks due
-   PostPlatformDelivery rows (status=queued, scheduled_for<=now), atomically
-   claims them (FOR UPDATE SKIP LOCKED), marks them publishing, and hands a
-   payload to the Manus worker. No content regeneration or re-approval.
-5. per-platform results come back via callback (follow-up work) and transition
-   individual deliveries to posted or failed
-6. a reconciler (follow-up work) aggregates delivery terminal states into the
-   parent post status: posted | partial | failed
+4. backoffice creates a PostPlatformDelivery row for (post_id, post.platform)
+   via `ensureDeliveriesForPost()`. Row status is `queued` if scheduled_for
+   has arrived, `scheduled` otherwise. The same helper runs on explicit
+   `POST /api/posts/[id]/schedule`. Idempotent via the unique constraint +
+   `createMany({ skipDuplicates: true })`.
+5. Manus dispatcher (POST /api/jobs/dispatch, cron-driven) picks due
+   PostPlatformDelivery rows (status IN ('queued','scheduled') with
+   scheduled_for<=now), atomically claims them (FOR UPDATE SKIP LOCKED),
+   marks them publishing, and hands a payload to the Manus worker.
+   No content regeneration or re-approval.
+6. per-platform results come back via `POST /api/manus/callback` (HMAC-signed
+   with `MANUS_WEBHOOK_SECRET`), transitioning the individual PostPlatformDelivery
+   to posted or failed. Callback is idempotent: repeated success callbacks
+   fill in missing `external_post_id` only; repeated failure callbacks refresh
+   `last_error` only when it differs; posted→failed regressions are refused
+   (200 with `refused=true`). Failed callbacks may include a machine-readable
+   `error_code` (see `ManusErrorCode` in docs/00-architecture.md); when
+   provided, `last_error` is stored as `"[CODE] human message"`.
+7. the same callback then runs `reconcilePostStatus()`, which computes the
+   aggregate via `computePostStatusFromDeliveries()` and updates
+   `Post.status` (+ `Post.posted_at` on first-time posted): posted | partial | failed
 
 Retries:
 - Happen at the platform delivery level (see PostPlatformDelivery model)
 - Resend the same approved content payload
 - Do NOT regenerate content, re-run automation source logic, or require re-approval
 - Available from the Delivery Status modal per failed platform
+- API: `POST /api/posts/[id]/deliveries/[platform]/retry`. Allowed only when
+  delivery status is `failed`. Resets status to `queued`, sets
+  `scheduled_for = now()`, bumps `retry_count`, clears `last_error`, writes
+  `delivery.retried` to audit_logs. Cloud Scheduler's next dispatcher tick
+  claims and re-dispatches the row — no operator action needed after the
+  retry click. Role-gated to brand_manager+.
 
 Refinement:
 - Content Queue refinements are constrained to visual/tone/presentation only
 - Source rules, reward, campaign period, posting schedule, and snapshot remain
   fixed across refinement cycles — regardless of the Manus publishing path.
+
+Refinement scope — MVP policy (locked 2026-04-21):
+- **NO REFINE AFTER APPROVAL.** Once a post is approved and enters the
+  delivery lifecycle, its content is locked.
+- Refine is available ONLY in review-side statuses: `draft`,
+  `pending_approval`, `rejected`.
+- Refine is FORBIDDEN in delivery-side statuses: `scheduled`, `publishing`,
+  `posted`, `partial`, `failed`. (Approved is metadata-only and not editable.)
+- There is **no Return to Review** flow in MVP — approved posts cannot be
+  sent back to review. If a mistake is caught after approval, the operator's
+  recourse is to let the delivery complete and create a new post.
+- Because content is locked post-approval, the Manus dispatcher safely reads
+  live Post fields at dispatch time and on retry; **approved-payload
+  snapshotting is deferred** (not needed under this policy).
+- Enforced in three places: row-level Refine button gating, modal-level
+  defensive lockout render, and server-side PATCH `/api/posts/[id]` (which
+  only accepts `draft` / `rejected` updates).

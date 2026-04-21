@@ -75,15 +75,16 @@ export async function PATCH(
 
   const { identity, integration, voice, design, sample_captions } = parsed.data;
 
-  // Build identity column updates
+  // Build identity column updates. logo_url (top-level column) is no longer
+  // written from the form — logos live in design_settings_json.logos since
+  // 2026-04-21. Legacy column reads still work; it just isn't updated here.
   const identityData = identity
     ? {
         ...(identity.name !== undefined ? { name: identity.name } : {}),
-        ...(identity.domain !== undefined ? { domain: identity.domain || null } : {}),
-        ...(identity.logo_url !== undefined ? { logo_url: identity.logo_url || null } : {}),
-        ...(identity.primary_color !== undefined ? { primary_color: identity.primary_color || null } : {}),
-        ...(identity.secondary_color !== undefined ? { secondary_color: identity.secondary_color || null } : {}),
-        ...(identity.accent_color !== undefined ? { accent_color: identity.accent_color || null } : {}),
+        ...(identity.domain !== undefined ? { domain: identity.domain } : {}),
+        ...(identity.primary_color !== undefined ? { primary_color: identity.primary_color } : {}),
+        ...(identity.secondary_color !== undefined ? { secondary_color: identity.secondary_color } : {}),
+        ...(identity.accent_color !== undefined ? { accent_color: identity.accent_color } : {}),
         ...(identity.active !== undefined ? { active: identity.active } : {}),
       }
     : {};

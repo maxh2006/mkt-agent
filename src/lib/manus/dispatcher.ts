@@ -34,9 +34,11 @@ export async function runManusDispatcher(options: { batchSize?: number } = {}): 
   const batchSize = options.batchSize ?? DEFAULT_BATCH;
 
   // ─── 1. Claim due deliveries atomically.
-  // One SQL statement: lock queued rows whose scheduled_for has arrived, mark them
-  // publishing, return the claimed set. Uses FOR UPDATE SKIP LOCKED so two
-  // dispatchers running concurrently never pick the same row.
+  // One SQL statement: lock queued/scheduled rows whose scheduled_for has arrived,
+  // mark them publishing, return the claimed set. Uses FOR UPDATE SKIP LOCKED so
+  // two dispatchers running concurrently never pick the same row.
+  // Both `queued` (immediate) and `scheduled` (future) rows are eligible once
+  // scheduled_for passes — `scheduled` transitions directly to `publishing`.
   const claimed = await db.$queryRaw<ClaimedRow[]>`
     UPDATE "post_platform_deliveries"
     SET "status" = 'publishing',
@@ -44,7 +46,7 @@ export async function runManusDispatcher(options: { batchSize?: number } = {}): 
         "updated_at" = now()
     WHERE "id" IN (
       SELECT "id" FROM "post_platform_deliveries"
-      WHERE "status" = 'queued' AND "scheduled_for" <= now()
+      WHERE "status" IN ('queued', 'scheduled') AND "scheduled_for" <= now()
       ORDER BY "scheduled_for" ASC
       LIMIT ${batchSize}
       FOR UPDATE SKIP LOCKED
@@ -112,8 +114,9 @@ export async function runManusDispatcher(options: { batchSize?: number } = {}): 
     const result = await dispatchToManus(payload);
     if (result.accepted) {
       summary.dispatched += 1;
+      const refSuffix = result.external_ref ? ` external_ref=${result.external_ref}` : "";
       console.log(
-        `[manus-dispatcher] dispatched delivery=${row.id} platform=${row.platform} post=${post.id}${result.dry_run ? " (dry-run)" : ""}`,
+        `[manus-dispatcher] dispatched delivery=${row.id} platform=${row.platform} post=${post.id}${refSuffix}${result.dry_run ? " (dry-run)" : ""}`,
       );
     } else {
       summary.errors.push({
@@ -121,8 +124,9 @@ export async function runManusDispatcher(options: { batchSize?: number } = {}): 
         platform: row.platform,
         error: result.error ?? "Unknown handoff failure",
       });
+      const codeSuffix = result.error_code ? ` code=${result.error_code}` : "";
       console.warn(
-        `[manus-dispatcher] handoff FAILED delivery=${row.id} platform=${row.platform} post=${post.id} err=${result.error ?? "unknown"}`,
+        `[manus-dispatcher] handoff FAILED delivery=${row.id} platform=${row.platform} post=${post.id}${codeSuffix} err=${result.error ?? "unknown"}`,
       );
       // The delivery is already in `publishing`. Transitioning it back to
       // `failed` on handoff error is a reconciler concern (out of scope here).
