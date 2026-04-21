@@ -16,8 +16,18 @@ enum PostStatus {
   pending_approval
   approved
   scheduled
+  publishing
   posted
+  partial
   rejected
+  failed
+}
+
+enum DeliveryStatus {
+  queued
+  scheduled
+  publishing
+  posted
   failed
 }
 
@@ -26,6 +36,7 @@ enum PostType {
   big_win
   event
   educational
+  hot_games
 }
 
 enum Platform {
@@ -41,6 +52,7 @@ enum SourceType {
   big_win
   event
   manual
+  hot_games
 }
 
 enum EventStatus {
@@ -113,6 +125,7 @@ model User {
   brand_permissions UserBrandPermission[]
   posts_created     Post[]               @relation("PostCreatedBy")
   posts_approved    Post[]               @relation("PostApprovedBy")
+  posts_rejected    Post[]               @relation("PostRejectedBy")
   events_created    Event[]
   audit_logs        AuditLog[]
 
@@ -153,17 +166,49 @@ model Post {
   scheduled_at     DateTime?
   posted_at        DateTime?
   rejected_reason  String?
+  rejected_at      DateTime?
+  rejected_by      String?
   created_by       String
   approved_by      String?
+  approved_at      DateTime?
   created_at   DateTime    @default(now())
   updated_at   DateTime    @updatedAt
 
   brand           Brand              @relation(fields: [brand_id], references: [id])
   creator         User               @relation("PostCreatedBy", fields: [created_by], references: [id])
   approver        User?              @relation("PostApprovedBy", fields: [approved_by], references: [id])
+  rejecter        User?              @relation("PostRejectedBy", fields: [rejected_by], references: [id])
   metrics_rollup  PostMetricsRollup?
+  deliveries      PostPlatformDelivery[]
 
   @@map("posts")
+}
+
+// Per-platform delivery record for a Post.
+// Written when a publish job is dispatched to Manus; retried at the platform level without
+// regenerating content or re-running automation source logic.
+model PostPlatformDelivery {
+  id                     String         @id @default(cuid())
+  post_id                String
+  platform               Platform
+  status                 DeliveryStatus @default(queued)
+  scheduled_for          DateTime?
+  publish_requested_at   DateTime?
+  publish_attempted_at   DateTime?
+  posted_at              DateTime?
+  external_post_id       String?
+  retry_count            Int            @default(0)
+  last_error             String?
+  worker                 String?        // "manus" for now
+  created_at             DateTime       @default(now())
+  updated_at             DateTime       @updatedAt
+
+  post Post @relation(fields: [post_id], references: [id], onDelete: Cascade)
+
+  @@unique([post_id, platform])
+  @@index([post_id])
+  @@index([status, scheduled_for])
+  @@map("post_platform_deliveries")
 }
 
 model Event {

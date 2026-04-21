@@ -7,6 +7,206 @@
 ## Done Tasks
 
 ### 2026-04-21
+- Task: Publishing lifecycle cleanup — Approved becomes metadata; Delivery modal foundation
+  - Status: Complete
+  - Files changed:
+    - prisma/migrations/20260421200000_approved_to_scheduled/migration.sql (new)
+      — UPDATE posts SET status='scheduled', scheduled_at=COALESCE(scheduled_at, approved_at, now())
+        WHERE status='approved'. Existing legacy rows migrated.
+    - src/lib/post-status.ts — VALID_TRANSITIONS updated: pending_approval can now go
+      directly to scheduled (rejected still valid). Legacy `approved` transitions kept.
+    - src/app/api/posts/[id]/approve/route.ts — approval now:
+      * sets status=scheduled (not approved)
+      * writes approved_at + approved_by (metadata)
+      * defaults scheduled_at to now() if null
+      * transitions via isValidTransition(post.status, "scheduled")
+    - src/app/api/posts/route.ts — date-range filter adds `posted` branch using posted_at
+      (primary); legacy `approved` branch kept as fallback
+    - src/app/api/posts/[id]/deliveries/route.ts (new) — GET returns per-platform
+      deliveries + post snapshot; readable by any authenticated user
+    - src/app/api/posts/[id]/deliveries/[platform]/retry/route.ts (new) — POST placeholder
+      retry: validates delivery is in `failed` state, resets to queued, bumps retry_count,
+      clears last_error. Gated to brand_manager+. TODO for actual Manus dispatcher.
+    - src/lib/posts-api.ts — added PlatformDelivery interface + getDeliveries + retryDelivery
+      client methods
+    - src/lib/delivery-aggregation.ts (new) — computePostStatusFromDeliveries() helper
+      implementing the aggregation rules (publishing > scheduled > posted/failed/partial)
+    - src/components/posts/delivery-status-modal.tsx (new) — full modal with table
+      (platform, status chip, scheduled, attempted, posted/error, retry button), empty
+      state when no deliveries yet, Retry All Failed footer button
+    - src/app/(app)/queue/page.tsx:
+      * STATUSES filter: removed "Approved"; added "Publishing" and "Partial"
+      * DELIVERY_STATUSES set added for row action gating
+      * showSchedule now gated on status=scheduled (was: approved)
+      * showDelivery gates on DELIVERY_STATUSES
+      * New View Delivery action button (Send icon, cyan) opens the modal
+      * Page wires setDeliveryPostId state + DeliveryStatusModal instance
+    - src/app/(app)/calendar/page.tsx — STATUS_OPTIONS "Approved (Posted)" replaced with
+      "Posted"; default `statuses` query switched from "approved,scheduled" to
+      "posted,scheduled"
+    - src/lib/calendar-utils.ts — getPostDate() now checks status==="posted" instead of
+      "approved" for posted_at display
+    - src/components/calendar/calendar-post-card.tsx — STATUS_CARD_STYLES + StatusIndicator
+      + detail dialog all switched from "approved" key to "posted"
+    - docs/00-architecture.md, docs/02-data-model.md, docs/03-ui-pages.md,
+      docs/06-workflows-roles.md — updated; CLAUDE.md also updated
+  - Where Approved was removed from visible status handling:
+    - Queue page STATUSES filter
+    - Calendar page STATUS_OPTIONS filter + default query
+    - Calendar post card visual styles + status indicator + detail dialog
+    - calendar-utils.getPostDate branching
+    - Approve API endpoint no longer sets status=approved
+    - Data migration converted existing rows
+    - Kept in enum for historical rows + legacy fallback in posts-list date-range filter
+  - Current visible lifecycle:
+    Draft → Pending Approval → Scheduled → Publishing → Posted | Partial | Failed
+    (Rejected is a terminal path from Pending Approval)
+    approved_at + approved_by persist as metadata only.
+  - Delivery modal behavior:
+    - Opens via "View Delivery" action (Send icon) when post has entered delivery lifecycle
+    - Fetches GET /api/posts/[id]/deliveries
+    - Shows one row per platform with status chip, scheduled time, attempted time,
+      posted_at + external_post_id (on success) or last_error + retry_count (on failure)
+    - Retry button on each failed row + "Retry All Failed" footer button when >1 failed
+    - Empty state when no deliveries have been dispatched yet
+  - Retry UI behavior:
+    - POST /api/posts/[id]/deliveries/[platform]/retry resets delivery to queued
+    - Bumps retry_count, clears last_error
+    - Requires brand_manager+ role, single-brand context
+    - TODO: signal the Manus dispatcher when that lands
+    - Does NOT regenerate, does NOT re-approve
+  - Schema adjustments: none beyond the one-shot data migration (status values, enum,
+    and delivery model were all set up in earlier tasks)
+  - Docs updated: CLAUDE.md, docs/00-architecture.md, docs/02-data-model.md,
+    docs/03-ui-pages.md, docs/06-workflows-roles.md
+  - Remaining follow-up items for full Manus integration:
+    1. Manus dispatcher service — picks up scheduled posts whose scheduled_at <= now()
+       and creates PostPlatformDelivery rows + dispatches delivery jobs
+    2. Webhook / callback route — Manus reports per-platform results (posted, failed)
+    3. Post-level status reconciler — runs computePostStatusFromDeliveries() and updates
+       post.status whenever a delivery transitions
+    4. Post detail page — surface the delivery modal from a View Delivery button there too
+       (currently wired only in Queue; detail page is a small follow-up)
+    5. Manus credentials / webhook signing (env-level config, out of scope here)
+    6. Retry trigger — after placeholder retry, the dispatcher needs to actually redispatch
+       the queued delivery job
+
+### 2026-04-21
+- Task: Manus publishing architecture — docs + minimal schema hooks
+  - Status: Complete (architecture + schema surface only; full Manus integration deferred)
+  - Schema/model changes (migration 20260421180000_manus_publishing):
+    - PostStatus enum: added `publishing`, `partial` (kept `approved` for metadata + brief handoff)
+    - New DeliveryStatus enum: queued | scheduled | publishing | posted | failed
+    - New model PostPlatformDelivery (table post_platform_deliveries):
+      * id, post_id (FK cascade), platform, status (DeliveryStatus), scheduled_for,
+        publish_requested_at, publish_attempted_at, posted_at, external_post_id,
+        retry_count, last_error, worker ("manus"), created_at, updated_at
+      * unique (post_id, platform); indexes on (post_id) and (status, scheduled_for)
+    - Post: added `deliveries PostPlatformDelivery[]` back-relation
+  - Code changes:
+    - src/lib/validations/post.ts — postStatusValues adds `publishing` + `partial`
+    - src/lib/post-status.ts — VALID_TRANSITIONS updated for the new lifecycle:
+      approved → {scheduled, publishing, posted, failed}; scheduled → {publishing, posted, failed};
+      publishing → {posted, partial, failed}; partial → {publishing}; failed → {publishing}
+    - src/components/posts/status-badge.tsx — new entries for `publishing` (cyan, Loader2)
+      and `partial` (orange, CircleDot)
+  - Docs changes:
+    - CLAUDE.md — added Manus publishing principles + Approved ≠ Posted clarification
+    - docs/00-architecture.md — new Publishing — Manus worker section
+    - docs/02-data-model.md — new post_platform_deliveries table + DeliveryStatus enum
+      + updated post_status enum with publishing/partial
+    - docs/03-ui-pages.md — target row actions model (core + overflow), Delivery Status
+      modal plan, Scheduled-posts clarity note (approved = metadata, not operational state)
+    - docs/06-workflows-roles.md — rewrote Content Queue Status Lifecycle section for
+      the Manus flow (review-side vs delivery-side), approval flow steps, retry rules
+    - docs/07-ai-boundaries.md — new Manus Publishing — AI Boundary section
+      (no AI at publish or retry; retry resends approved payload)
+  - Target lifecycle model:
+    - Review-side: draft → pending_approval → approved (metadata) | rejected
+    - Delivery-side: scheduled → publishing → posted | partial | failed
+    - approved_at + approved_by: metadata only; operational state after approval
+      becomes scheduled (or briefly publishing for immediate sends)
+  - Retry model:
+    - Lives at PostPlatformDelivery level (per-platform, not per-post)
+    - Resends same approved content payload via Manus
+    - Does NOT regenerate content or re-run automation source logic
+    - Does NOT require re-approval
+    - Increments retry_count; updates publish_attempted_at / last_error / status
+  - Per-platform delivery structure: see PostPlatformDelivery model (above)
+  - Follow-up items (not implemented, flagged here):
+    1. Manus dispatcher — service/worker that picks up scheduled posts and sends to platforms
+    2. Per-platform status reporter — webhook or polling route that updates deliveries
+    3. Post-level status aggregation from deliveries (e.g. all posted → posted, some failed → partial)
+    4. Delivery Status modal UI (planned in docs/03-ui-pages.md)
+    5. Retry API endpoints (per-platform + retry-all-failed)
+    6. "View Delivery" overflow action in queue row
+    7. Calendar wording audit (calendar still uses older approved=posted semantics)
+    8. Approve endpoint transition — update it to set status=scheduled (not approved)
+       once Manus is wired. For now approved is kept to avoid breaking the existing flow.
+
+- Task: Content Queue audit refinements
+  - Status: Complete
+  - Schema changes (migration 20260421120000_queue_audit):
+    - PostType enum: added `hot_games`
+    - SourceType enum: added `hot_games`
+    - Post: added `rejected_at` (DateTime?), `rejected_by` (String?, FK to users), `approved_at` (DateTime?)
+    - User: added `posts_rejected` back-relation (PostRejectedBy)
+  - Files changed:
+    - prisma/schema.prisma + prisma/migrations/20260421120000_queue_audit/migration.sql
+    - src/lib/validations/post.ts — hot_games added to postTypeValues + sourceTypeValues
+    - src/app/api/posts/[id]/reject/route.ts — sets rejected_at + rejected_by
+    - src/app/api/posts/[id]/approve/route.ts — sets approved_at
+    - src/app/api/posts/route.ts — GET enriches each post with schedule_summary (window + cadence)
+      and sample_group ({id, index, total}) derived from generation_context_json
+    - src/lib/posts-api.ts — Post interface adds rejected_at, rejected_by, approved_at,
+      schedule_summary, sample_group
+    - src/app/(app)/queue/page.tsx:
+      * Type filter: Hot Games added
+      * Badge: hot_games → "Hot" (rose)
+      * Column: Recurrence → Schedule, renders post.schedule_summary (wraps on long text)
+      * Sample group: "Sample N/M" chip in preview cell, deterministic colored left border
+        (border-l-4) on first visible cell for siblings
+    - src/app/(app)/queue/[id]/page.tsx — rejection block now shows rejected_at + rejected_by
+    - src/components/posts/edit-post-modal.tsx — renamed "Edit Post" → "Refine Post",
+      CTA renamed to "Apply Refinement". Added Locked Context panel at top showing source
+      type, event title, schedule summary, Hot Games snapshot summary, and source-specific
+      reminder. Universal helper note below textarea: "You may refine visual style, tone,
+      and presentation. Fixed rules, reward, timing, and source context will remain unchanged."
+    - docs/03-ui-pages.md, docs/06-workflows-roles.md, docs/07-ai-boundaries.md — updated
+  - How Schedule column works:
+    * Event-derived with posting instance: "Apr 1 – Apr 30 • Daily 3:00 PM"
+    * Event-derived Generate Now: "Apr 1 – Apr 30 • Generate Now • One-time" (or bare if no dates)
+    * big_win post_type: "Always-on • Big Win automation"
+    * hot_games post_type: "Always-on • Hot Games scan"
+    * else: "—"
+  - How sample grouping is shown:
+    * generation_context_json keys sample_group_id / sample_index / sample_total are
+      read server-side and surfaced as post.sample_group on the client
+    * UI: "Sample N/M" chip next to creator name in preview cell + colored left border
+      on first visible cell of the row. Siblings share color via deterministic hash of
+      sample_group_id.
+    * No DB column added — uses existing generation_context_json
+  - How refine/edit constraints are communicated:
+    * Locked Context panel at top of modal is always shown when source_type is set
+    * Per-source reminders: Event (rules + posting instance fixed), Hot Games (frozen
+      snapshot reused), Big Win (rule-matched values + username logic fixed)
+    * Universal note below instruction textarea spells out what CAN be refined vs what stays fixed
+    * Modal title is now "Refine Post"; CTA is "Apply Refinement"
+  - Status interpretation:
+    * Audited StatusBadge — labels already match canonical model
+      (Draft / Pending / Approved / Scheduled / Posted / Rejected / Failed)
+    * Approved uses emerald + CheckCircle2; Posted uses violet + SendHorizontal — never conflated
+    * docs/06-workflows-roles.md now codifies this status lifecycle
+    * Calendar page still uses older "approved = posted" semantics — flagged as follow-up per spec scope
+  - Rejected posts retention:
+    * Data-side unchanged — status=rejected persists
+    * UI: status filter option Rejected still surfaces them
+    * Rejection metadata now captured (rejected_at + rejected_by) and displayed on post detail
+    * Rejected drafts remain part of historical/learning dataset alongside approved/edited/posted
+  - Hot Games added to Type filter: confirmed — value "hot_games", label "Hot Games", badge "Hot" (rose)
+  - Docs updated: 03-ui-pages.md, 06-workflows-roles.md, 07-ai-boundaries.md
+
+### 2026-04-21
 - Task: Calendar header — centered period label + month-overlap week labels
   - Status: Complete
   - Files changed:

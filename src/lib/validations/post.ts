@@ -1,9 +1,9 @@
 import { z } from "zod";
 
 // Inline enum values to avoid importing Prisma enums in shared validation files
-const postTypeValues = ["promo", "big_win", "event", "educational"] as const;
+const postTypeValues = ["promo", "big_win", "event", "educational", "hot_games"] as const;
 const platformValues = ["instagram", "facebook", "twitter", "tiktok", "telegram"] as const;
-const sourceTypeValues = ["promo", "big_win", "event", "manual"] as const;
+const sourceTypeValues = ["promo", "big_win", "event", "manual", "hot_games"] as const;
 
 export const createPostSchema = z.object({
   post_type: z.enum(postTypeValues),
@@ -32,7 +32,7 @@ export const schedulePostSchema = z.object({
   scheduled_at: z.string().datetime({ message: "scheduled_at must be an ISO 8601 datetime" }),
 });
 
-const postStatusValues = ["draft", "pending_approval", "approved", "scheduled", "posted", "rejected", "failed"] as const;
+const postStatusValues = ["draft", "pending_approval", "approved", "scheduled", "publishing", "posted", "partial", "rejected", "failed"] as const;
 
 export const listPostsQuerySchema = z.object({
   status: z.enum(postStatusValues).optional(),

@@ -67,7 +67,7 @@ function BrandDot({ post, className }: { post: Post; className?: string }) {
 }
 
 const STATUS_CARD_STYLES = {
-  approved: {
+  posted: {
     border: "border-l-emerald-500",
     bg: "bg-emerald-500/5",
     hoverBg: "hover:bg-emerald-500/10",
@@ -88,7 +88,7 @@ function getStatusStyle(status: string) {
 }
 
 function StatusIndicator({ status }: { status: string }) {
-  if (status === "approved") {
+  if (status === "posted") {
     return (
       <span className="inline-flex items-center gap-0.5 rounded border px-1 py-0 text-[10px] font-medium leading-4 bg-emerald-500/10 text-emerald-700 border-emerald-500/20">
         <CheckCircle2 className="h-2.5 w-2.5" />
@@ -168,7 +168,7 @@ function PostDetailDialog({ post, open, onClose, showBrand }: {
 
           {/* Time */}
           <div className="flex items-center gap-2 text-sm">
-            {post.status === "approved" ? (
+            {post.status === "posted" ? (
               <>
                 <CheckCircle2 className="h-4 w-4 text-emerald-600" />
                 <span className="text-muted-foreground">Posted:</span>

@@ -41,7 +41,7 @@ const POST_TYPES = [
 
 const STATUS_OPTIONS = [
   { value: "all", label: "All" },
-  { value: "approved", label: "Approved (Posted)" },
+  { value: "posted", label: "Posted" },
   { value: "scheduled", label: "Scheduled" },
 ];
 
@@ -69,7 +69,7 @@ export default function CalendarPage() {
   );
 
   const queryFilters = useMemo(() => ({
-    statuses: filters.status !== "all" ? filters.status : "approved,scheduled",
+    statuses: filters.status !== "all" ? filters.status : "posted,scheduled",
     platform: filters.platform !== "all" ? filters.platform : undefined,
     post_type: filters.post_type !== "all" ? filters.post_type : undefined,
     date_from: range.start.toISOString(),

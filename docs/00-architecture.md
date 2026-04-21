@@ -72,6 +72,33 @@ Keep logic grouped by domain:
 ### Database
 PostgreSQL with Prisma.
 
+### Publishing — Manus worker
+Manus is the external auto-publishing worker. Responsibilities split:
+
+Backoffice (this app):
+- source of truth for drafts
+- review / refine / reject / approve / schedule
+- queue + calendar visibility
+- delivery visibility (per-platform status surfaced via delivery modal)
+- source/rule context shown to operator
+
+Manus:
+- receives publish jobs from approved/scheduled posts
+- posts to external platforms (Meta, Telegram, more later)
+- returns success/failure per platform
+- retries when requested
+- reports platform-level outcomes back
+
+Retries happen at the **platform delivery level** and resend the same approved
+content payload — retry does NOT regenerate content, re-run automation source logic,
+or require re-approval.
+
+Visible post lifecycle (operational):
+Draft → Pending Approval → Scheduled → Publishing → Posted / Partial / Failed.
+Rejected is a terminal path from Pending Approval.
+Approved is metadata only (`approved_at`, `approved_by`) — not a long-lived
+operational status.
+
 ### External Data Source — Shared BigQuery
 Primary operational facts come from a shared BigQuery dataset maintained by the platform team.
 Tables: `shared.users`, `shared.transactions`, `shared.game_rounds`, `shared.games`.

@@ -51,6 +51,51 @@ The system stores the output and lets humans review it.
 
 ---
 
+## Manus Publishing — AI Boundary
+
+Manus is the auto-publishing worker. It does not generate content; it delivers an
+already-approved content payload to external platforms and reports outcomes.
+
+AI is never invoked at publish or retry time:
+- approval does not trigger regeneration
+- retry does not regenerate content
+- per-platform retry resends the same payload produced at generation/refinement time
+
+Publishing failures (platform rejection, auth error, rate limit) surface in the
+delivery modal with readable error text. Operators retry at the platform level;
+the AI layer is not re-entered.
+
+---
+
+## Content Queue Refinement Constraints
+
+When an operator opens the Refine Post modal from Content Queue, refinement
+instructions may alter **visual style, tone, urgency, and presentation only**.
+
+The following stay fixed across refinement cycles:
+- source rules (event mechanics, promo config, big win match logic)
+- reward amount
+- campaign period / posting schedule
+- source snapshot (Hot Games frozen ranked list)
+- username logic (masked source for default rule, random for custom rule)
+
+The modal shows a Locked Context panel summarizing the immutable source details
+and a universal helper note restating the constraint.
+
+## Multi-sample Draft Grouping
+
+Automations create multiple sibling drafts per scenario:
+- Big Wins: 3 samples per scan
+- Running Promotions: 3 samples per promo match
+- Hot Games: 2 samples per snapshot
+
+Sibling drafts share a `sample_group_id` stored in `generation_context_json` along
+with `sample_index` and `sample_total`. The Content Queue reads these to render
+a "Sample N/M" chip and a shared left-edge accent color so operators can recognize
+siblings at a glance. No dedicated column — the existing JSON field is reused.
+
+---
+
 ## Sample Brief Panel (Create Event page)
 
 The Create Event page shows a right-side Sample Event Brief panel for operator

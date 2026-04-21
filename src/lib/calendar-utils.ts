@@ -45,8 +45,9 @@ export function getDaysInRange(range: DateRange): Date[] {
 }
 
 export function getPostDate(post: Post): string | null {
-  if (post.status === "approved" && post.posted_at) return post.posted_at;
-  if (post.status === "approved" && !post.posted_at) return post.updated_at;
+  // Posted posts display their real posted_at time.
+  if (post.status === "posted" && post.posted_at) return post.posted_at;
+  if (post.status === "posted" && !post.posted_at) return post.updated_at;
   if (post.status === "scheduled" && post.scheduled_at) return post.scheduled_at;
   return post.scheduled_at ?? post.posted_at ?? null;
 }

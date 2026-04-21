@@ -291,10 +291,15 @@ export default function PostDetailPage() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Left: content fields */}
         <div className="space-y-4">
-          {post.rejected_reason && (
+          {(post.rejected_reason || post.rejected_at) && (
             <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4 space-y-1">
-              <p className="text-xs font-medium text-destructive uppercase tracking-wide">Rejection Reason</p>
-              <p className="text-sm">{post.rejected_reason}</p>
+              <p className="text-xs font-medium text-destructive uppercase tracking-wide">Rejection</p>
+              {post.rejected_reason && <p className="text-sm">{post.rejected_reason}</p>}
+              <p className="text-xs text-muted-foreground">
+                {post.rejected_at && <>Rejected {new Date(post.rejected_at).toLocaleString()}</>}
+                {post.rejected_at && post.rejected_by && " · "}
+                {post.rejected_by && <>by user {post.rejected_by}</>}
+              </p>
             </div>
           )}
 

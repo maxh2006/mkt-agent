@@ -75,3 +75,46 @@
 - keep approval actions fast
 - audit all critical changes
 - always show source data in preview when relevant
+
+---
+
+## Content Queue Status Lifecycle (Manus publishing)
+
+Operator-side (review):
+- **draft** — generated, not yet reviewed
+- **pending_approval** — submitted for review
+- **rejected** — rejected by operator; retained for history/learning (not deleted)
+
+Approved is NOT a visible status — approval is metadata only.
+
+Delivery-side (driven by Manus):
+- **scheduled** — approved, waiting for publish time (or immediate dispatch window)
+- **publishing** — Manus is currently attempting per-platform delivery
+- **posted** — all required platform deliveries succeeded
+- **partial** — some platforms succeeded, some failed
+- **failed** — all targeted deliveries failed
+
+Approval as metadata (not a visible state):
+- `approved_at` and `approved_by` are recorded on the post
+- `approved` remains in the enum for legacy/historical rows only
+- The Approve action transitions `pending_approval` → `scheduled` directly
+- If `scheduled_at` was not pre-set, approval defaults it to `now()` (immediate)
+- Rejection metadata (rejected_at, rejected_by, rejected_reason) likewise persisted
+
+Approval flow:
+1. operator approves
+2. backoffice records approved_at / approved_by and sets status = scheduled
+3. scheduled_at defaults to now() if operator didn't pre-schedule
+4. Manus picks up scheduled posts and transitions them through publishing → posted / partial / failed
+5. terminal state: posted | partial | failed
+
+Retries:
+- Happen at the platform delivery level (see PostPlatformDelivery model)
+- Resend the same approved content payload
+- Do NOT regenerate content, re-run automation source logic, or require re-approval
+- Available from the Delivery Status modal per failed platform
+
+Refinement:
+- Content Queue refinements are constrained to visual/tone/presentation only
+- Source rules, reward, campaign period, posting schedule, and snapshot remain
+  fixed across refinement cycles — regardless of the Manus publishing path.

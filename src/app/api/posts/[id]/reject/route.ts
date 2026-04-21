@@ -47,6 +47,8 @@ export async function POST(
     data: {
       status: "rejected",
       rejected_reason: reason ?? null,
+      rejected_at: new Date(),
+      rejected_by: user.id,
     },
   });
 

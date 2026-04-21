@@ -8,6 +8,8 @@ import {
   SendHorizontal,
   XCircle,
   AlertTriangle,
+  Loader2,
+  CircleDot,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -38,10 +40,20 @@ const STATUS_CONFIG: Record<string, StatusConfig> = {
     className: "bg-blue-500/10 text-blue-700 border-blue-500/20 dark:text-blue-400",
     Icon: CalendarClock,
   },
+  publishing: {
+    label: "Publishing",
+    className: "bg-cyan-500/10 text-cyan-700 border-cyan-500/20 dark:text-cyan-400",
+    Icon: Loader2,
+  },
   posted: {
     label: "Posted",
     className: "bg-violet-500/10 text-violet-700 border-violet-500/20 dark:text-violet-400",
     Icon: SendHorizontal,
+  },
+  partial: {
+    label: "Partial",
+    className: "bg-orange-500/10 text-orange-700 border-orange-500/20 dark:text-orange-400",
+    Icon: CircleDot,
   },
   rejected: {
     label: "Rejected",

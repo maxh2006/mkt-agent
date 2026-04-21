@@ -10,6 +10,7 @@ import { StatusBadge } from "@/components/posts/status-badge";
 import { RejectDialog } from "@/components/posts/reject-dialog";
 import { ScheduleDialog } from "@/components/posts/schedule-dialog";
 import { EditPostModal } from "@/components/posts/edit-post-modal";
+import { DeliveryStatusModal } from "@/components/posts/delivery-status-modal";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -27,18 +28,21 @@ import {
   CalendarClock,
   Pencil,
   ImageIcon,
+  Send,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
+// Visible operational statuses — Approved is no longer here; it exists as approved_at/approved_by metadata only.
 const STATUSES = [
   { value: "", label: "All Statuses" },
   { value: "draft", label: "Draft" },
   { value: "pending_approval", label: "Pending Approval" },
-  { value: "approved", label: "Approved" },
   { value: "scheduled", label: "Scheduled" },
+  { value: "publishing", label: "Publishing" },
   { value: "posted", label: "Posted" },
+  { value: "partial", label: "Partial" },
   { value: "rejected", label: "Rejected" },
   { value: "failed", label: "Failed" },
 ];
@@ -58,6 +62,7 @@ const POST_TYPES = [
   { value: "big_win", label: "Big Win" },
   { value: "event", label: "Adhoc Event" },
   { value: "educational", label: "Educational" },
+  { value: "hot_games", label: "Hot Games" },
 ];
 
 const PLATFORM_STYLE: Record<string, { abbr: string; className: string }> = {
@@ -73,7 +78,19 @@ const POST_TYPE_STYLE: Record<string, { label: string; className: string }> = {
   big_win:     { label: "Win",    className: "bg-amber-500/10 text-amber-700 border-amber-500/20" },
   event:       { label: "Event",  className: "bg-violet-500/10 text-violet-700 border-violet-500/20" },
   educational: { label: "Edu",    className: "bg-indigo-500/10 text-indigo-700 border-indigo-500/20" },
+  hot_games:   { label: "Hot",    className: "bg-rose-500/10 text-rose-700 border-rose-500/20" },
 };
+
+// Deterministic left-accent color for sample group siblings
+const SAMPLE_GROUP_COLORS = [
+  "border-l-sky-500", "border-l-fuchsia-500", "border-l-amber-500",
+  "border-l-lime-500", "border-l-teal-500", "border-l-violet-500",
+];
+function sampleGroupBorderColor(id: string): string {
+  let h = 0;
+  for (const c of id) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return SAMPLE_GROUP_COLORS[h % SAMPLE_GROUP_COLORS.length];
+}
 
 // Deterministic color dot for brands (no primary_color in BrandRef)
 const BRAND_COLORS = [
@@ -172,6 +189,7 @@ function canApproveRole(role?: string) {
 }
 
 const EDITABLE_STATUSES = new Set(["draft", "pending_approval", "rejected"]);
+const DELIVERY_STATUSES = new Set(["scheduled", "publishing", "posted", "partial", "failed"]);
 
 const PER_PAGE = 25;
 
@@ -186,6 +204,7 @@ export default function ContentQueuePage() {
 
   const [filters, setFilters] = useState<PostFilters>({ page: 1, per_page: PER_PAGE });
   const [editPost, setEditPost] = useState<Post | null>(null);
+  const [deliveryPostId, setDeliveryPostId] = useState<string | null>(null);
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["posts", filters],
@@ -309,8 +328,8 @@ export default function ContentQueuePage() {
                     <th className="px-3 py-2.5 text-left font-medium text-muted-foreground whitespace-nowrap">
                       Platform
                     </th>
-                    <th className="px-3 py-2.5 text-left font-medium text-muted-foreground whitespace-nowrap">
-                      Recurrence
+                    <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">
+                      Schedule
                     </th>
                     <th className="px-3 py-2.5 text-left font-medium text-muted-foreground whitespace-nowrap">
                       Scheduled
@@ -345,6 +364,7 @@ export default function ContentQueuePage() {
                         onReject={(reason) => handleReject(post.id, reason)}
                         onSchedule={(scheduledAt) => handleSchedule(post.id, scheduledAt)}
                         onEdit={() => setEditPost(post)}
+                        onViewDelivery={() => setDeliveryPostId(post.id)}
                       />
                     ))
                   )}
@@ -378,6 +398,13 @@ export default function ContentQueuePage() {
         open={editPost !== null}
         onClose={() => setEditPost(null)}
       />
+
+      {/* Delivery status modal */}
+      <DeliveryStatusModal
+        postId={deliveryPostId}
+        open={deliveryPostId !== null}
+        onClose={() => setDeliveryPostId(null)}
+      />
     </div>
   );
 }
@@ -393,6 +420,7 @@ interface PostRowProps {
   onReject: (reason?: string) => Promise<void>;
   onSchedule: (scheduledAt: string) => Promise<void>;
   onEdit: () => void;
+  onViewDelivery: () => void;
 }
 
 function PostRow({
@@ -404,6 +432,7 @@ function PostRow({
   onReject,
   onSchedule,
   onEdit,
+  onViewDelivery,
 }: PostRowProps) {
   const [approving, setApproving] = useState(false);
 
@@ -412,19 +441,25 @@ function PostRow({
 
   const showApprove  = canApprove && post.status === "pending_approval";
   const showReject   = canApprove && post.status === "pending_approval";
-  const showSchedule = canApprove && post.status === "approved";
+  // Schedule action lets operator change publish time while the post is scheduled.
+  const showSchedule = canApprove && post.status === "scheduled";
   const showEdit     = EDITABLE_STATUSES.has(post.status);
+  // View Delivery is surfaced once the post has entered the delivery lifecycle.
+  const showDelivery = DELIVERY_STATUSES.has(post.status);
 
   async function handleApprove() {
     setApproving(true);
     try { await onApprove(); } finally { setApproving(false); }
   }
 
+  const sampleGroup = post.sample_group ?? null;
+  const groupBorderClass = sampleGroup ? `border-l-4 ${sampleGroupBorderColor(sampleGroup.id)}` : "";
+
   return (
     <tr className="hover:bg-muted/30 transition-colors">
       {/* Brand */}
       {isAllBrands && (
-        <td className="px-3 py-3 max-w-[140px]">
+        <td className={cn("px-3 py-3 max-w-[140px]", groupBorderClass)}>
           {post.brand ? (
             <BrandCell name={post.brand.name} />
           ) : (
@@ -434,7 +469,7 @@ function PostRow({
       )}
 
       {/* Thumbnail */}
-      <td className="px-3 py-3">
+      <td className={cn("px-3 py-3", !isAllBrands && groupBorderClass)}>
         <ThumbnailCell platform={post.platform} />
       </td>
 
@@ -446,9 +481,16 @@ function PostRow({
             {previewSecondary}
           </p>
         )}
-        {post.creator && (
-          <p className="text-xs text-muted-foreground/70 mt-0.5">{post.creator.name}</p>
-        )}
+        <div className="flex items-center gap-2 mt-0.5">
+          {post.creator && (
+            <span className="text-xs text-muted-foreground/70">{post.creator.name}</span>
+          )}
+          {sampleGroup && (
+            <span className="inline-flex items-center rounded border px-1.5 py-0 text-[10px] font-medium leading-4 bg-muted/40 text-muted-foreground border-border">
+              Sample {sampleGroup.index}/{sampleGroup.total}
+            </span>
+          )}
+        </div>
       </td>
 
       {/* Status */}
@@ -466,9 +508,9 @@ function PostRow({
         <PlatformTag platform={post.platform} />
       </td>
 
-      {/* Recurrence */}
-      <td className="px-3 py-3 whitespace-nowrap text-xs text-muted-foreground">
-        {post.event_posting_summary ?? "—"}
+      {/* Schedule */}
+      <td className="px-3 py-3 text-xs text-muted-foreground max-w-[220px]">
+        {post.schedule_summary ?? post.event_posting_summary ?? "—"}
       </td>
 
       {/* Scheduled */}
@@ -545,6 +587,18 @@ function PostRow({
                 </Button>
               }
             />
+          )}
+
+          {showDelivery && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onViewDelivery}
+              title="View Delivery"
+              className="text-cyan-700 hover:text-cyan-800 hover:bg-cyan-500/10"
+            >
+              <Send className="h-4 w-4" />
+            </Button>
           )}
         </div>
       </td>

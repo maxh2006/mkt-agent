@@ -212,11 +212,48 @@ Old config shapes migrated at render time by merging with defaults.
 ### post_status
 - draft
 - pending_approval
-- approved
+- approved (legacy enum value — no longer used operationally; kept for history)
 - scheduled
+- publishing
 - posted
+- partial
 - rejected
 - failed
+
+Approval is metadata only (`approved_at`, `approved_by`); the Approve action
+transitions `pending_approval` directly to `scheduled`. Existing DB rows with
+`status = 'approved'` were migrated to `scheduled` by
+`20260421200000_approved_to_scheduled`.
+
+### delivery_status (new)
+- queued
+- scheduled
+- publishing
+- posted
+- failed
+
+### post_platform_deliveries (new)
+Per-platform delivery record for a Post. Written when a publish job is dispatched
+to Manus. Retried at the platform level without regenerating content.
+- id
+- post_id (FK to posts, cascade delete)
+- platform (Platform enum)
+- status (DeliveryStatus enum)
+- scheduled_for
+- publish_requested_at
+- publish_attempted_at
+- posted_at
+- external_post_id
+- retry_count
+- last_error
+- worker ("manus")
+- created_at
+- updated_at
+
+Indexes:
+- unique (post_id, platform)
+- (post_id)
+- (status, scheduled_for)
 
 ### event_status
 - active

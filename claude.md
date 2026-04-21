@@ -65,6 +65,16 @@ Never skip `WORKLOG.md`.
 - Backend code computes metrics, thresholds, rollups, and source facts
 - AI only generates language and creative variations from structured input
 - Human approval is required in MVP before publishing
+- **Manus is the auto-publishing worker.** The backoffice owns drafts / review /
+  refine / approve / schedule / queue / calendar / delivery visibility. Manus owns
+  actual platform delivery (Meta, Telegram, more later), result reporting, and
+  retries.
+- Approval is metadata (approved_at, approved_by) — **Approved is not a visible
+  post status**. Approving transitions the post straight to `scheduled`. Visible
+  operational lifecycle: Draft / Rejected / Scheduled / Publishing / Posted /
+  Partial / Failed.
+- Refine stays source-constrained (visual/tone only; rules/reward/schedule/snapshot
+  stay fixed) even with Manus publishing.
 - Keep the system simple and extensible
 - Do not overengineer with microservices for MVP
 - Do not make the dashboard feel like a developer admin panel

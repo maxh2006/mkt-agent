@@ -93,8 +93,9 @@ export async function GET(req: NextRequest) {
     if (activeStatuses.length > 0) {
       const orClauses: Record<string, unknown>[] = [];
       for (const s of activeStatuses) {
-        if (s === "approved") orClauses.push({ status: "approved", OR: [{ posted_at: range }, { posted_at: null, updated_at: range }] });
+        if (s === "posted") orClauses.push({ status: "posted", OR: [{ posted_at: range }, { posted_at: null, updated_at: range }] });
         else if (s === "scheduled") orClauses.push({ status: "scheduled", scheduled_at: range });
+        else if (s === "approved") orClauses.push({ status: "approved", OR: [{ posted_at: range }, { posted_at: null, updated_at: range }] }); // legacy fallback
         else orClauses.push({ status: s, created_at: range });
       }
       dateFilter = { OR: orClauses };
@@ -121,24 +122,64 @@ export async function GET(req: NextRequest) {
     db.post.count({ where }),
   ]);
 
-  // Enrich event-sourced posts with recurrence summary and event title
+  // Enrich event-sourced posts with recurrence summary, title, and event window
   const eventIds = [...new Set(posts.filter((p) => p.source_type === "event" && p.source_id).map((p) => p.source_id!))];
-  const eventMap = new Map<string, { title: string; posting_instance_json: unknown }>();
+  type EventMeta = { title: string; posting_instance_json: unknown; start_at: Date | null; end_at: Date | null };
+  const eventMap = new Map<string, EventMeta>();
   if (eventIds.length > 0) {
     const events = await db.event.findMany({
       where: { id: { in: eventIds } },
-      select: { id: true, title: true, posting_instance_json: true },
+      select: { id: true, title: true, posting_instance_json: true, start_at: true, end_at: true },
     });
-    for (const e of events) eventMap.set(e.id, { title: e.title, posting_instance_json: e.posting_instance_json });
+    for (const e of events) {
+      eventMap.set(e.id, { title: e.title, posting_instance_json: e.posting_instance_json, start_at: e.start_at, end_at: e.end_at });
+    }
+  }
+
+  function fmtShort(d: Date): string {
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   }
 
   const enriched = posts.map((p) => {
     const ev = p.source_type === "event" && p.source_id ? eventMap.get(p.source_id) : null;
     const piConfig = ev ? parsePostingInstance(ev.posting_instance_json) : null;
+    const eventPostingSummary = piConfig ? formatPostingInstanceCompact(piConfig) : null;
+
+    // Compute schedule_summary (window + cadence)
+    let schedule_summary: string | null = null;
+    if (ev) {
+      if (piConfig && ev.start_at && ev.end_at) {
+        schedule_summary = `${fmtShort(ev.start_at)} – ${fmtShort(ev.end_at)} • ${eventPostingSummary}`;
+      } else if (ev.start_at && ev.end_at) {
+        schedule_summary = `${fmtShort(ev.start_at)} – ${fmtShort(ev.end_at)} • Generate Now • One-time`;
+      } else if (!piConfig) {
+        schedule_summary = "Generate Now • One-time";
+      } else {
+        schedule_summary = eventPostingSummary;
+      }
+    } else if (p.post_type === "big_win") {
+      schedule_summary = "Always-on • Big Win automation";
+    } else if (p.post_type === "hot_games") {
+      schedule_summary = "Always-on • Hot Games scan";
+    }
+
+    // Extract sample_group info from generation_context_json if present
+    const ctx = (p.generation_context_json ?? null) as Record<string, unknown> | null;
+    let sample_group: { id: string; index: number; total: number } | null = null;
+    if (ctx && typeof ctx.sample_group_id === "string" && typeof ctx.sample_index === "number" && typeof ctx.sample_total === "number") {
+      sample_group = {
+        id: ctx.sample_group_id,
+        index: ctx.sample_index,
+        total: ctx.sample_total,
+      };
+    }
+
     return {
       ...p,
-      event_posting_summary: piConfig ? formatPostingInstanceCompact(piConfig) : null,
+      event_posting_summary: eventPostingSummary,
       event_title: ev?.title ?? null,
+      schedule_summary,
+      sample_group,
     };
   });
 

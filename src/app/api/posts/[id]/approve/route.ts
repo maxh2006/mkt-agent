@@ -8,7 +8,13 @@ import { isValidTransition } from "@/lib/post-status";
 
 /**
  * POST /api/posts/[id]/approve
- * Transitions post: pending_approval → approved
+ * Approval: records approved_at + approved_by metadata and moves the post
+ * directly to `scheduled` (the new visible lifecycle — there is no long-lived
+ * `approved` operational state).
+ *
+ * If the post has no scheduled_at yet, we default it to `now()` so the post is
+ * immediately eligible for the publishing step (when Manus is wired).
+ *
  * Requires brand_manager or admin role.
  */
 export async function POST(
@@ -29,15 +35,18 @@ export async function POST(
   });
   if (!post) return Errors.NOT_FOUND("Post");
 
-  if (!isValidTransition(post.status, "approved")) {
-    return Errors.INVALID_TRANSITION(post.status, "approved");
+  if (!isValidTransition(post.status, "scheduled")) {
+    return Errors.INVALID_TRANSITION(post.status, "scheduled");
   }
 
+  const now = new Date();
   const updated = await db.post.update({
     where: { id },
     data: {
-      status: "approved",
+      status: "scheduled",
       approved_by: user.id,
+      approved_at: now,
+      scheduled_at: post.scheduled_at ?? now,
     },
   });
 
@@ -47,8 +56,8 @@ export async function POST(
     action: AuditAction.POST_APPROVED,
     entity_type: "post",
     entity_id: id,
-    before: { status: post.status },
-    after: { status: "approved", approved_by: user.id },
+    before: { status: post.status, scheduled_at: post.scheduled_at },
+    after: { status: "scheduled", scheduled_at: updated.scheduled_at, approved_by: user.id },
   });
 
   return ok(updated);

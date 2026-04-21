@@ -31,8 +31,11 @@ export interface Post {
   scheduled_at: string | null;
   posted_at: string | null;
   rejected_reason: string | null;
+  rejected_at: string | null;
+  rejected_by: string | null;
   created_by: string;
   approved_by: string | null;
+  approved_at: string | null;
   created_at: string;
   updated_at: string;
   creator: PostAuthor;
@@ -40,6 +43,8 @@ export interface Post {
   brand?: BrandRef;
   event_posting_summary?: string | null;
   event_title?: string | null;
+  schedule_summary?: string | null;
+  sample_group?: { id: string; index: number; total: number } | null;
 }
 
 export interface PostsPage {
@@ -115,7 +120,35 @@ export const postsApi = {
 
   getEventContext: (id: string) =>
     apiFetch<EventBriefContext | null>(`/api/posts/${id}/event-context`),
+
+  getDeliveries: (id: string) =>
+    apiFetch<{
+      post: { id: string; status: string; scheduled_at: string | null; platform: string };
+      deliveries: PlatformDelivery[];
+    }>(`/api/posts/${id}/deliveries`),
+
+  retryDelivery: (id: string, platform: string) =>
+    apiFetch<PlatformDelivery>(`/api/posts/${id}/deliveries/${platform}/retry`, {
+      method: "POST",
+    }),
 };
+
+export interface PlatformDelivery {
+  id: string;
+  post_id: string;
+  platform: string;
+  status: "queued" | "scheduled" | "publishing" | "posted" | "failed";
+  scheduled_for: string | null;
+  publish_requested_at: string | null;
+  publish_attempted_at: string | null;
+  posted_at: string | null;
+  external_post_id: string | null;
+  retry_count: number;
+  last_error: string | null;
+  worker: string | null;
+  created_at: string;
+  updated_at: string;
+}
 
 export interface EventBriefContext {
   event_id: string;
