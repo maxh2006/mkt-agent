@@ -3,8 +3,15 @@
 # MKT Agent — Deploy / Update Script
 # Run this on the server every time you push new code.
 #
-# Usage:
-#   cd /opt/mkt-agent && bash scripts/deploy.sh
+# Usage (canonical):
+#   sudo bash /opt/mkt-agent/scripts/deploy.sh
+#
+# Ownership model (see docs/08-deployment.md — Deploy ownership model):
+#   - /opt/mkt-agent is root-owned
+#   - PM2 god daemon runs as root
+#   - Deploy must therefore run as root so git/npm/prisma/next all act on
+#     a directory they own. Running as a non-root user trips git's
+#     dubious-ownership guard and leaves PM2 in an inconsistent state.
 #
 # What it does:
 #   1. Pulls latest code from GitHub
@@ -17,8 +24,25 @@
 
 set -e
 
+# ─── Root guard ──────────────────────────────────────────────────────────────
+# Fail fast with a clear message if not run as root, so operators don't
+# rediscover the dubious-ownership trap the hard way.
+if [[ "$EUID" -ne 0 ]]; then
+  echo "ERROR: deploy.sh must be run as root (sudo bash scripts/deploy.sh)"
+  echo "See docs/08-deployment.md — Deploy ownership model"
+  exit 1
+fi
+
 APP_DIR="/opt/mkt-agent"
 cd "$APP_DIR"
+
+# ─── Ownership self-heal ─────────────────────────────────────────────────────
+# Idempotent: if the tree drifted back to a non-root owner (e.g. someone
+# ran `git clone` as a different user), normalise it before git touches it.
+if [[ "$(stat -c '%U' "$APP_DIR")" != "root" ]]; then
+  echo "    Normalising $APP_DIR ownership to root:root…"
+  chown -R root:root "$APP_DIR"
+fi
 
 echo ""
 echo "==========================================================================
@@ -49,8 +73,9 @@ npm run build
 
 echo ""
 echo "==> [6/6] Restarting app via PM2..."
-# Kill any stale processes on port 3000 (e.g. leftover nohup or old PM2)
-sudo fuser -k 3000/tcp 2>/dev/null || true
+# Kill any stale processes on port 3000 (e.g. leftover nohup or old PM2).
+# We're already root (enforced by the guard above), so no sudo needed.
+fuser -k 3000/tcp 2>/dev/null || true
 sleep 1
 
 # Stop existing PM2 process if running, then start fresh

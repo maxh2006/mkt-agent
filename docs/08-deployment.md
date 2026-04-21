@@ -9,13 +9,65 @@ Operational / deployment runbook.
 - Host: GCP Compute Engine VM (external IP `34.92.70.250`, project
   `mktagent-493404`, zone `asia-east2-c`)
 - App path: `/opt/mkt-agent`
-- Deploy script: `scripts/deploy.sh` (run on the server)
+- Deploy script: `scripts/deploy.sh` (run on the server as root)
 - Env file: `/opt/mkt-agent/.env` (see `.env.production.example` for shape)
 - Process manager: PM2 (`mkt-agent`), fronted by Nginx
 - Public URL: `https://<your-domain>` (Nginx terminates TLS; app listens on
   localhost:3000)
 
 For dev/deploy steps see `scripts/deploy.sh` and `scripts/server-setup.sh`.
+
+---
+
+## Deploy ownership model
+
+**Everything runs as root** — `/opt/mkt-agent`, the PM2 god daemon, and
+`/opt/mkt-agent/.env` are all owned by `root:root`. This is intentional
+and matches where PM2 actually lives (`/root/.pm2`). Keeping filesystem
+ownership aligned with the process manager avoids two-user dances, is
+the simplest stable model for this single-VM deployment, and sidesteps
+git's `detected dubious ownership` guard.
+
+**Canonical commands**
+
+| Action                | Command                                                  |
+|-----------------------|----------------------------------------------------------|
+| Deploy                | `sudo bash /opt/mkt-agent/scripts/deploy.sh`             |
+| Tail app logs         | `sudo pm2 logs mkt-agent`                                |
+| Restart only          | `sudo pm2 restart mkt-agent --update-env`                |
+| Status                | `sudo pm2 status`                                        |
+
+`scripts/deploy.sh` enforces this: it exits immediately with a helpful
+error if run without root, and self-heals ownership (`chown -R root:root`)
+if the tree ever drifts back to a non-root owner.
+
+### One-time cleanup — if the VM drifted to non-root ownership
+
+Historically `/opt/mkt-agent` was cloned as a non-root user (e.g. `max`),
+which caused `sudo bash scripts/deploy.sh` to fail at `git pull` with
+"fatal: detected dubious ownership". To bring a VM back to the canonical
+model, run these four commands once (all idempotent; safe to re-run):
+
+```bash
+# 1. Take ownership of the repo tree
+sudo chown -R root:root /opt/mkt-agent
+
+# 2. Lock down the env file so only root (and the runtime) can read it
+sudo chmod 600 /opt/mkt-agent/.env
+
+# 3. Kill stale user-scoped PM2 daemons (leftovers; not running prod)
+sudo pkill -f "/home/max/.pm2"  2>/dev/null || true
+sudo pkill -f "/home/moloh/.pm2" 2>/dev/null || true
+
+# 4. Sanity-check: root's PM2 still has mkt-agent online
+sudo pm2 status
+```
+
+After this, deploy is always:
+
+```bash
+sudo bash /opt/mkt-agent/scripts/deploy.sh
+```
 
 ---
 
@@ -37,10 +89,6 @@ real Manus traffic**: add a domain (Cloudflare proxy or Let's Encrypt),
 switch the target URL to HTTPS, rotate the secret, and
 `gcloud scheduler jobs update http --update-headers` / `--uri` on the
 scheduler. No app code changes required.
-
-Operational note: the production app runs under **root's** PM2 daemon on the
-VM. Use `sudo pm2 logs mkt-agent` (not `pm2 logs mkt-agent` from a non-root
-user) when tailing dispatcher output.
 
 ### Scheduler contract
 

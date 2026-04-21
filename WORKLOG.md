@@ -16,7 +16,25 @@ Current execution priority (per ROADMAP.md):
 
 ## Ongoing Tasks
 
-
+- Task: Ops cleanup — standardize deploy ownership on root
+  - Status: In progress
+  - Why: `/opt/mkt-agent` is currently owned by `max:max` while the prod
+    PM2 god daemon runs under `root`. That mismatch caused today's
+    `sudo bash scripts/deploy.sh` to fail at `git pull` with "fatal: detected
+    dubious ownership"; deploy only succeeded via a `sudo -u max bash -c '...'`
+    workaround.
+  - Target model: `/opt/mkt-agent`, PM2, and `.env` all root-owned. Canonical
+    deploy becomes a single `sudo bash /opt/mkt-agent/scripts/deploy.sh`.
+  - Next steps:
+    1. Edit `scripts/deploy.sh` — root guard + idempotent ownership
+       self-heal + drop redundant `sudo` on `fuser` + update usage comment
+    2. Update `docs/08-deployment.md` — add "Deploy ownership model"
+       subsection with the one-time cleanup commands and canonical deploy
+    3. Commit + push
+    4. On the VM (one-time): `chown -R root:root /opt/mkt-agent`,
+       `chmod 600 /opt/mkt-agent/.env`, kill stale user-scoped PM2 daemons
+    5. Test the new flow: `sudo bash scripts/deploy.sh` + smoke test
+    6. Move to Done
 
 ## Done Tasks
 
