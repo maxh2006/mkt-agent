@@ -16,27 +16,67 @@ Current execution priority (per ROADMAP.md):
 
 ## Ongoing Tasks
 
-- Task: Ops cleanup — standardize deploy ownership on root
-  - Status: In progress
-  - Why: `/opt/mkt-agent` is currently owned by `max:max` while the prod
-    PM2 god daemon runs under `root`. That mismatch caused today's
-    `sudo bash scripts/deploy.sh` to fail at `git pull` with "fatal: detected
-    dubious ownership"; deploy only succeeded via a `sudo -u max bash -c '...'`
-    workaround.
-  - Target model: `/opt/mkt-agent`, PM2, and `.env` all root-owned. Canonical
-    deploy becomes a single `sudo bash /opt/mkt-agent/scripts/deploy.sh`.
-  - Next steps:
-    1. Edit `scripts/deploy.sh` — root guard + idempotent ownership
-       self-heal + drop redundant `sudo` on `fuser` + update usage comment
-    2. Update `docs/08-deployment.md` — add "Deploy ownership model"
-       subsection with the one-time cleanup commands and canonical deploy
-    3. Commit + push
-    4. On the VM (one-time): `chown -R root:root /opt/mkt-agent`,
-       `chmod 600 /opt/mkt-agent/.env`, kill stale user-scoped PM2 daemons
-    5. Test the new flow: `sudo bash scripts/deploy.sh` + smoke test
-    6. Move to Done
+
 
 ## Done Tasks
+
+### 2026-04-21
+- Task: Ops cleanup — standardize deploy ownership on root
+  - Status: Complete
+  - Commit: `29e5bd2` on origin/master
+  - Problem fixed: `/opt/mkt-agent` was owned by `max:max` but PM2 god
+    daemon runs as root, so `sudo bash scripts/deploy.sh` tripped git's
+    `detected dubious ownership` guard. Deploys previously worked only via
+    a `sudo -u max bash -c '...'` hack.
+  - Recommended final ownership model:
+    - `/opt/mkt-agent` → `root:root`
+    - `/opt/mkt-agent/.env` → `root:root` with mode `600`
+    - PM2 god daemon stays under root (unchanged)
+    - `/var/log/mkt-agent` stays under root (unchanged)
+  - Exact server commands run (one-time, all idempotent):
+    1. `sudo chown -R root:root /opt/mkt-agent`
+    2. `sudo chmod 600 /opt/mkt-agent/.env`
+    3. `sudo pkill -f "/home/max/.pm2"` (then targeted `sudo kill 515800`
+       for the moloh daemon pkill didn't catch)
+    4. `sudo pm2 status` — confirmed `mkt-agent` online under root
+  - scripts/deploy.sh changes:
+    - **Root guard** at the top: exits with `"ERROR: deploy.sh must be run
+      as root …"` and points at docs/08-deployment.md if run without sudo
+    - **Idempotent ownership self-heal**: `chown -R root:root $APP_DIR`
+      runs before `git pull` if the tree ever drifts back to a non-root
+      owner (self-healing for future VMs)
+    - Dropped redundant `sudo` prefix on `fuser` (guard guarantees root)
+    - Updated Usage comment to canonical
+      `sudo bash /opt/mkt-agent/scripts/deploy.sh`
+    - Added inline reference to "docs/08-deployment.md — Deploy ownership
+      model" for future operators
+  - docs/08-deployment.md changes:
+    - New **"Deploy ownership model"** subsection directly under
+      "Production target" covering:
+      - Plain statement of the model ("everything runs as root") + why
+      - Canonical-commands table (deploy / logs / restart / status)
+      - One-time cleanup block (four `sudo` commands) for VMs that have
+        drifted to non-root ownership
+    - Removed the now-redundant "Operational note" paragraph from the
+      Cloud Scheduler section (content superseded by the new subsection)
+    - Small wording tweak in Production target to clarify deploy script
+      is run "as root"
+  - Verification performed end-to-end:
+    - `ls -ld /opt/mkt-agent` → `drwxr-xr-x root root` ✓
+    - `stat /opt/mkt-agent/.env` → `root root 600` ✓
+    - PM2 daemons — only root's remains (`/root/.pm2`); max's + moloh's
+      user-scoped daemons killed ✓
+    - `sudo bash /opt/mkt-agent/scripts/deploy.sh` — all 6 steps succeed,
+      PM2 restart output shows `user=root` ✓
+    - `bash /opt/mkt-agent/scripts/deploy.sh` (no sudo) → exits with
+      `ERROR: deploy.sh must be run as root …` + exit code 1 ✓
+    - Post-deploy curl smoke test against `/api/jobs/dispatch` → 200
+      with expected dry-run payload ✓
+    - Cloud Scheduler still firing every 2 min (unchanged from before) ✓
+  - Summary: deploy flow is now a single `sudo bash
+    /opt/mkt-agent/scripts/deploy.sh` — no `sudo -u max` workaround, no
+    git dubious-ownership, self-healing against future drift. Docs reflect
+    the correct operational model.
 
 ### 2026-04-21
 - Task: Phase 1 — Refactor Brand Management as the base AI profile for each brand
