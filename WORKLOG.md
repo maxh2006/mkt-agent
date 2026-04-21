@@ -7,6 +7,101 @@
 ## Done Tasks
 
 ### 2026-04-21
+- Task: Manus dispatcher foundation
+  - Status: Complete (dispatcher + handoff boundary + trigger route + env surface)
+  - Files changed:
+    - src/lib/manus/types.ts (new) — ManusDispatchPayload, ManusDispatchResult,
+      DispatcherSummary shapes. Flat contracts, easy to extend.
+    - src/lib/manus/client.ts (new) — dispatchToManus() handoff boundary.
+      Dry-run mode when MANUS_AGENT_ENDPOINT is unset (logs payload + returns
+      accepted=true, dry_run=true). When configured: POST with optional
+      MANUS_API_KEY bearer; returns accepted/error plus optional external_ref.
+    - src/lib/manus/dispatcher.ts (new) — runManusDispatcher({ batchSize }):
+      1. Atomic claim via db.$queryRaw:
+         UPDATE post_platform_deliveries SET status='publishing',
+           publish_requested_at=now(), updated_at=now()
+         WHERE id IN (SELECT id FROM post_platform_deliveries
+                      WHERE status='queued' AND scheduled_for<=now()
+                      ORDER BY scheduled_for ASC LIMIT $batch
+                      FOR UPDATE SKIP LOCKED)
+         RETURNING id, post_id, platform, scheduled_for, retry_count;
+      2. Batch-load parent posts (+ brand select) — no N+1
+      3. Build ManusDispatchPayload per claimed row
+      4. Hand off via dispatchToManus()
+      Returns DispatcherSummary { picked, claimed, dispatched, errors[], dry_run }.
+      Logs per-delivery dispatch + errors with platform/post/delivery ids.
+    - src/app/api/jobs/dispatch/route.ts (new) — POST trigger. Auth via
+      `x-dispatch-secret` header matching MANUS_DISPATCH_SECRET env var. Returns
+      503-equivalent validation error if secret unconfigured (safer than silently
+      accepting anonymous pokes). Designed for cron/curl.
+    - .env.production.example — added MANUS_AGENT_ENDPOINT, MANUS_API_KEY,
+      MANUS_DISPATCH_SECRET with inline comments
+    - docs/00-architecture.md — new Dispatcher subsection detailing atomic claim,
+      handoff boundary, dry-run mode, correlation keys, retry compatibility
+    - docs/06-workflows-roles.md — approval flow updated: step 4 now references
+      the dispatcher route + picker + atomic claim + no-regeneration rule;
+      step 5/6 split (callback updates individual deliveries; reconciler aggregates)
+  - Where the dispatcher lives:
+    - Core logic: src/lib/manus/dispatcher.ts (importable from any entry point)
+    - HTTP entry: POST /api/jobs/dispatch (cron-friendly, secret-gated)
+    - Handoff boundary: src/lib/manus/client.ts (swap for real Manus later)
+  - How the picker works:
+    - Status = 'queued' AND scheduled_for <= now() — handles both immediate
+      (scheduled_for=now()) and future-scheduled deliveries uniformly
+    - Ordered by scheduled_for ASC (oldest first)
+    - Batched (default 25 per pass)
+  - How safe claiming works:
+    - Single SQL statement: inner SELECT ... FOR UPDATE SKIP LOCKED chooses
+      the batch, outer UPDATE transitions them to publishing + sets
+      publish_requested_at. RETURNING clause yields the claimed rows atomically.
+    - Concurrent dispatchers NEVER pick the same row (SKIP LOCKED guarantees it).
+    - Prisma doesn't natively expose FOR UPDATE SKIP LOCKED, so raw SQL is used
+      for this one step. Everything else stays on the typed Prisma client.
+  - Payload shape sent to Manus:
+    {
+      post_id, delivery_id, platform,
+      brand: { id, name },
+      content: { headline, caption, cta, banner_text, image_prompt },
+      scheduled_for (ISO or null),
+      source: { post_type, source_type, source_id, source_instance_key },
+      retry_count
+    }
+    Taken directly from the approved parent Post — no regeneration, no
+    re-approval, no source re-run. post_id + delivery_id are the stable
+    correlation keys Manus must echo on callbacks.
+  - Env vars introduced:
+    - MANUS_AGENT_ENDPOINT — Manus agent URL (unset → dry-run mode)
+    - MANUS_API_KEY — bearer token sent with the request (optional)
+    - MANUS_DISPATCH_SECRET — shared secret for POST /api/jobs/dispatch
+      (required; generate with openssl rand -base64 32)
+  - Scheduled vs immediate: unified via scheduled_for <= now(). Creators that
+    want immediate dispatch set scheduled_for = now() when inserting the delivery.
+  - Retry compatibility: a failed delivery reset back to 'queued' (the existing
+    placeholder retry route does this) becomes eligible for the next dispatcher
+    pass automatically — same payload, same correlation keys.
+  - Observability: every pass logs [manus-dispatcher] claimed=N batch=M, then
+    one line per dispatch with delivery_id/platform/post_id and dry-run flag.
+    Handoff failures log at warn level with the error message.
+  - Placeholders / follow-ups remaining for full integration:
+    1. Manus callback/webhook route (POST .../callback) that receives per-platform
+       results and transitions deliveries posted/failed with posted_at, external_post_id,
+       last_error
+    2. Reconciler that reads deliveries and updates Post.status via
+       computePostStatusFromDeliveries() from src/lib/delivery-aggregation.ts
+    3. Creator path that inserts PostPlatformDelivery rows at post creation /
+       scheduling time (currently the queue only has the delivery model but no
+       writer; the Approve endpoint + scheduler will need to create rows)
+    4. Actual retry dispatch wiring — existing retry API just resets state;
+       the dispatcher picks the reset row up on the next tick
+    5. Cron setup — external (GCP Cloud Scheduler hitting /api/jobs/dispatch
+       with the secret header every 1–5 minutes)
+    6. Approved-payload snapshot: if refine-after-approval is ever allowed,
+       we'd want to freeze the dispatched content. For now the dispatcher
+       reads the live Post fields.
+    7. Manus response protocol finalization — external_ref handling, error
+       taxonomy, signed callbacks
+
+### 2026-04-21
 - Task: Publishing lifecycle cleanup — Approved becomes metadata; Delivery modal foundation
   - Status: Complete
   - Files changed:

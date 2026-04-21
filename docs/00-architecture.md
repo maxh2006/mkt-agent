@@ -99,6 +99,31 @@ Rejected is a terminal path from Pending Approval.
 Approved is metadata only (`approved_at`, `approved_by`) — not a long-lived
 operational status.
 
+### Dispatcher
+`src/lib/manus/dispatcher.ts` is the worker-side entry point that hands queued
+deliveries to Manus. Triggered by POST `/api/jobs/dispatch` (secret-gated via
+`MANUS_DISPATCH_SECRET` header). A single call:
+
+1. Runs one atomic SQL statement that selects queued deliveries with
+   `scheduled_for <= now()`, locks them with `FOR UPDATE SKIP LOCKED`, marks them
+   `publishing`, sets `publish_requested_at`, and returns the claimed rows.
+   Safe against concurrent dispatchers.
+2. Loads the parent posts in a single batch query (no N+1).
+3. Builds a flat `ManusDispatchPayload` per claimed delivery from the approved
+   post fields (no regeneration, no re-approval, no source re-run).
+4. Hands each payload to `dispatchToManus()` at `src/lib/manus/client.ts`.
+
+The Manus client is a thin, replaceable boundary. If `MANUS_AGENT_ENDPOINT` is
+unset it runs in **dry-run mode** (logs payload, returns accepted). Otherwise it
+POSTs the payload with optional `MANUS_API_KEY` as a bearer token.
+
+Per-platform delivery results come back asynchronously via a future Manus
+callback route (not in this task). `post_id` and `delivery_id` are the stable
+correlation keys Manus must echo back.
+
+Retry reuses the same picker: resetting a delivery to `queued` makes it eligible
+for the next dispatcher pass. No regeneration, no re-approval.
+
 ### External Data Source — Shared BigQuery
 Primary operational facts come from a shared BigQuery dataset maintained by the platform team.
 Tables: `shared.users`, `shared.transactions`, `shared.game_rounds`, `shared.games`.

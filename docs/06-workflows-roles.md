@@ -105,8 +105,14 @@ Approval flow:
 1. operator approves
 2. backoffice records approved_at / approved_by and sets status = scheduled
 3. scheduled_at defaults to now() if operator didn't pre-schedule
-4. Manus picks up scheduled posts and transitions them through publishing → posted / partial / failed
-5. terminal state: posted | partial | failed
+4. Manus dispatcher (POST /api/jobs/dispatch, cron-driven) picks due
+   PostPlatformDelivery rows (status=queued, scheduled_for<=now), atomically
+   claims them (FOR UPDATE SKIP LOCKED), marks them publishing, and hands a
+   payload to the Manus worker. No content regeneration or re-approval.
+5. per-platform results come back via callback (follow-up work) and transition
+   individual deliveries to posted or failed
+6. a reconciler (follow-up work) aggregates delivery terminal states into the
+   parent post status: posted | partial | failed
 
 Retries:
 - Happen at the platform delivery level (see PostPlatformDelivery model)
