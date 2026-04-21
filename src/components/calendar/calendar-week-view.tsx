@@ -31,11 +31,13 @@ export function CalendarWeekView({ range, postsByDate, showBrand }: CalendarWeek
                 <div className="text-[11px] font-medium text-muted-foreground uppercase">
                   {DAY_NAMES[i]}
                 </div>
-                <div className={cn(
-                  "mt-0.5 text-lg font-medium",
-                  today && "bg-primary text-primary-foreground rounded-full w-8 h-8 flex items-center justify-center mx-auto",
-                )}>
-                  {day.getDate()}
+                <div className="mt-0.5 flex justify-center">
+                  <span className={cn(
+                    "inline-flex items-center justify-center w-8 h-8 text-lg font-medium rounded-full",
+                    today && "bg-primary text-primary-foreground",
+                  )}>
+                    {day.getDate()}
+                  </span>
                 </div>
               </div>
               <div className="flex-1 p-1 space-y-1 overflow-y-auto">

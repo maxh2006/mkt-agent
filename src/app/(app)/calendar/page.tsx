@@ -118,60 +118,64 @@ export default function CalendarPage() {
         </p>
       </div>
 
-      {/* Controls bar */}
-      <div className="flex flex-wrap items-center gap-2">
-        {/* View toggle */}
-        <div className="inline-flex rounded-md border">
-          <button
-            onClick={() => setView("week")}
-            className={`px-3 py-1.5 text-sm font-medium rounded-l-md transition-colors ${
-              view === "week"
-                ? "bg-primary text-primary-foreground"
-                : "hover:bg-muted"
-            }`}
-          >
-            Week
-          </button>
-          <button
-            onClick={() => setView("month")}
-            className={`px-3 py-1.5 text-sm font-medium rounded-r-md border-l transition-colors ${
-              view === "month"
-                ? "bg-primary text-primary-foreground"
-                : "hover:bg-muted"
-            }`}
-          >
-            Month
-          </button>
+      {/* Controls bar — 3-slot layout: controls | centered label | post count */}
+      <div className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_auto_1fr] md:items-center">
+        {/* Left: controls cluster */}
+        <div className="flex flex-wrap items-center gap-2 md:justify-self-start">
+          {/* View toggle */}
+          <div className="inline-flex rounded-md border">
+            <button
+              onClick={() => setView("week")}
+              className={`px-3 py-1.5 text-sm font-medium rounded-l-md transition-colors ${
+                view === "week"
+                  ? "bg-primary text-primary-foreground"
+                  : "hover:bg-muted"
+              }`}
+            >
+              Week
+            </button>
+            <button
+              onClick={() => setView("month")}
+              className={`px-3 py-1.5 text-sm font-medium rounded-r-md border-l transition-colors ${
+                view === "month"
+                  ? "bg-primary text-primary-foreground"
+                  : "hover:bg-muted"
+              }`}
+            >
+              Month
+            </button>
+          </div>
+
+          {/* Navigation */}
+          <div className="flex items-center gap-1">
+            <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => navigate(-1)}>
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <Button variant="outline" size="sm" className="h-8" onClick={goToday}>
+              Today
+            </Button>
+            <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => navigate(1)}>
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
 
-        {/* Navigation */}
-        <div className="flex items-center gap-1">
-          <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => navigate(-1)}>
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <Button variant="outline" size="sm" className="h-8" onClick={goToday}>
-            Today
-          </Button>
-          <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => navigate(1)}>
-            <ChevronRight className="h-4 w-4" />
-          </Button>
+        {/* Center: period label */}
+        <h2 className="text-lg font-semibold md:justify-self-center">{rangeLabel}</h2>
+
+        {/* Right: post count */}
+        <div className="flex items-center md:justify-self-end">
+          <span className="text-xs text-muted-foreground">{totalPosts} post{totalPosts !== 1 ? "s" : ""}</span>
         </div>
-
-        {/* Date label */}
-        <span className="text-sm font-medium">{rangeLabel}</span>
-
-        {/* Spacer */}
-        <div className="flex-1" />
-
-        {/* Post count */}
-        <span className="text-xs text-muted-foreground">{totalPosts} post{totalPosts !== 1 ? "s" : ""}</span>
       </div>
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-2">
         <Select value={filters.platform} onValueChange={(v) => updateFilter("platform", v)}>
           <SelectTrigger className="h-8 w-[150px] text-sm">
-            <SelectValue />
+            {filters.platform === "all"
+              ? <span className="text-muted-foreground">Platform</span>
+              : <SelectValue />}
           </SelectTrigger>
           <SelectContent>
             {PLATFORMS.map((p) => (
@@ -182,7 +186,9 @@ export default function CalendarPage() {
 
         <Select value={filters.post_type} onValueChange={(v) => updateFilter("post_type", v)}>
           <SelectTrigger className="h-8 w-[170px] text-sm">
-            <SelectValue />
+            {filters.post_type === "all"
+              ? <span className="text-muted-foreground">Type</span>
+              : <SelectValue />}
           </SelectTrigger>
           <SelectContent>
             {POST_TYPES.map((p) => (
@@ -193,7 +199,9 @@ export default function CalendarPage() {
 
         <Select value={filters.status} onValueChange={(v) => updateFilter("status", v)}>
           <SelectTrigger className="h-8 w-[170px] text-sm">
-            <SelectValue />
+            {filters.status === "all"
+              ? <span className="text-muted-foreground">Status</span>
+              : <SelectValue />}
           </SelectTrigger>
           <SelectContent>
             {STATUS_OPTIONS.map((s) => (

@@ -6,6 +6,59 @@
 
 ## Done Tasks
 
+### 2026-04-21
+- Task: Calendar header — centered period label + month-overlap week labels
+  - Status: Complete
+  - Files changed:
+    - src/lib/calendar-utils.ts — rewrote formatDateRangeLabel. Week view now outputs
+      month/year context instead of a day range. Branches:
+        * same month, same year → "April 2026" (full month name)
+        * same year, different months → "Apr – May 2026" (short names + single year)
+        * different years → "Dec 2026 – Jan 2027" (short name + year on each side)
+      Month view unchanged.
+    - src/app/(app)/calendar/page.tsx — header restructured from a single flex row
+      into a 3-slot responsive grid (`grid-cols-[1fr_auto_1fr]` on md+). Left slot
+      holds the view toggle + prev/Today/next controls grouped together. Middle slot
+      is the centered period label (`text-lg font-semibold`, `justify-self-center`).
+      Right slot shows the post count. Removed the inline date-range label span.
+      On narrow screens the grid collapses to a single column and the label appears
+      on its own row.
+  - How week labels now behave:
+    - Day-of-month is not duplicated (that's the grid's job).
+    - Label is purely a month/year title indicating the visible week's context.
+  - How overlapping months are displayed:
+    - A week crossing into another month shows both — "Apr – May 2026".
+    - A week crossing a year shows both years — "Dec 2026 – Jan 2027".
+  - How the centered title is laid out:
+    - CSS grid with three tracks: `1fr` | `auto` | `1fr`. Middle track is auto-sized
+      to the label, and `justify-self-center` keeps it visually centered regardless
+      of left/right slot widths. Today button unchanged; filters unchanged.
+
+### 2026-04-21
+- Task: Calendar page — week cell sizing + filter default labels
+  - Status: Complete
+  - Files changed:
+    - src/components/calendar/calendar-week-view.tsx — date number now always renders
+      inside a fixed 32×32 inline-flex slot (`w-8 h-8 rounded-full`). Today keeps the
+      primary color badge treatment; non-today days show the number inside a transparent
+      slot of the same size. Header row height now matches across all 7 columns.
+    - src/app/(app)/calendar/page.tsx — each of the 3 filter triggers now renders
+      conditional content: a muted-text "Platform" / "Type" / "Status" label when the
+      filter is at "all" default; otherwise the selected option's label via SelectValue.
+      Dropdown options (PLATFORMS, POST_TYPES, STATUS_OPTIONS) unchanged.
+  - How current-day sizing was fixed:
+    Non-today cells previously rendered the date as plain text (~28px line height) while
+    today used a 32×32 rounded-full flex container. This caused today's header row to be
+    slightly taller. The fix reserves an identical 32×32 badge footprint for every day
+    (transparent for non-today, primary-colored for today). All columns' headers and
+    content areas now have matching dimensions.
+  - New default filter labels:
+    - Left filter → "Platform" (when value = all)
+    - Middle filter → "Type" (when value = all; filters by post type, not promotion-only)
+    - Right filter → "Status" (when value = all)
+    Muted text color (text-muted-foreground) so they read as placeholder hints.
+    Filter logic is untouched.
+
 ### 2026-04-18
 - Task: Events Posting Schedule — "Generate Now" option replacing "None"
   - Status: Complete

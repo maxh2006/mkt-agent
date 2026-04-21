@@ -102,11 +102,29 @@ export function formatDateRangeLabel(range: DateRange, view: "week" | "month"): 
   if (view === "month") {
     return range.start.toLocaleDateString("en-US", { month: "long", year: "numeric" });
   }
-  const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
-  const startStr = range.start.toLocaleDateString("en-US", opts);
-  const endStr = range.end.toLocaleDateString("en-US", opts);
-  const year = range.start.getFullYear();
-  return `${startStr} – ${endStr}, ${year}`;
+
+  // Week view: show month/year context only — day numbers already visible in grid.
+  const startMonth = range.start.getMonth();
+  const startYear = range.start.getFullYear();
+  const endMonth = range.end.getMonth();
+  const endYear = range.end.getFullYear();
+
+  if (startYear === endYear && startMonth === endMonth) {
+    // Entirely within one month
+    return range.start.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  }
+
+  if (startYear === endYear) {
+    // Spans two months in the same year — e.g. "Apr – May 2026"
+    const startName = range.start.toLocaleDateString("en-US", { month: "short" });
+    const endName = range.end.toLocaleDateString("en-US", { month: "short" });
+    return `${startName} – ${endName} ${startYear}`;
+  }
+
+  // Spans two years — e.g. "Dec 2026 – Jan 2027"
+  const startName = range.start.toLocaleDateString("en-US", { month: "short" });
+  const endName = range.end.toLocaleDateString("en-US", { month: "short" });
+  return `${startName} ${startYear} – ${endName} ${endYear}`;
 }
 
 const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
