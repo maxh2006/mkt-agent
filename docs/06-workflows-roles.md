@@ -76,7 +76,22 @@ AI content generation reads layered context in this order (later overrides earli
 1. **Brand Management (default / base layer)** — positioning, voice, language style + sample, audience persona, notes for AI, banned phrases + topics, hashtags, colors, logos, sample captions. This is the admin-maintained base AI profile for each brand.
 2. **Adhoc Event brief** — theme, objective, rules, reward, target audience, CTA, tone, platform scope, notes for AI. When an event-derived post is being generated/refined, event fields override brand fields wherever both specify the same attribute.
 
-The precedence is documented here and in `docs/07-ai-boundaries.md`. It does not need to be surfaced loudly in the UI beyond a small "base AI profile; events override" note at the top of the Brand Management edit dialog.
+Alongside these two rule layers, **Templates & Assets is a reusable
+supporting library** the AI generator may draw from:
+
+- **Copy templates** — reusable caption structures / post shapes
+- **CTA snippets** — reusable call-to-action lines
+- **Banner text patterns** — reusable short overlay-text patterns
+- **Prompt templates** — reusable image-generation scaffolds
+- **Reference assets** — reusable visual reference URLs (distinct from
+  Brand Management's `benchmark_assets`, which are brand-identity base
+  guidance rather than operational library material)
+
+Templates & Assets is **not** a rule layer — it cannot override the
+brand or event layers. It is material the generator can reach for when
+the rule layers ask for a concrete building block.
+
+The precedence is documented here and in `docs/07-ai-boundaries.md`. It does not need to be surfaced loudly in the UI beyond a small "base AI profile; events override" note at the top of the Brand Management edit dialog and a "not base AI rules — see Brand Management" callout on the Templates & Assets page.
 
 ---
 

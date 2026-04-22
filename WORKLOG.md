@@ -20,6 +20,274 @@ Current execution priority (per ROADMAP.md):
 
 ## Done Tasks
 
+### 2026-04-22
+- Task: Phase 1 / 7 — Templates & Assets audit: reposition as reusable library (not base AI rules)
+  - Status: Complete
+  - Product rule locked:
+    - Brand Management = base AI rules
+    - Event brief = situational override/input
+    - **Templates & Assets = reusable supporting library** for operators
+      and the future AI content generator. Not a rule layer; never
+      overrides brand or event context.
+  - Files changed (no DB migration; enum values in `TemplateType` and
+    `AssetType` are unchanged):
+    - src/lib/validations/template.ts:
+      - Added AI-aware labels to `TEMPLATE_TYPE_LABELS`
+        (caption → "Copy Template", banner → "Banner Text Pattern",
+        prompt → "Prompt Template", cta → "CTA Snippet",
+        asset → "Reference Asset")
+      - Added `TEMPLATE_TYPE_LABELS_PLURAL` for tab headers /
+        empty-states
+      - Added `TEMPLATE_TYPE_HELPERS` per-type guidance strings
+        emphasizing "reusable library" role and (for `asset`)
+        distinction from Brand Management's `benchmark_assets`
+      - Added `TEMPLATE_TAB_ORDER` — canonical tab order (caption → cta
+        → banner → prompt → asset) matching the target IA
+      - Tightened `textTemplateConfigSchema.content` to `.trim().min(1)`
+        so empty strings can't silently persist (UI already blocked;
+        schema now agrees)
+      - Trimmed other inputs (`name`, `notes`, `url`) for hygiene
+      - Added a module-role docblock at the top of the file so future
+        readers understand precedence before editing
+    - src/app/(app)/templates/page.tsx:
+      - Header description rewritten to emphasize library role and
+        "operators and the AI content generator draw from these as
+        supporting material"
+      - New inline callout under the header: "Not base AI rules —
+        positioning, tone, language, audience, banned topics, and
+        brand notes live in **Brand Management**. Event briefs remain
+        the situational override. This page is a reusable supporting
+        library."
+      - Tabs now read from `TEMPLATE_TAB_ORDER` (Copy → CTA → Banner →
+        Prompt → Assets) using plural labels
+      - Per-tab helper text rendered above each section and echoed in
+        the create/edit dialog (reused `TEMPLATE_TYPE_HELPERS`)
+      - Concrete token-style placeholders per tab (e.g.
+        `{player_handle}`, `{win_amount}`, `{brand}`) so operators
+        immediately understand "pattern, not exact wording"
+      - Dialog labels made type-specific ("Prompt scaffold" /
+        "CTA line" / "Pattern") instead of a generic "Content"
+      - Notes label reframed as "Usage notes" with per-tab "when to
+        use this" placeholders
+      - Active toggle annotated: "inactive entries are hidden from AI
+        reuse"
+      - Reference Asset dialog notes storage caveat: "File hosting is
+        not wired in this build — paste a publicly hosted URL"
+      - Tab bar now scrolls on narrow viewports (`overflow-x-auto`)
+    - docs/03-ui-pages.md — Templates & Assets section rewritten from
+      a one-liner into a full subsection: reusable-library positioning,
+      relationship to Brand Management + Event, new tab ordering,
+      per-tab descriptions, distinction between Reference Assets and
+      Brand Management benchmark assets, global vs brand-scoped rules.
+    - docs/06-workflows-roles.md — "AI Context Precedence" section
+      gets a new paragraph explicitly placing Templates & Assets as a
+      reusable supporting layer that does NOT override brand/event rule
+      layers. Lists the 5 template types + their intended use.
+    - docs/07-ai-boundaries.md — Input Contract gets a new
+      "Templates & Assets — reusable supporting library" subsection
+      mapping DB enum values to operator labels and making clear the
+      retrieval call is not wired in Phase 4 (library is ready; hook-up
+      lands with the real AI provider).
+  - What overlap with Brand Management was removed or clarified:
+    - `asset` vs `benchmark_assets` overlap clarified in UI copy + all
+      three docs: benchmark_assets are brand-identity base guidance;
+      Templates' reference assets are operational library material
+    - `caption` vs Brand's `sample_captions` overlap clarified by
+      renaming tab to "Copy Templates" and reframing helper text as
+      "pattern, not exact wording" (sample_captions = few-shot voice
+      examples; copy templates = structural scaffolds)
+    - Inline callout on the page + module-role docblock prevent future
+      drift
+  - Final role of Templates & Assets:
+    - Reusable supporting library of copy patterns, CTA snippets,
+      banner text patterns, prompt templates, and reference assets
+    - Drawn from by operators + the future AI content generator as
+      building blocks
+    - **Not** a rule source. Cannot override Brand or Event context.
+  - Tab / field / placeholder changes:
+    - Tab order: caption → banner → prompt → cta → asset ⇒ caption →
+      cta → banner → prompt → asset
+    - Tab labels: "Captions / Banner Text / Image Prompts / CTA
+      Snippets / Assets" ⇒ "Copy Templates / CTA Snippets / Banner
+      Text Patterns / Prompt Templates / Reference Assets"
+    - Dialog content labels: generic "Content" ⇒ per-type ("Prompt
+      scaffold" / "CTA line" / "Pattern")
+    - Placeholders: abstract examples ⇒ concrete token-style patterns
+      (e.g. `{win_amount}`, `{brand}`, `{player_handle}`)
+  - Validation changes: `content` min(1) at the Zod level; trims on
+    name / content / notes / url
+  - Docs updated: docs/03-ui-pages.md (section rewrite), docs/06
+    (AI Context Precedence addition), docs/07 (new supporting-library
+    subsection). docs/02-data-model.md unchanged — no schema change.
+  - Typecheck clean (`npx tsc --noEmit`). No DB migration.
+  - Follow-ups deferred:
+    - AI generator retrieval hook-up (Phase 4 continuation): prompt
+      builder will pull active brand-scoped templates by `template_type`
+      and append them as additional prompt sections. Trivial to add
+      once the live provider is chosen.
+    - Optional: an admin seed set of global (brand_id=null) templates
+      to bootstrap new brands.
+
+### 2026-04-21
+- Task: Phase 4 — AI content generator agent foundation
+  - Status: Complete
+  - Files changed (all new under `src/lib/ai/` unless noted):
+    - `types.ts` — canonical shapes: `BrandContext`, `EventOverride`,
+      `EffectiveContext`, `SourceFacts` (discriminated union for
+      big_win / promo / hot_games / event / educational),
+      `NormalizedGenerationInput`, `GeneratedSample`,
+      `GenerationRunResult`.
+    - `resolve-context.ts` — `resolveEffectiveContext(brand, event?)`
+      merges Brand base + Event override into the single context the
+      prompt builder reads. Brand positioning never overridden;
+      `notes_for_ai` appended (not replaced) when both layers have it;
+      `overridden_by_event[]` recorded for transparency.
+    - `source-normalizers/{index,defaults,big-win,promo,hot-games,event,educational}.ts`
+      — one normalizer per source_type. Each lifts raw per-source facts
+      (plus brand + optional event) into `NormalizedGenerationInput`.
+      Sample count defaults: big_win=3, promo=3, hot_games=2, event=1,
+      educational=2.
+    - `fixtures/{index,big-win,promo,hot-games,educational}.ts` — mock
+      source payloads shaped exactly like what the future BigQuery /
+      Promotions API adapters will emit, so swapping in live data is a
+      one-call change in the orchestrator.
+    - `prompt-builder.ts` — builds a structured multi-section prompt:
+      brand positioning, voice & tone, audience, language style (+
+      sample), brand notes, restrictions (banned phrases + topics),
+      default hashtags, few-shot sample captions (up to 5), platform
+      guidance, source facts, optional event override section
+      surfacing which fields the event overrode. Strict-JSON output
+      schema. Versioned via `PROMPT_VERSION = "v1-2026-04-21"`.
+    - `client.ts` — swappable provider boundary. Current state:
+      `AI_PROVIDER=stub` (default) returns deterministic placeholder
+      samples shaped like a real provider response — the whole
+      pipeline runs end-to-end with no provider account and no cost.
+      Future Anthropic / OpenAI wire-up is a single-case addition to
+      the `switch(provider)` in `generateSamples()`. Emits
+      `[ai-generator]` log line per run.
+    - `queue-inserter.ts` — `insertSamplesAsDrafts()`. Writes one Post
+      per sample as `draft` status. Every draft carries:
+      `generation_context_json.{sample_group_id, sample_index,
+      sample_total, source_type, source_snapshot, prompt_version,
+      ai_provider, ai_dry_run, generated_at, effective_context_overrides}`.
+      Hot Games drafts additionally get `type: "hot_games_snapshot"`
+      + `ranked_games` so the existing refine modal's Hot Games contract
+      keeps working. Uses `$transaction` over `create` calls so we can
+      collect created ids (createMany doesn't return them).
+    - `generate.ts` — `runGeneration({ input, created_by })`
+      orchestrator: build prompt → call client → insert drafts →
+      return `{ created_post_ids, sample_count, dry_run, provider,
+      prompt_version }`. Single entry point; per-source routes only
+      produce `NormalizedGenerationInput`, never touch prompt/client/DB
+      directly. Re-exports helper namespaces `normalizers` and
+      `fixtures` for API-route ergonomics.
+    - `load-brand.ts` — server helper `loadBrandContext(brandId)` /
+      `brandOr404(brandId)`. Pulls a Brand row and coerces
+      voice/design/sample_captions JSON blobs into the `BrandContext`
+      shape. Mirrors the client-side coercions in the brands page.
+    - `src/app/api/ai/generate-from-fixture/route.ts` (new) — admin-only
+      dev endpoint gated by `ALLOW_AI_FIXTURES=true`. Body
+      `{ source_type, brand_id, platform?, sample_count? }`, runs
+      pipeline against bundled fixture. Returns
+      `{ created_post_ids, sample_group_id, ... }`. Events not
+      supported here — they have their own route.
+    - `src/app/api/events/[id]/generate-drafts/route.ts` (modified) —
+      upgraded from "create empty shell posts" to "run AI pipeline per
+      (occurrence × platform) slot". Dedupe on
+      `(source_instance_key, platform)` preserved. Default 1 sample
+      per slot (matches legacy); accepts `?samples_per_slot=N` (1–5).
+      Builds `EventOverride` including `posting_instance_summary` so
+      the prompt's event section can reference the cadence.
+    - `prisma/schema.prisma` + `prisma/migrations/20260421230000_ai_sourcetype_educational/migration.sql`
+      — added `educational` to `SourceType` enum. Matches `PostType`
+      which already had it. Required so AI-generated educational drafts
+      persist with the correct source label. One-line `ALTER TYPE ...
+      ADD VALUE IF NOT EXISTS 'educational'` migration.
+    - `.env.production.example` — added `AI_PROVIDER="stub"` and
+      `ALLOW_AI_FIXTURES="false"` with comments describing swap path
+      and dev-endpoint gate.
+    - `docs/00-architecture.md` — new "AI content generator" subsection
+      covering the pipeline diagram, module map, precedence rule,
+      supported source types, image-generation deferral note, dev +
+      event entry points, refine compatibility.
+    - `docs/02-data-model.md` — added `source_type` enum listing with
+      the new `educational` value + date note.
+    - `docs/03-ui-pages.md` — Events detail page note updated: the
+      "Generate Drafts" button now runs through the AI pipeline (not
+      shell posts) + `?samples_per_slot` tunable.
+    - `docs/07-ai-boundaries.md` — Input Contract paragraph now
+      references `NormalizedGenerationInput` + `resolveEffectiveContext`.
+      Multi-sample Draft Grouping list now includes Events + Educational
+      counts and names `defaultSampleCount()`.
+  - Generation architecture created:
+    - 5-stage pipeline: normalizer → prompt builder → provider client →
+      queue inserter → Content Queue draft rows
+    - Orchestrator `runGeneration()` is the single entry point from API
+      routes; per-source routes only produce `NormalizedGenerationInput`
+    - Provider boundary sits behind an env flag; stub runs by default
+    - Image generation explicitly deferred (image_prompt emitted but
+      not rendered; no model locked)
+  - Normalized input shape (`NormalizedGenerationInput`):
+    - `source_type` + `source_id` + `source_instance_key` (correlation)
+    - `brand: BrandContext` + `event: EventOverride | null` (raw layers
+      for audit/snapshot)
+    - `effective: EffectiveContext` (merged, prompt-builder consumes
+      this)
+    - `source_facts: SourceFacts` (discriminated union)
+    - `post_type` + `platform` + `sample_count` + `sample_group_id`
+  - Precedence model used: **Brand Management (base) → Event brief
+    (override on conflict)**. Brand positioning never overridden;
+    tone/cta/audience/notes_for_ai can be overridden by event; event
+    notes are appended to brand notes (not replaced). Overridden fields
+    tracked in `effective.overridden_by_event[]` and surfaced in the
+    prompt's Event Brief section.
+  - Source types supported (Phase 4 MVP):
+    - big_win (3 samples; fixture-backed)
+    - promo (3 samples; fixture-backed)
+    - hot_games (2 samples; fixture-backed)
+    - event (1 sample per slot; live — uses real Event rows)
+    - educational (2 samples; fixture-backed)
+  - How samples are generated into Content Queue:
+    1. Normalizer produces `NormalizedGenerationInput` (assigns
+       `sample_group_id`)
+    2. `buildPrompt(input)` returns a `StructuredPrompt` with labeled
+       sections + strict JSON output schema
+    3. `generateSamples({ input, prompt })` returns `{ samples[],
+       provider, dry_run }` — stub in default config, swappable later
+    4. `insertSamplesAsDrafts(...)` writes one `draft` Post per sample
+       with the shared `sample_group_id` + `sample_index`/`sample_total`
+       in `generation_context_json` (picked up by the existing Queue
+       enrichment logic that renders "Sample N/M" chips)
+    5. Drafts enter the normal review lifecycle: refine/approve/schedule/publish
+  - Mock fixtures: `bigWinFixture()`, `promoFixture()`,
+    `hotGamesFixture()`, `educationalFixture()` in `src/lib/ai/fixtures/`.
+    Each accepts partial overrides for targeted test runs.
+  - Actual AI generation implemented vs deferred:
+    - **Implemented**: full prompt builder, provider boundary, dry-run
+      stub that returns deterministic placeholder samples, queue insertion
+      with full context snapshot, event route using the pipeline end-to-end
+    - **Deferred** (single-function flip each, behind env):
+      Anthropic/OpenAI provider, actual image rendering, learning
+      loop, live BigQuery and Promotions API adapters (fixtures stand in
+      for now)
+  - Refine-flow compatibility: confirmed. Hot Games drafts still get
+    the `type: "hot_games_snapshot"` tag + frozen ranked_games, so the
+    existing refine modal's Locked Context panel continues to render
+    correctly. Event-derived drafts carry the event id as `source_id`
+    and occurrence ISO as `source_instance_key`, so existing event
+    context resolution still works.
+  - Typecheck clean (`npx tsc --noEmit`), Prisma client regenerated.
+  - Follow-ups (not blocking Phase 4 close):
+    - Phase 3: live BigQuery adapter for big_win + hot_games;
+      per-brand Promotions API adapter. Drops into the existing
+      normalizer inputs with zero downstream changes.
+    - Provider wire-up (Anthropic / OpenAI). Single-case addition in
+      `client.ts`; no other files need to change.
+    - Image-generation provider decision + wire-up.
+    - Phase 6: learning loop reads the rich
+      `generation_context_json` snapshot already being written by
+      every draft.
+
 ### 2026-04-21
 - Task: Ops cleanup — standardize deploy ownership on root
   - Status: Complete

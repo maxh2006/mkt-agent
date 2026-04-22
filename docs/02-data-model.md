@@ -221,6 +221,14 @@ Old config shapes migrated at render time by merging with defaults.
 - rejected
 - failed
 
+### source_type
+- promo
+- big_win
+- event
+- manual
+- hot_games
+- educational (added 2026-04-21 with Phase 4 AI generator; matches the `educational` value in `post_type`)
+
 Approval is metadata only (`approved_at`, `approved_by`); the Approve action
 transitions `pending_approval` directly to `scheduled`. Existing DB rows with
 `status = 'approved'` were migrated to `scheduled` by

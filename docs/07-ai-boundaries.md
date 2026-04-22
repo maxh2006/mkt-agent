@@ -48,6 +48,41 @@ Example packet shape:
 - CTA style (brand default, possibly overridden by event)
 - (for event-derived posts) event brief layer
 
+Canonical in-code shape: `NormalizedGenerationInput` at
+`src/lib/ai/types.ts`. Every source-type normalizer produces this shape;
+the prompt builder (`src/lib/ai/prompt-builder.ts`) reads from it. The
+Brand→Event merge lives in `src/lib/ai/resolve-context.ts#resolveEffectiveContext()`
+and records `overridden_by_event[]` so the prompt can surface the
+override reasoning transparently.
+
+### Templates & Assets — reusable supporting library
+
+Alongside the two rule layers (Brand Management + Event), the AI
+generator may draw from **Templates & Assets** — a reusable library of
+concrete building blocks authored by operators / admins:
+
+- `caption` → **Copy Templates** — reusable caption structures / post
+  shapes. Pattern, not wording. AI pulls these as scaffolds when a
+  source type calls for a proven post layout.
+- `cta` → **CTA Snippets** — reusable call-to-action lines.
+- `banner` → **Banner Text Patterns** — reusable short overlay-text
+  patterns for banner/image creatives.
+- `prompt` → **Prompt Templates** — reusable image-generation prompt
+  scaffolds. Composed from brand identity + scene cues.
+- `asset` → **Reference Assets** — reusable visual reference URLs.
+  Distinct from Brand Management's `benchmark_assets` (which are
+  base brand identity guidance, not operational library material).
+
+Templates & Assets is **NOT a rule layer**. It never overrides brand or
+event context; it only supplies building blocks when those rule layers
+reach for one. The page UI restates this to prevent drift.
+
+Phase 4 does not yet wire template/asset retrieval into the prompt
+builder — that's a later enhancement once the live AI provider is
+chosen. The library surface is ready; the retrieval call is trivial to
+add because every entry is already keyed by `template_type`, `brand_id`
+(null for global), and `active`.
+
 ---
 
 ## Output Contract
@@ -111,10 +146,14 @@ and a universal helper note restating the constraint.
 
 ## Multi-sample Draft Grouping
 
-Automations create multiple sibling drafts per scenario:
+Automations create multiple sibling drafts per scenario (defaults set in
+`src/lib/ai/source-normalizers/defaults.ts#defaultSampleCount()`):
 - Big Wins: 3 samples per scan
 - Running Promotions: 3 samples per promo match
 - Hot Games: 2 samples per snapshot
+- Events: 1 sample per (occurrence × platform) slot by default; callers
+  can pass `samples_per_slot=N` (1–5) for multiple sibling samples
+- Educational: 2 samples per packet
 
 Sibling drafts share a `sample_group_id` stored in `generation_context_json` along
 with `sample_index` and `sample_total`. The Content Queue reads these to render

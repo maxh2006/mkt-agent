@@ -53,6 +53,7 @@ enum SourceType {
   event
   manual
   hot_games
+  educational
 }
 
 enum EventStatus {

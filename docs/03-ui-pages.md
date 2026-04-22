@@ -161,7 +161,7 @@ operators type their own values. Required field enforcement is unchanged.
 
 On the Create page, the primary button label is "Create Event & Generate Drafts Now" when Generate Now is selected; otherwise "Create Campaign Event". Submitting with Generate Now creates the event and immediately triggers draft generation into Content Queue for review.
 
-Detail page shows all sections with inline editing. "Generate Drafts" button creates shell posts in Content Queue from the posting schedule.
+Detail page shows all sections with inline editing. "Generate Drafts" button creates drafts in Content Queue from the posting schedule. Since 2026-04-21 (Phase 4 AI generator), each (occurrence × platform) slot runs through the AI pipeline (`src/lib/ai/generate.ts#runGeneration`), producing a real draft with headline/caption/CTA/banner/image_prompt — not an empty shell. The current provider is the dry-run stub (`AI_PROVIDER=stub`); swapping to a real provider is an env + single-function change in `src/lib/ai/client.ts`. Pass `?samples_per_slot=N` (1–5) to generate multiple sibling samples per slot.
 
 Event statuses: active, ended, archived (no draft). Lifecycle auto-managed.
 
@@ -176,7 +176,56 @@ Rules-only configuration page with 3 tabs:
 All matched rules create drafts in Content Queue for operator review.
 
 ### Templates & Assets
-Brand assets, reusable templates, prompts, CTAs.
+
+**Reusable library of supporting material** — copy patterns, CTA snippets,
+banner text, prompt scaffolds, and reference assets. Operators and the
+future AI content generator draw from these as reusable building blocks.
+
+**This page is NOT a rule source.** Base AI rules (positioning, tone,
+language, audience, banned lists, brand notes) live in Brand Management;
+event briefs are the situational override layer. Templates & Assets sits
+alongside those as a reusable supporting library — see
+docs/07-ai-boundaries.md for the full AI context precedence model. A
+small callout on the page itself restates this so operators don't
+duplicate brand rules here.
+
+Tabs (reordered 2026-04-22 to match the library mental model):
+
+1. **Copy Templates** (`caption`) — reusable caption structures and post
+   shapes the AI can pull from as scaffolds. Save the pattern, not the
+   exact wording.
+2. **CTA Snippets** (`cta`) — reusable call-to-action lines the AI can
+   drop into drafts.
+3. **Banner Text Patterns** (`banner`) — short overlay-text patterns
+   (2–6 words) used on banner/image creatives.
+4. **Prompt Templates** (`prompt`) — image-generation prompt scaffolds
+   the AI can reuse across creatives.
+5. **Reference Assets** (`asset`) — reusable visual reference URLs.
+   **Distinct from Brand Management's benchmark assets** — benchmarks
+   define base brand identity; reference assets here are operational
+   library material (cross-content references like recurring mascots,
+   reusable background elements).
+
+DB enum values (`caption`/`banner`/`prompt`/`cta`/`asset`) are unchanged —
+only operator-facing labels, order, and helper text were refreshed.
+
+Per-entry fields:
+- `name` (required) — library identifier.
+- Text types: `content` (required, min 1 char, max 5000) + optional
+  `notes` (usage guidance).
+- Reference assets: `url` (required, must be a valid URL) +
+  `asset_type` (image / logo / banner) + optional `notes`. Direct file
+  upload is not wired; paste a hosted URL.
+- `active` toggle — inactive entries are hidden from AI reuse.
+- Global vs brand-scoped: global templates (`brand_id=null`) are
+  read-only in the UI; admin-managed seeds. Brand-scoped templates are
+  editable by brand_manager+.
+
+Each tab shows a short helper line restating that tab's reusable role,
+and the dialog echoes the same helper to remind operators what belongs
+there vs. in Brand Management. Content placeholders are concrete and
+token-style (e.g. `{player_handle}`, `{win_amount}`) to communicate the
+"pattern, not wording" expectation.
 
 ### Insights
 Lightweight internal metrics only.

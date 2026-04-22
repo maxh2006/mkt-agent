@@ -5,8 +5,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import { templatesApi, type Template } from "@/lib/templates-api";
 import {
-  TEMPLATE_TYPES,
   TEMPLATE_TYPE_LABELS,
+  TEMPLATE_TYPE_LABELS_PLURAL,
+  TEMPLATE_TYPE_HELPERS,
+  TEMPLATE_TAB_ORDER,
   ASSET_TYPES,
   ASSET_TYPE_LABELS,
   type TemplateType,
@@ -25,19 +27,45 @@ function canEdit(role?: string) {
 
 // ─── Tab config ───────────────────────────────────────────────────────────────
 
-type Tab = "caption" | "banner" | "prompt" | "cta" | "asset";
-const TABS: { id: Tab; label: string }[] = [
-  { id: "caption", label: "Captions" },
-  { id: "banner", label: "Banner Text" },
-  { id: "prompt", label: "Image Prompts" },
-  { id: "cta", label: "CTA Snippets" },
-  { id: "asset", label: "Assets" },
-];
+type Tab = TemplateType;
+
+const TABS: { id: Tab; label: string }[] = TEMPLATE_TAB_ORDER.map((id) => ({
+  id,
+  label: TEMPLATE_TYPE_LABELS_PLURAL[id],
+}));
 
 // ─── Shared input style ───────────────────────────────────────────────────────
 
 const inputClass =
   "w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50";
+
+// ─── Per-type concrete placeholders (AI-aware copy) ───────────────────────────
+
+const NAME_PLACEHOLDERS: Record<Tab, string> = {
+  caption: "e.g. Big Win — 3-line celebration",
+  banner: "e.g. Weekly promo — short reward overlay",
+  prompt: "e.g. Casino-night hero scene",
+  cta: "e.g. Short urgency CTA",
+  asset: "e.g. Mascot — hero pose",
+};
+
+const CONTENT_PLACEHOLDERS: Record<Tab, string> = {
+  caption:
+    "e.g.\n{hook emoji} {headline}\n\n{player_handle} hit {win_amount} on {game_name}!\n\n{cta}",
+  banner: "e.g. {WIN_AMOUNT} WIN",
+  prompt:
+    "e.g. Celebration-themed scene for {brand}. {game_name} artwork background, confetti, bold gold {win_amount} overlay, brand color accents ({primary}, {accent}). Mood: exciting, premium, trustworthy.",
+  cta: "e.g. Claim your bonus now →",
+  asset: "",
+};
+
+const NOTES_PLACEHOLDERS: Record<Tab, string> = {
+  caption: "When to use this pattern — e.g. 'High-multiplier wins, casual tone'",
+  banner: "When to use this pattern — e.g. 'Celebratory banners over 100x multiplier'",
+  prompt: "When to reuse this prompt — e.g. 'Any Big Win creative, evening slots'",
+  cta: "When to use this CTA — e.g. 'Time-bound promos with hard deadline'",
+  asset: "How this asset is used — e.g. 'Mascot layered over JILI game thumbs'",
+};
 
 // ─── Template form ────────────────────────────────────────────────────────────
 
@@ -96,7 +124,7 @@ function TemplateFormDialog({
     if (!form.name.trim()) { setError("Name is required"); return; }
 
     const isAsset = templateType === "asset";
-    if (isAsset && !form.url.trim()) { setError("URL is required for assets"); return; }
+    if (isAsset && !form.url.trim()) { setError("URL is required for reference assets"); return; }
     if (!isAsset && !form.content.trim()) { setError("Content is required"); return; }
 
     setSaving(true);
@@ -147,6 +175,11 @@ function TemplateFormDialog({
           </button>
         </div>
 
+        {/* Per-type helper — explains the reusable-library role */}
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          {TEMPLATE_TYPE_HELPERS[templateType]}
+        </p>
+
         <div className="space-y-4">
           {/* Name */}
           <div className="space-y-1.5">
@@ -156,7 +189,7 @@ function TemplateFormDialog({
               value={form.name}
               onChange={(e) => set("name", e.target.value)}
               maxLength={255}
-              placeholder="e.g. Big Win Caption — Energetic"
+              placeholder={NAME_PLACEHOLDERS[templateType]}
               disabled={saving}
               className={inputClass}
             />
@@ -165,19 +198,15 @@ function TemplateFormDialog({
           {/* Content (text templates) */}
           {!isAsset && (
             <div className="space-y-1.5">
-              <label className="text-sm font-medium">Content</label>
+              <label className="text-sm font-medium">
+                {templateType === "prompt" ? "Prompt scaffold" : templateType === "cta" ? "CTA line" : "Pattern"}
+              </label>
               <textarea
                 value={form.content}
                 onChange={(e) => set("content", e.target.value)}
                 maxLength={5000}
                 rows={5}
-                placeholder={
-                  templateType === "cta"
-                    ? "e.g. Register now and claim your bonus!"
-                    : templateType === "prompt"
-                    ? "e.g. Bold casino aesthetic, neon colors, jackpot coins..."
-                    : "e.g. 🎰 Play smart, win big! {{player_name}} just hit {{amount}}..."
-                }
+                placeholder={CONTENT_PLACEHOLDERS[templateType]}
                 disabled={saving}
                 className={inputClass + " resize-y min-h-24"}
               />
@@ -197,10 +226,13 @@ function TemplateFormDialog({
                   value={form.url}
                   onChange={(e) => set("url", e.target.value)}
                   maxLength={2048}
-                  placeholder="https://cdn.example.com/banner.png"
+                  placeholder="https://cdn.example.com/reference.png"
                   disabled={saving}
                   className={inputClass}
                 />
+                <p className="text-xs text-muted-foreground">
+                  File hosting is not wired in this build — paste a publicly hosted URL.
+                </p>
               </div>
               <div className="space-y-1.5">
                 <label className="text-sm font-medium">Asset type</label>
@@ -221,7 +253,7 @@ function TemplateFormDialog({
           {/* Notes */}
           <div className="space-y-1.5">
             <label className="text-sm font-medium">
-              Notes{" "}
+              Usage notes{" "}
               <span className="text-muted-foreground font-normal">(optional)</span>
             </label>
             <input
@@ -229,7 +261,7 @@ function TemplateFormDialog({
               value={form.notes}
               onChange={(e) => set("notes", e.target.value)}
               maxLength={500}
-              placeholder="Internal usage notes"
+              placeholder={NOTES_PLACEHOLDERS[templateType]}
               disabled={saving}
               className={inputClass}
             />
@@ -245,6 +277,9 @@ function TemplateFormDialog({
               className="h-4 w-4 rounded border-input accent-primary"
             />
             <span className="text-sm">Active</span>
+            <span className="text-xs text-muted-foreground">
+              — inactive entries are hidden from AI reuse
+            </span>
           </label>
         </div>
 
@@ -384,15 +419,20 @@ function TemplateSection({
 
   return (
     <>
-      <div className="flex items-center justify-between mb-3">
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          {TEMPLATE_TYPE_LABELS[templateType]}
+      <div className="space-y-1 mb-3">
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {TEMPLATE_TYPE_LABELS_PLURAL[templateType]}
+          </p>
+          {canEditSection && (
+            <Button size="sm" variant="outline" onClick={() => setDialog("create")}>
+              + New
+            </Button>
+          )}
+        </div>
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          {TEMPLATE_TYPE_HELPERS[templateType]}
         </p>
-        {canEditSection && (
-          <Button size="sm" variant="outline" onClick={() => setDialog("create")}>
-            + New
-          </Button>
-        )}
       </div>
 
       {isLoading && (
@@ -406,8 +446,8 @@ function TemplateSection({
       {!isLoading && visible.length === 0 && (
         <div className="rounded-lg border border-border bg-muted/20 px-4 py-8 text-center">
           <p className="text-sm text-muted-foreground">
-            No {TEMPLATE_TYPE_LABELS[templateType].toLowerCase()} yet.
-            {canEditSection && " Click + New to create one."}
+            No {TEMPLATE_TYPE_LABELS_PLURAL[templateType].toLowerCase()} yet.
+            {canEditSection && " Click + New to add one."}
           </p>
         </div>
       )}
@@ -445,7 +485,7 @@ export default function TemplatesPage() {
   const { data: session } = useSession();
   const queryClient = useQueryClient();
   const editable = canEdit(session?.user?.role);
-  const [activeTab, setActiveTab] = useState<Tab>("caption");
+  const [activeTab, setActiveTab] = useState<Tab>(TEMPLATE_TAB_ORDER[0]);
 
   const { data: templates, isLoading, isError, error } = useQuery({
     queryKey: ["templates"],
@@ -460,16 +500,20 @@ export default function TemplatesPage() {
     queryClient.invalidateQueries({ queryKey: ["templates"] });
   }
 
-  const tabTemplates = templates?.filter((t) => t.template_type === activeTab) ?? [];
-
   return (
     <div className="space-y-6 max-w-5xl">
       {/* Header */}
       <div>
         <h1 className="text-2xl font-semibold">Templates &amp; Assets</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Reusable captions, prompts, CTAs, banner text, and brand assets.
+          Reusable library of copy patterns, CTA snippets, banner text, prompt scaffolds, and reference assets. Operators and the AI content generator draw from these as supporting material.
         </p>
+      </div>
+
+      {/* Brand-precedence callout */}
+      <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground leading-relaxed">
+        Not base AI rules — positioning, tone, language, audience, banned
+        topics, and brand notes live in <span className="font-medium text-foreground">Brand Management</span>. Event briefs remain the situational override. This page is a reusable supporting library.
       </div>
 
       {/* No active brand */}
@@ -494,14 +538,14 @@ export default function TemplatesPage() {
       {!isError && (
         <>
           {/* Tabs */}
-          <div className="flex gap-1 border-b border-border">
+          <div className="flex gap-1 border-b border-border overflow-x-auto">
             {TABS.map((tab) => {
               const count = templates?.filter((t) => t.template_type === tab.id).length ?? 0;
               return (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                  className={`whitespace-nowrap px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
                     activeTab === tab.id
                       ? "border-primary text-foreground"
                       : "border-transparent text-muted-foreground hover:text-foreground"

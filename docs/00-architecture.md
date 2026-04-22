@@ -289,6 +289,98 @@ filter-by-code work.
 approved-payload snapshot (deferred — no refine-after-approval in MVP),
 multi-platform posts.
 
+### AI content generator
+
+Lives under `src/lib/ai/`. Turns structured source facts + brand context
+into draft samples that get inserted into Content Queue. AI creates
+drafts only — Content Queue handles human review; Manus handles publishing.
+Never invoked at publish/retry time.
+
+**Pipeline** (one function call per generation run):
+
+```
+raw source facts
+   ↓ (per-source normalizer)
+NormalizedGenerationInput
+   ↓ (buildPrompt)
+StructuredPrompt
+   ↓ (generateSamples — client.ts)
+GeneratedSample[]
+   ↓ (insertSamplesAsDrafts)
+Post[] (draft, grouped by sample_group_id)
+```
+
+**Module map** (everything under `src/lib/ai/`):
+- `types.ts` — canonical shapes: `NormalizedGenerationInput`,
+  `BrandContext`, `EventOverride`, `EffectiveContext`, `SourceFacts` (union),
+  `GeneratedSample`.
+- `resolve-context.ts` — `resolveEffectiveContext(brand, event?)` merges
+  Brand base + Event override into a single `EffectiveContext` consumed
+  by the prompt builder. Records `overridden_by_event[]` for transparency.
+- `source-normalizers/*` — one per source type. Each produces
+  `NormalizedGenerationInput` from raw per-source facts.
+- `fixtures/*` — mock per-source facts for dev. Live source adapters
+  (BigQuery for big_win + hot_games, per-brand API for promo) land in
+  Phase 3 work and will produce the exact same `*Facts` shapes.
+- `prompt-builder.ts` — builds a structured `StructuredPrompt` with
+  labeled sections (positioning, voice, audience, language style,
+  notes, restrictions, hashtags, sample captions, platform hint,
+  source facts, optional event override). Emits a strict JSON
+  `output_schema` every provider must honor. Versioned via
+  `PROMPT_VERSION`.
+- `client.ts` — swappable provider. Default `AI_PROVIDER=stub` returns
+  deterministic placeholder samples so the whole pipeline runs without
+  a provider account. Real provider wire-up (Anthropic / OpenAI) is a
+  single-case addition to the `switch(provider)` in `generateSamples()`.
+- `queue-inserter.ts` — writes each sample as a `draft` Post with
+  `sample_group_id`/`sample_index`/`sample_total` in
+  `generation_context_json` (matches the existing Queue enrichment
+  convention). Preserves per-source snapshot fields (e.g. Hot Games
+  frozen ranked list, event occurrence, big-win source row) so refine
+  cycles stay source-constrained.
+- `generate.ts` — orchestrator `runGeneration()`. Single entry point.
+- `load-brand.ts` — `loadBrandContext(brandId)` / `brandOr404(brandId)`
+  server helpers to turn a Brand row into the `BrandContext` shape.
+
+**Brand base + Event override precedence** (see
+`docs/07-ai-boundaries.md` and `resolveEffectiveContext()`):
+- Brand Management is the default layer on every generation call.
+- When the post is event-derived, the Event brief overrides brand
+  fields it specifies (`tone`, `cta` → cta_style, `target_audience` →
+  audience_persona). Brand positioning is never overridden.
+- `notes_for_ai` is *appended* rather than replaced — the brand voice
+  still matters even when the event has extra guidance.
+
+**Source types supported** (Phase 4 MVP):
+- `big_win` — 3 samples default (BigQuery-shaped facts; fixture only)
+- `promo` — 3 samples default (per-brand API-shaped; fixture only)
+- `hot_games` — 2 samples default (BigQuery-shaped scan; fixture only)
+- `event` — 1 sample per (occurrence × platform) default (real Event
+  rows, live)
+- `educational` — 2 samples default (structured packet; fixture only)
+
+**Image generation.** Deferred. Every generated sample carries an
+`image_prompt` string; the image-rendering provider + model are picked
+in a later task. No schema changes needed when it lands.
+
+**Dev entry point.** `POST /api/ai/generate-from-fixture` is an
+admin-only dev route gated by `ALLOW_AI_FIXTURES=true`. It feeds a
+bundled fixture through the full pipeline — useful for exercising the
+Content Queue against AI-produced drafts without live source data.
+
+**Event entry point.** `POST /api/events/[id]/generate-drafts` (existing)
+now calls `runGeneration()` for each (occurrence × platform) slot that
+doesn't already have a draft. Legacy dedupe on
+`(source_instance_key, platform)` is preserved. Add
+`?samples_per_slot=N` (1–5) for multiple sibling samples per slot.
+
+**Refine compatibility.** Because refine is locked to review-side
+statuses (see docs/06-workflows-roles.md) and source-constrained to
+visual/tone/presentation, the generator's `generation_context_json`
+snapshot is the same shape the existing refine modal already expects —
+especially the Hot Games `type: "hot_games_snapshot"` + `ranked_games`
+fields, which the queue-inserter writes for every hot_games draft.
+
 ### External Data Source — Shared BigQuery
 Primary operational facts come from a shared BigQuery dataset maintained by the platform team.
 Tables: `shared.users`, `shared.transactions`, `shared.game_rounds`, `shared.games`.
