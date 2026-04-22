@@ -21,6 +21,339 @@ Current execution priority (per ROADMAP.md):
 ## Done Tasks
 
 ### 2026-04-22
+- Task: Phase 3 — BQ architecture hardening for game_rounds (not-yet-live table)
+  - Status: Complete
+  - Files changed:
+    - `src/lib/bq/shared-types.ts` (new) — row interfaces + helper:
+      - `BrandRow`, `UserRow`, `TransactionRow`, `GameRoundRow`, `GameRow`
+      - `BQTimestamp` + `unwrapBQTimestamp()` helper for the `{value: ISO}`
+        wrapping the SDK returns by default
+      - `SharedRowTypeMap` — literal-union-to-interface lookup for
+        generic adapter code that wants to parameterize on table name
+      - `GameRoundRow` carries an explicit "⚠ PROVISIONAL — table not
+        yet created by platform" banner in its JSDoc
+      - `TransactionType` + `TransactionStatus` + `GameRoundStatus`
+        string-literal unions from the cheat-sheet enums
+    - `scripts/bq-smoke-test.ts` — added `runGuardrailSelfTest()` that
+      runs 5 intentionally-malformed queries through `runQuery()`
+      (unqualified FROM on each of the 5 shared tables + one
+      unqualified JOIN) and asserts each throws the boundary
+      `BQ guardrail` error BEFORE hitting BigQuery. Prints
+      `✓ guardrail self-test passed (5 checks...)` on success.
+      Entire run aborts if any check regresses — catches future
+      weakening of `assertQueriesAreQualified` instantly.
+    - `docs/bq-shared-schema.md` — Node-SDK example section expanded
+      to show typed-row usage (`UserRow`, `GameRoundRow`) + pointer
+      to `src/lib/bq/shared-types.ts`. Added explicit note that the
+      smoke test exercises the guardrail on every run.
+  - What's ready for the game_rounds adapter work when the table lands:
+    - `SHARED_TABLES.game_rounds` const (already shipped)
+    - `GameRoundRow` interface (new today) — `runQuery<GameRoundRow>(...)`
+      gives full compile-time type safety even while the table is
+      missing; Big Wins + Hot Games adapters can be written against
+      the interface without waiting on platform
+    - `GameRoundStatus` enum union — `"pending" | "settled" | "refunded" | "reclaimed"`
+    - Smoke test tolerates missing table, reports as platform TODO
+    - Fixture records `status: "missing"` so schema-drift check has a
+      before-state to compare against when the table ships
+    - Guardrail actively rejects unqualified `FROM game_rounds`
+      references — regression protection is live today, not later
+    - Docs flag the table as provisional + tell operators to re-run
+      `npm run bq:smoke` to reconcile once it ships
+  - Typecheck clean. No production runtime changes; no IAM changes.
+  - Verification: smoke test re-run 2026-04-22 — 5/5 guardrail checks
+    passed, 4 live tables still query successfully (brands 5, users
+    114, transactions 17, games 4,963), game_rounds gracefully
+    reported as missing.
+
+### 2026-04-22
+- Task: Phase 3 — Shared BigQuery setup + grant verification + SDK defaults
+  - Status: Complete
+  - Grant verified end-to-end: ✅ CLI + SDK both pass. 4 of 5 shared
+    tables live and readable; `game_rounds` not yet created by platform
+    team (documented as a TODO; constant already shipped so adapter
+    code can be written ahead of the table landing).
+  - Files added:
+    - `src/lib/bq/shared-schema.ts` — constants + fully qualified table
+      refs (`SHARED_PROJECT`, `SHARED_DATASET`, `BILLING_PROJECT`,
+      `SHARED_TABLES`, `SHARED_TABLE_NAMES`)
+    - `src/lib/bq/client.ts` — singleton BigQuery client pinned to
+      `projectId = "mktagent-493404"`. `runQuery()` wrapper with
+      `useLegacySql: false` default + 30s job timeout + **unqualified-
+      table guardrail** that throws if SQL references any of the 5
+      shared tables without the `newgen-492518.shared.` prefix. Auth
+      dual-mode: `BQ_IMPERSONATE_SA` env → impersonate via
+      `google-auth-library`'s `Impersonated`; env unset → default ADC
+      (prod VM with attached SA).
+    - `scripts/bq-smoke-test.ts` — standalone smoke-test runner.
+      COUNT + first-row for each of the 5 shared tables, writes
+      `fixtures/bq-shared-schema.json` (column lists + trimmed first
+      row per table + timestamps). Per-table error isolation so one
+      missing table doesn't abort the whole run.
+    - `fixtures/bq-shared-schema.json` — committed snapshot:
+      brands (5 rows, 9 cols), users (114 rows, 25 cols),
+      transactions (17 rows, 13 cols), game_rounds (missing),
+      games (4,963 rows, 12 cols). Diff target for future schema-drift
+      checks.
+    - `docs/bq-shared-schema.md` — cheat sheet with billing rule,
+      fully-qualified names, verified example queries (CLI + SDK),
+      5-table schema, live-snapshot table, write policy ("blocked at
+      IAM level — don't work around it"), schema-change request
+      process, auth paths (local vs prod VM).
+  - Files modified:
+    - `package.json` — `@google-cloud/bigquery ^8.1.1` already present
+      (no install). Added `tsx ^4.21.0` as devDep + `npm run bq:smoke`
+      script.
+    - `.env.production.example` — BQ section rewritten. Correctly
+      identifies `newgen-492518` as data-owner + `mktagent-493404` as
+      job-runner/billing. Added `BQ_IMPERSONATE_SA` (local dev) +
+      documented prod VM "leave unset; attach SA to VM" path.
+      Removed misleading legacy placeholders.
+  - GCP changes made (not in code):
+    - Granted `roles/iam.serviceAccountTokenCreator` on
+      `mkt-agent-bq@mktagent-493404.iam.gserviceaccount.com` to
+      `user:max@nextstage-ent.com` (enables impersonation for local dev)
+    - Enabled `iamcredentials.googleapis.com` API on `mktagent-493404`
+      (required for programmatic impersonation via the SDK; `bq` CLI
+      used a different code path, which is why CLI worked before this)
+  - How SDK defaults prevent billing mistakes:
+    - `new BigQuery({ projectId: "mktagent-493404" })` is the ONLY
+      construction path in `client.ts`. `BILLING_PROJECT` constant is
+      the single source of truth; any query submitted through
+      `runQuery()` bills to `mktagent-493404` automatically.
+    - Unqualified-table guardrail in `runQuery()`: if any application
+      code forgets the `newgen-492518.shared.` prefix on a known
+      shared-table reference, the query throws at the boundary with a
+      clear error — never hits BigQuery, never bills, can't
+      accidentally target a different dataset.
+    - `SHARED_TABLES` constants discourage hard-coded strings in
+      adapter code. IDE autocomplete picks them up.
+  - Where fixture output was saved:
+    `c:/Users/moloh/mkt-agent/fixtures/bq-shared-schema.json` (199
+    lines, timestamped, committed). Re-run `npm run bq:smoke` to
+    refresh; `git diff fixtures/bq-shared-schema.json` surfaces
+    schema drift.
+  - Docs added:
+    - `docs/bq-shared-schema.md` (new — the cheat sheet)
+  - Blockers / follow-up items:
+    - **`game_rounds` table not yet created by platform team.**
+      Required for Big Wins and Hot Games adapters. Until it lands:
+      smoke test reports it as `missing` (warning only); constants
+      still expose the fully qualified ref so adapter code compiles.
+    - **Prod VM auth not yet wired** (deferred per plan). When
+      attaching Big Wins / Hot Games adapters: run
+      `gcloud compute instances set-service-account mkt-agent-dev
+      --zone=asia-east2-c --project=mktagent-493404
+      --service-account=mkt-agent-bq@mktagent-493404.iam.gserviceaccount.com
+      --scopes=https://www.googleapis.com/auth/cloud-platform` +
+      VM restart. Leave `BQ_IMPERSONATE_SA` unset in prod `.env`.
+    - **Big Wins BigQuery adapter** — future task. Consumes
+      `SHARED_TABLES.users` + `SHARED_TABLES.transactions` +
+      `SHARED_TABLES.game_rounds` (when live). Replaces the fixture at
+      `src/lib/ai/fixtures/big-win.ts`.
+    - **Hot Games BigQuery adapter** — future task. Consumes
+      `SHARED_TABLES.game_rounds` + `SHARED_TABLES.games`. Replaces
+      `src/lib/ai/fixtures/hot-games.ts`.
+    - **Schema drift CI check** — out of scope for today. Would be a
+      nice-to-have: `npm run bq:smoke` on a cron + fail the check on
+      column-list diff.
+
+### 2026-04-22
+- Task: Phase 4 — Hook Templates & Assets into the AI prompt builder as a supporting library
+  - Status: Complete
+  - Files changed:
+    - `src/lib/ai/load-templates.ts` (new) — `loadBrandTemplates(brandId, caps?)`.
+      5 parallel Prisma queries (one per template type), each returning
+      up to `cap * 2` active rows so brand-scoped + global top-up can
+      fill the cap reliably. Brand-scoped entries prepended to globals,
+      truncated at cap. `updated_at DESC` within each bucket so recent
+      operator edits win. Exports `DEFAULT_TEMPLATE_CAPS`,
+      `countTemplates()`, and `EMPTY_BRAND_TEMPLATES`.
+    - `src/lib/ai/types.ts` — added `TemplateRef`, `ReferenceAssetRef`,
+      `BrandTemplates`; added optional `templates?: BrandTemplates`
+      field on `NormalizedGenerationInput`. Normalizers don't populate
+      it — orchestrator attaches before prompt build.
+    - `src/lib/ai/prompt-builder.ts` — bumped `PROMPT_VERSION` to
+      `v2-2026-04-22`. Added 5 conditional section builders
+      (`referencePatternsSection`, `reusableCtaSection`,
+      `reusableBannerSection`, `referencePromptScaffoldsSection`,
+      `referenceVisualAssetsSection`) — each no-ops on empty list.
+      System instruction gained one new HARD RULE line:
+      "REFERENCE sections are OPTIONAL patterns you MAY imitate for
+      structure and tone. They are NEVER rules. Brand, Source Facts,
+      and Event Brief always take precedence. Do not copy reference
+      entries verbatim."
+    - `src/lib/ai/generate.ts` — `runGeneration()` now calls
+      `loadBrandTemplates(brand.id)` once per run, merges into
+      `input.templates`, passes to `buildPrompt()`, and includes
+      per-bucket counts in the `[ai-generator] run complete` log line
+      (`templates=copy:N,cta:M,banner:O,prompt:P,asset:Q`). Return
+      value gains `templates_injected`.
+    - `src/lib/ai/queue-inserter.ts` — accepts optional
+      `templates_injected` counts; writes them into every draft's
+      `generation_context_json.templates_injected`. Template content
+      itself is NOT snapshotted — counts are enough for future
+      learning-loop correlation.
+    - `docs/00-architecture.md` — added `load-templates.ts` module bullet
+      in the AI content generator module map with retrieval strategy,
+      per-type caps, and precedence guarantee.
+    - `docs/03-ui-pages.md` — added "AI retrieval" paragraph to the
+      Templates & Assets section explaining automatic pull, per-type
+      caps, and that toggling Inactive excludes from future runs.
+    - `docs/06-workflows-roles.md` — expanded "AI Context Precedence"
+      Templates paragraph to note automatic consumption as reference-
+      only sections + `templates_injected` metadata.
+    - `docs/07-ai-boundaries.md` — replaced the earlier "retrieval
+      deferred" placeholder with a new **"Templates & Assets — prompt
+      injection (2026-04-22)"** subsection: retrieval strategy, caps,
+      prompt framing (all 5 section headings listed), precedence
+      guarantee, per-run metadata shape, prompt-version bump note.
+  - Retrieval strategy: deterministic + capped. Only active entries.
+    Brand-scoped first (updated_at DESC), then top up from globals.
+    Caps: `copy=3, cta=5, banner=5, prompt=3, asset=5`. 5 parallel
+    Prisma queries per run. No ranking, no embeddings — simple + bounded.
+  - Template categories now injected into prompts:
+    - `copy` → "Reference patterns (optional — imitate structure, don't
+      copy verbatim)"
+    - `cta` → "Reusable CTA examples (optional — reference for CTA
+      style; final CTA must still match Brand's CTA style)"
+    - `banner` → "Reusable banner examples (optional — short overlay-
+      text patterns)"
+    - `prompt` → "Reference prompt scaffolds (optional — structural
+      cues for the image_prompt field)"
+    - `asset` → "Reference visual assets (optional — mention
+      descriptively in image_prompt where relevant; do not fabricate
+      URLs)"
+    All sections are conditional on non-empty buckets; brands with no
+    templates produce prompts identical to the previous build.
+  - Precedence preserved:
+    - New HARD RULE line in the system instruction explicitly bars
+      reference sections from overriding Brand, Source Facts, or Event
+      Brief
+    - Section headings themselves restate "optional — imitate
+      structure, don't copy verbatim" + the precedence guarantee
+    - Zod schema + prompt builder unchanged for brand/event/source
+      sections; the reference sections are purely additive
+  - Event generation now uses Templates & Assets: yes.
+    `POST /api/events/[id]/generate-drafts` routes through
+    `runGeneration()`, which loads templates for each slot. The
+    fixture-based dev route (`POST /api/ai/generate-from-fixture`)
+    uses the same pipeline and therefore benefits identically.
+  - Metadata additions:
+    - `generation_context_json.templates_injected: {copy, cta, banner,
+      prompt, asset}` — per-bucket counts, written on every draft
+    - Lightweight; no template content snapshot, no URL duplication
+    - Ready for Phase 6 learning-loop consumption: correlate "which
+      template category(ies) were present" with "draft approved /
+      edited / rejected" outcomes
+  - Typecheck clean (`npx tsc --noEmit`).
+  - Follow-ups (explicit — not in this task):
+    - Semantic / vector retrieval (currently deterministic by
+      updated_at + brand scoping)
+    - Ranking by source_type relevance — template entries don't yet
+      carry source_type tags
+    - Anthropic prompt caching (`cache_control` on system + brand +
+      reference sections — valuable once prod volume grows)
+    - Image generation consuming the `asset` URLs as real input
+    - Learning loop feeding reuse ↔ outcome correlations back into
+      retrieval (Phase 6)
+
+### 2026-04-22
+- Task: Phase 4 — Wire real text-generation provider (Anthropic Claude)
+  - Status: Complete
+  - Files changed:
+    - package.json / package-lock.json — added `@anthropic-ai/sdk ^0.90.0`
+      as a runtime dependency.
+    - src/lib/ai/serialize-prompt.ts (new) — turns the
+      provider-agnostic `StructuredPrompt` into the Anthropic Messages
+      API's `{ system, user }` pair. Restates the output schema inline
+      in the user message with the exact JSON shape + required sample
+      count. Exports `ANTHROPIC_JSON_PREFILL = "{"` (the assistant
+      pre-fill that nudges Claude to emit JSON from the first token).
+    - src/lib/ai/parse-response.ts (new) — `parseGeneratedSamples(raw,
+      expectedSampleCount)`. Pulls the first top-level JSON object
+      from arbitrary model text using a balanced-brace scan that
+      handles pure JSON, markdown-fenced JSON (```json ... ```), and
+      prose-wrapping. Validates through a Zod schema mirroring
+      `GeneratedSample`. Truncates extras; throws with a clear error
+      on schema drift or shortage so the event route's per-slot
+      try/catch can surface it to operators.
+    - src/lib/ai/client.ts — added `anthropicProvider()` behind a new
+      `case "anthropic"` in `generateSamples()`. Reads
+      `ANTHROPIC_API_KEY` (required — throws loud if missing) and
+      `ANTHROPIC_MODEL` (default `claude-sonnet-4-6`). Single
+      `messages.create` call per run with assistant pre-fill of `{`.
+      Stitches the pre-fill back onto the response text before
+      parsing. Logs per-run: provider, platform, model, input_tokens,
+      output_tokens. Stub provider preserved as default.
+    - .env.production.example — documented `ANTHROPIC_API_KEY` and
+      optional `ANTHROPIC_MODEL` under the existing AI section, with
+      explicit "fails loud if key unset" note and model override
+      suggestions (haiku for cheaper, opus for richer).
+    - docs/00-architecture.md — `client.ts` bullet updated to describe
+      the anthropic case + fail-loud semantics; added new
+      `serialize-prompt.ts` and `parse-response.ts` module bullets in
+      the AI content generator module map.
+    - docs/03-ui-pages.md — Events "Generate Drafts" note updated to
+      mention `AI_PROVIDER=anthropic` as the path to real AI copy
+      (stub remains the safe default).
+    - docs/07-ai-boundaries.md — new **"AI generator — real provider
+      (Anthropic Claude)"** subsection covering activation, fields
+      generated, request shape, response parsing, preserved
+      precedence, and explicit deferrals (prompt caching,
+      image-generation, tool-use).
+  - Provider wired: **Anthropic Claude** via `@anthropic-ai/sdk`.
+    Chosen because it matches the stub's existing `AI_PROVIDER=anthropic`
+    hint, the project's Claude-native tooling + docs, and gives reliable
+    JSON output via the assistant-pre-fill technique.
+  - Env vars added:
+    - `ANTHROPIC_API_KEY` — required when `AI_PROVIDER=anthropic`;
+      unset key throws a clear error at call time (no silent stub
+      fallback, so misconfig surfaces during rollout)
+    - `ANTHROPIC_MODEL` — optional; defaults to `claude-sonnet-4-6`
+      (balanced quality/cost); override for haiku or opus
+  - Fields now generated by the real provider:
+    - `headline` — short punchy hook
+    - `caption` — full post copy, platform-appropriate length
+    - `cta` — call-to-action matching brand's CTA style
+    - `banner_text` — optional short overlay text (or `null` when not
+      applicable)
+    - `image_prompt` — one-paragraph visual direction for a future
+      image-generation step
+  - Events now use real AI output: yes —
+    `POST /api/events/[id]/generate-drafts` is the first-class path.
+    Each (occurrence × platform) slot runs through the provider when
+    `AI_PROVIDER=anthropic`. Fixture-based generation via
+    `POST /api/ai/generate-from-fixture` (dev-only; gated by
+    `ALLOW_AI_FIXTURES=true`) uses the same provider path, so operators
+    can test real-provider output against bundled fixtures before
+    wiring live sources.
+  - Preserved invariants:
+    - Brand Management base + Event brief override precedence unchanged
+      (same `StructuredPrompt`, same prompt builder)
+    - Sample count + grouping + `generation_context_json` snapshot
+      unchanged
+    - Refine constraints unchanged (Hot Games frozen snapshot, event
+      rules locked, no-refine-after-approval policy)
+    - Stub remains the default provider — prod must explicitly opt in
+      to real generation
+  - Remains deferred (not in this task, intentional):
+    - **Image generation** — the `image_prompt` is text only; no image
+      model is locked, no image files are rendered. Future phase.
+    - **Prompt caching** (Anthropic `cache_control` on the system
+      prompt + brand-context sections). Worth adding once there's
+      production volume for the same brand; skipped now to avoid
+      overengineering the first wire-up.
+    - **Tool-use / structured-output mode**. The pre-fill + Zod combo
+      is reliable enough for current output shape.
+    - **Live BigQuery + Promotions API adapters** (Phase 3).
+    - **Templates & Assets retrieval hook-up into the prompt builder**
+      (Phase 4 continuation).
+    - **Learning loop** (Phase 6).
+  - Typecheck clean (`npx tsc --noEmit`). SDK v0.90.0 pulls three new
+    packages; no breaking peer-dep changes.
+
+### 2026-04-22
 - Task: Phase 1 / 7 — Templates & Assets audit: reposition as reusable library (not base AI rules)
   - Status: Complete
   - Product rule locked:

@@ -1,23 +1,23 @@
+import Anthropic from "@anthropic-ai/sdk";
 import type { StructuredPrompt } from "./prompt-builder";
+import { ANTHROPIC_JSON_PREFILL, serializePromptForAnthropic } from "./serialize-prompt";
+import { parseGeneratedSamples } from "./parse-response";
 import type { GeneratedSample, NormalizedGenerationInput } from "./types";
 
 /**
  * AI client boundary.
  *
- * Current state: **dry-run stub**. `generateSamples()` returns
- * deterministic placeholder samples shaped exactly like a real provider
- * response. This lets the rest of the pipeline (prompt builder, orchestrator,
- * queue inserter) be exercised end-to-end with no provider account and no
- * cost, and makes the event-drafts route immediately useful again.
+ * Providers (select via `AI_PROVIDER`):
+ *   - `stub` (default)  — deterministic placeholder samples. Lets the
+ *                         pipeline run end-to-end with no provider
+ *                         account and no cost. Safe prod default.
+ *   - `anthropic`       — Claude via @anthropic-ai/sdk. Requires
+ *                         `ANTHROPIC_API_KEY`. Optional
+ *                         `ANTHROPIC_MODEL` (default `claude-sonnet-4-6`).
  *
- * Wire-up of a real provider (Anthropic / OpenAI / local model) is a
- * single-function change behind an env flag:
- *   AI_PROVIDER=stub         → stub samples (default)
- *   AI_PROVIDER=anthropic    → TODO: call @anthropic-ai/sdk (future task)
- *
- * Locking the image-generation model is explicitly out of scope for
- * Phase 4; every sample carries an `image_prompt` string that a future
- * image provider can consume.
+ * Locking the image-generation model is explicitly out of scope — every
+ * sample carries an `image_prompt` string that a future image provider
+ * can consume.
  */
 
 export interface GenerateSamplesResult {
@@ -33,10 +33,65 @@ export async function generateSamples(args: {
   const provider = (process.env.AI_PROVIDER ?? "stub").toLowerCase();
 
   switch (provider) {
+    case "anthropic":
+      return anthropicProvider(args);
     case "stub":
     default:
       return stubProvider(args);
   }
+}
+
+// ─── Anthropic ───────────────────────────────────────────────────────────────
+
+const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6";
+const ANTHROPIC_MAX_TOKENS = 4096;
+
+async function anthropicProvider(args: {
+  input: NormalizedGenerationInput;
+  prompt: StructuredPrompt;
+}): Promise<GenerateSamplesResult> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    // Fail loud — silent stub fallback here would mask a real misconfig
+    // that the operator needs to see during initial rollout.
+    throw new Error(
+      "AI_PROVIDER=anthropic but ANTHROPIC_API_KEY is not set. Configure the key or switch AI_PROVIDER to 'stub'.",
+    );
+  }
+
+  const model = process.env.ANTHROPIC_MODEL ?? DEFAULT_ANTHROPIC_MODEL;
+  const { input, prompt } = args;
+
+  const client = new Anthropic({ apiKey });
+  const { system, user } = serializePromptForAnthropic(prompt);
+
+  // Assistant pre-fill with `{` strongly nudges Claude to emit JSON from
+  // the very first token. Parser prepends this back before validating.
+  // See docs/07-ai-boundaries.md "AI generator — real provider".
+  const response = await client.messages.create({
+    model,
+    max_tokens: ANTHROPIC_MAX_TOKENS,
+    system,
+    messages: [
+      { role: "user", content: user },
+      { role: "assistant", content: ANTHROPIC_JSON_PREFILL },
+    ],
+  });
+
+  // Stitch text blocks + the pre-fill into the raw response.
+  const textBlocks = response.content
+    .filter((b): b is Anthropic.TextBlock => b.type === "text")
+    .map((b) => b.text)
+    .join("");
+  const rawText = ANTHROPIC_JSON_PREFILL + textBlocks;
+
+  const samples = parseGeneratedSamples(rawText, input.sample_count);
+
+  console.log(
+    `[ai-generator] anthropic produced ${samples.length} sample(s) for source=${input.source_type} brand=${input.brand.id} platform=${input.platform} model=${model} input_tokens=${response.usage.input_tokens} output_tokens=${response.usage.output_tokens}`,
+  );
+
+  return { samples, provider: "anthropic", dry_run: false };
 }
 
 // ─── Dry-run stub ───────────────────────────────────────────────────────────

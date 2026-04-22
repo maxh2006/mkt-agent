@@ -328,10 +328,22 @@ Post[] (draft, grouped by sample_group_id)
   source facts, optional event override). Emits a strict JSON
   `output_schema` every provider must honor. Versioned via
   `PROMPT_VERSION`.
-- `client.ts` — swappable provider. Default `AI_PROVIDER=stub` returns
+- `client.ts` — swappable provider. `AI_PROVIDER=stub` (default) returns
   deterministic placeholder samples so the whole pipeline runs without
-  a provider account. Real provider wire-up (Anthropic / OpenAI) is a
-  single-case addition to the `switch(provider)` in `generateSamples()`.
+  a provider account. `AI_PROVIDER=anthropic` routes through
+  `@anthropic-ai/sdk` with `ANTHROPIC_API_KEY` (required) and
+  `ANTHROPIC_MODEL` (optional, default `claude-sonnet-4-6`). Fails loud
+  if the key is missing — no silent stub fallback. Response parsing
+  uses an assistant pre-fill with `{` + a balanced-brace JSON extractor
+  + a Zod schema (see `serialize-prompt.ts` + `parse-response.ts`).
+- `serialize-prompt.ts` — turns the provider-agnostic `StructuredPrompt`
+  into Anthropic's `{ system, user }` pair. Output schema is restated
+  inline in the user message with exact JSON shape + required sample
+  count.
+- `parse-response.ts` — extracts the first top-level JSON object from
+  model output (handles markdown fences + prose-wrapping), validates
+  via Zod against the canonical `GeneratedSample` shape, and truncates
+  extras / errors on shortage.
 - `queue-inserter.ts` — writes each sample as a `draft` Post with
   `sample_group_id`/`sample_index`/`sample_total` in
   `generation_context_json` (matches the existing Queue enrichment
@@ -341,6 +353,18 @@ Post[] (draft, grouped by sample_group_id)
 - `generate.ts` — orchestrator `runGeneration()`. Single entry point.
 - `load-brand.ts` — `loadBrandContext(brandId)` / `brandOr404(brandId)`
   server helpers to turn a Brand row into the `BrandContext` shape.
+- `load-templates.ts` — `loadBrandTemplates(brandId, caps?)` server
+  helper that fetches the reusable Templates & Assets library as
+  **optional reference sections** for the prompt. Deterministic +
+  capped: brand-scoped active entries first (updated_at DESC), then
+  top-up from globals. Per-type caps
+  (`copy=3, cta=5, banner=5, prompt=3, asset=5`) bound prompt size.
+  Never overrides Brand or Event layers — enforced at the prompt
+  builder via explicit "optional — imitate structure, don't copy
+  verbatim" section framing + a matching HARD RULE line in the system
+  instruction. Counts are recorded per run in
+  `generation_context_json.templates_injected`; template content is
+  not snapshotted.
 
 **Brand base + Event override precedence** (see
 `docs/07-ai-boundaries.md` and `resolveEffectiveContext()`):

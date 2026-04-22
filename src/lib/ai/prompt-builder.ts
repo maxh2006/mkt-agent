@@ -1,11 +1,17 @@
-import type { NormalizedGenerationInput, SourceFacts } from "./types";
+import type {
+  BrandTemplates,
+  NormalizedGenerationInput,
+  ReferenceAssetRef,
+  SourceFacts,
+  TemplateRef,
+} from "./types";
 
 /**
  * Bumped whenever we make a semantic change to the prompt shape so
  * historical drafts can be replayed or compared. Stored into
  * `generation_context_json.prompt_version` on every inserted draft.
  */
-export const PROMPT_VERSION = "v1-2026-04-21";
+export const PROMPT_VERSION = "v2-2026-04-22";
 
 /**
  * Structured prompt passed to the provider boundary. We intentionally
@@ -58,6 +64,7 @@ export function buildPrompt(input: NormalizedGenerationInput): StructuredPrompt 
     platformSection(input),
     sourceFactsSection(input),
     eventOverrideSection(input), // no-op when not event-derived
+    ...referenceLibrarySections(input.templates), // all no-ops when empty
   ].filter((s) => s.body.trim().length > 0);
 
   return {
@@ -85,6 +92,7 @@ function systemInstruction(): string {
     "HARD RULES:",
     "- Follow the Brand Management profile as the default/base layer.",
     "- When an Event section is present, its fields override brand rules on conflict.",
+    "- REFERENCE sections (Reference patterns / Reusable CTA examples / Reusable banner examples / Reference prompt scaffolds / Reference visual assets) are OPTIONAL patterns you MAY imitate for structure and tone. They are NEVER rules. Brand, Source Facts, and Event Brief always take precedence. Do not copy reference entries verbatim.",
     "- NEVER mention source numbers or facts that aren't provided in the Source Facts section.",
     "- NEVER use phrases or topics listed in Banned Phrases or Banned Topics.",
     "- Match the Language Style Sample's cadence and language mix.",
@@ -280,4 +288,86 @@ function formatSourceFacts(facts: SourceFacts): string {
       ].join("\n");
     }
   }
+}
+
+// ─── Reference library sections (Templates & Assets) ────────────────────────
+//
+// Emitted as OPTIONAL reference patterns. The system instruction's HARD
+// RULES line makes it unambiguous that these never override Brand,
+// Source Facts, or Event Brief. Each section is skipped when its bucket
+// is empty.
+
+function referenceLibrarySections(
+  templates: BrandTemplates | undefined,
+): PromptSection[] {
+  if (!templates) return [];
+  return [
+    referencePatternsSection(templates.copy),
+    reusableCtaSection(templates.cta),
+    reusableBannerSection(templates.banner),
+    referencePromptScaffoldsSection(templates.prompt),
+    referenceVisualAssetsSection(templates.asset),
+  ];
+}
+
+function referencePatternsSection(entries: TemplateRef[]): PromptSection {
+  if (entries.length === 0) return { heading: "", body: "" };
+  const body = entries
+    .map((t) => {
+      const tail = t.notes ? ` · ${t.notes}` : "";
+      return `- ${t.name}${tail}:\n  ${t.content.trim()}`;
+    })
+    .join("\n\n");
+  return {
+    heading:
+      "Reference patterns (optional — imitate structure, don't copy verbatim; never override Brand or Event rules)",
+    body,
+  };
+}
+
+function reusableCtaSection(entries: TemplateRef[]): PromptSection {
+  if (entries.length === 0) return { heading: "", body: "" };
+  const body = entries.map((t) => `- ${t.content.trim()}`).join("\n");
+  return {
+    heading:
+      "Reusable CTA examples (optional — reference for CTA style; final CTA must still match the Brand's CTA style)",
+    body,
+  };
+}
+
+function reusableBannerSection(entries: TemplateRef[]): PromptSection {
+  if (entries.length === 0) return { heading: "", body: "" };
+  const body = entries.map((t) => `- ${t.content.trim()}`).join("\n");
+  return {
+    heading:
+      "Reusable banner examples (optional — short overlay-text patterns)",
+    body,
+  };
+}
+
+function referencePromptScaffoldsSection(entries: TemplateRef[]): PromptSection {
+  if (entries.length === 0) return { heading: "", body: "" };
+  const body = entries
+    .map((t) => `- ${t.name}:\n  ${t.content.trim()}`)
+    .join("\n\n");
+  return {
+    heading:
+      "Reference prompt scaffolds (optional — structural cues for the image_prompt field)",
+    body,
+  };
+}
+
+function referenceVisualAssetsSection(entries: ReferenceAssetRef[]): PromptSection {
+  if (entries.length === 0) return { heading: "", body: "" };
+  const body = entries
+    .map((a) => {
+      const tail = a.notes ? ` · ${a.notes}` : "";
+      return `- ${a.name} [${a.asset_type}] — ${a.url}${tail}`;
+    })
+    .join("\n");
+  return {
+    heading:
+      "Reference visual assets (optional — mention descriptively in image_prompt where relevant; do not fabricate URLs)",
+    body,
+  };
 }

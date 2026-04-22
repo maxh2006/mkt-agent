@@ -29,8 +29,22 @@ export async function insertSamplesAsDrafts(args: {
   provider: string;
   dry_run: boolean;
   created_by: string;
+  /**
+   * Per-bucket counts of Templates & Assets entries injected into the
+   * prompt for this run. Recorded in generation_context_json for
+   * future learning work (which template categories correlate with
+   * approved/refined drafts). Template content itself is NOT
+   * snapshotted — counts are enough.
+   */
+  templates_injected?: {
+    copy: number;
+    cta: number;
+    banner: number;
+    prompt: number;
+    asset: number;
+  };
 }): Promise<{ created_post_ids: string[]; meta: GenerationRunResult["meta"] }> {
-  const { input, samples, provider, dry_run, created_by } = args;
+  const { input, samples, provider, dry_run, created_by, templates_injected } = args;
 
   const now = new Date();
   const meta: GenerationRunResult["meta"] = {
@@ -57,6 +71,11 @@ export async function insertSamplesAsDrafts(args: {
       ai_dry_run: dry_run,
       generated_at: meta.generated_at,
       effective_context_overrides: input.effective.overridden_by_event,
+      // Per-bucket counts only — no template content snapshot. Enough
+      // for future learning-loop work to correlate reuse with outcomes.
+      templates_injected: templates_injected ?? {
+        copy: 0, cta: 0, banner: 0, prompt: 0, asset: 0,
+      },
     };
 
     // Hot Games: mirror the existing refine contract — the refine modal

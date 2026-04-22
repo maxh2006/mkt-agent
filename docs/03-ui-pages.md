@@ -161,7 +161,7 @@ operators type their own values. Required field enforcement is unchanged.
 
 On the Create page, the primary button label is "Create Event & Generate Drafts Now" when Generate Now is selected; otherwise "Create Campaign Event". Submitting with Generate Now creates the event and immediately triggers draft generation into Content Queue for review.
 
-Detail page shows all sections with inline editing. "Generate Drafts" button creates drafts in Content Queue from the posting schedule. Since 2026-04-21 (Phase 4 AI generator), each (occurrence × platform) slot runs through the AI pipeline (`src/lib/ai/generate.ts#runGeneration`), producing a real draft with headline/caption/CTA/banner/image_prompt — not an empty shell. The current provider is the dry-run stub (`AI_PROVIDER=stub`); swapping to a real provider is an env + single-function change in `src/lib/ai/client.ts`. Pass `?samples_per_slot=N` (1–5) to generate multiple sibling samples per slot.
+Detail page shows all sections with inline editing. "Generate Drafts" button creates drafts in Content Queue from the posting schedule. Since 2026-04-21 (Phase 4 AI generator), each (occurrence × platform) slot runs through the AI pipeline (`src/lib/ai/generate.ts#runGeneration`), producing a real draft with headline/caption/CTA/banner/image_prompt — not an empty shell. On 2026-04-22 the Anthropic Claude provider was wired behind the boundary: `AI_PROVIDER=anthropic` + `ANTHROPIC_API_KEY` produces real AI copy; `AI_PROVIDER=stub` (default) remains a safe no-cost placeholder. Pass `?samples_per_slot=N` (1–5) to generate multiple sibling samples per slot. Image generation is still deferred — the provider emits an `image_prompt` string; no image files are rendered yet.
 
 Event statuses: active, ended, archived (no draft). Lifecycle auto-managed.
 
@@ -226,6 +226,15 @@ and the dialog echoes the same helper to remind operators what belongs
 there vs. in Brand Management. Content placeholders are concrete and
 token-style (e.g. `{player_handle}`, `{win_amount}`) to communicate the
 "pattern, not wording" expectation.
+
+**AI retrieval (as of 2026-04-22):** the AI generator automatically
+pulls active entries into every generation run via
+`src/lib/ai/load-templates.ts`. Brand-scoped entries come first (most
+recently updated), then globals top up. Per-type caps bound the amount
+injected — `copy=3, cta=5, banner=5, prompt=3, asset=5`. Operators
+don't have to configure retrieval; toggling an entry to Inactive
+excludes it from future generations. No per-entry UX changes to this
+page.
 
 ### Insights
 Lightweight internal metrics only.

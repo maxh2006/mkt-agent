@@ -1,0 +1,199 @@
+{
+  "generated_at": "2026-04-22T10:55:51.927Z",
+  "billing_project": "mktagent-493404",
+  "shared_project": "newgen-492518",
+  "shared_dataset": "shared",
+  "impersonated_sa": "mkt-agent-bq@mktagent-493404.iam.gserviceaccount.com",
+  "tables": [
+    {
+      "table": "brands",
+      "fully_qualified": "`newgen-492518.shared.brands`",
+      "status": "ok",
+      "row_count": 5,
+      "column_count": 9,
+      "columns": [
+        "created_at",
+        "is_active",
+        "admin_color",
+        "currency_code",
+        "country_code",
+        "updated_at",
+        "slug",
+        "name",
+        "id"
+      ],
+      "first_row": {
+        "created_at": {
+          "value": "2026-04-09T16:13:08.368495000Z"
+        },
+        "is_active": true,
+        "admin_color": "#06B6D4",
+        "currency_code": "JPY",
+        "country_code": "JP",
+        "updated_at": {
+          "value": "2026-04-18T09:24:21.616803000Z"
+        },
+        "slug": "tomca",
+        "name": "TOMCA",
+        "id": "b0a17339-2e4a-483b-93e0-1fd4a7febe84"
+      }
+    },
+    {
+      "table": "users",
+      "fully_qualified": "`newgen-492518.shared.users`",
+      "status": "ok",
+      "row_count": 114,
+      "column_count": 25,
+      "columns": [
+        "username",
+        "scheduled_reval_at",
+        "channel",
+        "phone_verified",
+        "updated_at",
+        "email_verified",
+        "is_active",
+        "withdrawal_count",
+        "deposit_count",
+        "created_at",
+        "last_login_at",
+        "total_deposit",
+        "id",
+        "dw_net",
+        "tags",
+        "status",
+        "referral_code",
+        "country_code",
+        "total_withdrawal",
+        "level",
+        "agent_id",
+        "display_name",
+        "balance",
+        "telco",
+        "brand_id"
+      ],
+      "first_row": {
+        "username": "rolandogarcia",
+        "scheduled_reval_at": null,
+        "channel": "Smart",
+        "phone_verified": false,
+        "updated_at": {
+          "value": "2026-04-21T07:14:24.936429000Z"
+        },
+        "email_verified": false,
+        "is_active": true,
+        "withdrawal_count": 0,
+        "deposit_count": 0,
+        "created_at": {
+          "value": "2026-04-11T17:17:56.205114000Z"
+        },
+        "last_login_at": null,
+        "total_deposit": 8000,
+        "id": "d0000001-0000-0000-0000-000000000003",
+        "dw_net": 8000,
+        "tags": [
+          "test02"
+        ],
+        "status": "active",
+        "referral_code": "5409A37E",
+        "country_code": 63,
+        "total_withdrawal": 0,
+        "level": 0,
+        "agent_id": "5ECDA409",
+        "display_name": null,
+        "balance": 0,
+        "telco": "Smart",
+        "brand_id": "00000000-0000-0000-0000-000000000001"
+      }
+    },
+    {
+      "table": "transactions",
+      "fully_qualified": "`newgen-492518.shared.transactions`",
+      "status": "ok",
+      "row_count": 17,
+      "column_count": 13,
+      "columns": [
+        "updated_at",
+        "finalized_at",
+        "created_at",
+        "balance_after",
+        "status",
+        "type",
+        "user_id",
+        "approved_by",
+        "balance_before",
+        "amount",
+        "wallet_id",
+        "brand_id",
+        "id"
+      ],
+      "first_row": {
+        "updated_at": {
+          "value": "2026-04-19T09:40:30.656870000Z"
+        },
+        "finalized_at": {
+          "value": "2026-04-19T08:45:34.266321000Z"
+        },
+        "created_at": {
+          "value": "2026-04-19T08:32:40.590642000Z"
+        },
+        "balance_after": 15300,
+        "status": "completed",
+        "type": "withdrawal",
+        "user_id": "b6a1ad83-2cd2-473c-9812-7683c4a13969",
+        "approved_by": null,
+        "balance_before": 15400,
+        "amount": 100,
+        "wallet_id": "be7ac466-35b8-4cc5-849a-fcd5a81734f8",
+        "brand_id": "00000000-0000-0000-0000-000000000001",
+        "id": "30950657-5afc-48ff-907b-b31c18890b35"
+      }
+    },
+    {
+      "table": "game_rounds",
+      "fully_qualified": "`newgen-492518.shared.game_rounds`",
+      "status": "missing",
+      "row_count": null,
+      "column_count": null,
+      "columns": [],
+      "first_row": null,
+      "error": "Not found: Table newgen-492518:shared.game_rounds was not found in location asia-southeast1"
+    },
+    {
+      "table": "games",
+      "fully_qualified": "`newgen-492518.shared.games`",
+      "status": "ok",
+      "row_count": 4963,
+      "column_count": 12,
+      "columns": [
+        "created_at",
+        "is_active",
+        "category",
+        "type",
+        "display_name",
+        "tg_game_provider",
+        "game_icon",
+        "tg_game_code",
+        "rtp",
+        "vendor",
+        "name",
+        "id"
+      ],
+      "first_row": {
+        "created_at": {
+          "value": "2026-04-13T15:25:27.123046000Z"
+        },
+        "is_active": false,
+        "category": "arcade",
+        "type": "arcade",
+        "display_name": null,
+        "tg_game_provider": "Fa Chai",
+        "game_icon": "https://asset-dev.tiger-games.com/images/games/casino/Fa Chai/27002.jpg",
+        "tg_game_code": "FAC_CIRCUS_DOZER",
+        "rtp": null,
+        "vendor": "tga",
+        "name": "CIRCUS DOZER",
+        "id": "bdda820e-2ebb-4dd1-a903-79b494bb4d1c"
+      }
+    }
+  ]
+}

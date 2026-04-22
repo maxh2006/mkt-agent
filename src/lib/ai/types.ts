@@ -16,6 +16,7 @@ import type {
   DesignSettings,
   SampleCaption,
 } from "@/lib/validations/brand";
+import type { AssetType } from "@/lib/validations/template";
 
 // ─── Brand + Event context ───────────────────────────────────────────────────
 
@@ -142,6 +143,52 @@ export type SourceFacts =
   | EventFacts
   | EducationalFacts;
 
+// ─── Templates & Assets (supporting reference layer) ─────────────────────────
+//
+// Loaded by src/lib/ai/load-templates.ts and attached to
+// NormalizedGenerationInput.templates by the orchestrator. Presented to
+// the model as OPTIONAL reference patterns — never overrides Brand,
+// Source Facts, or Event Brief. See docs/07-ai-boundaries.md.
+
+/**
+ * Text-style library entry (Copy Templates / CTA Snippets / Banner
+ * Patterns / Prompt Templates).
+ */
+export interface TemplateRef {
+  id: string;
+  name: string;
+  content: string;
+  notes?: string;
+  /** true when brand_id is null (admin-seeded global). */
+  is_global: boolean;
+}
+
+/**
+ * Reference asset (distinct from Brand Management's benchmark_assets,
+ * which are base brand identity guidance rather than reusable library
+ * material).
+ */
+export interface ReferenceAssetRef {
+  id: string;
+  name: string;
+  url: string;
+  asset_type: AssetType;
+  notes?: string;
+  is_global: boolean;
+}
+
+/**
+ * Per-run retrieved library. Each bucket capped per
+ * `TemplateCaps` in load-templates.ts.
+ */
+export interface BrandTemplates {
+  copy: TemplateRef[];
+  cta: TemplateRef[];
+  banner: TemplateRef[];
+  prompt: TemplateRef[];
+  asset: ReferenceAssetRef[];
+}
+
 // ─── Normalized generator input ──────────────────────────────────────────────
 
 /**
@@ -179,6 +226,15 @@ export interface NormalizedGenerationInput {
    *  orchestrator; the inserter writes it into each draft's
    *  generation_context_json. */
   sample_group_id: string;
+
+  /**
+   * Optional reference library pulled from Templates & Assets. Attached
+   * by the orchestrator (`runGeneration`) via `load-templates.ts`
+   * before the prompt builder runs. Normalizers don't populate this —
+   * they stay source-focused. Empty buckets are valid; generation
+   * proceeds normally.
+   */
+  templates?: BrandTemplates;
 }
 
 // ─── AI output shape ─────────────────────────────────────────────────────────

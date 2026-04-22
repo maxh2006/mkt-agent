@@ -91,6 +91,18 @@ Templates & Assets is **not** a rule layer — it cannot override the
 brand or event layers. It is material the generator can reach for when
 the rule layers ask for a concrete building block.
 
+As of 2026-04-22 this library is consumed automatically by the prompt
+builder: `src/lib/ai/load-templates.ts` pulls active entries for the
+current brand (plus global seeds as fill-up) and the prompt builder
+renders them as **optional reference sections** with explicit
+"imitate structure, don't copy verbatim" framing. A HARD RULE line in
+the system instruction reinforces that reference sections never
+override Brand, Source Facts, or Event Brief. Per-run counts are
+recorded in `generation_context_json.templates_injected` for later
+learning work. Operators do not have to do anything — toggling an
+entry to Inactive in the Templates & Assets page excludes it from
+future generations.
+
 The precedence is documented here and in `docs/07-ai-boundaries.md`. It does not need to be surfaced loudly in the UI beyond a small "base AI profile; events override" note at the top of the Brand Management edit dialog and a "not base AI rules — see Brand Management" callout on the Templates & Assets page.
 
 ---

@@ -3,6 +3,7 @@ import { generateSamples } from "./client";
 import { buildPrompt } from "./prompt-builder";
 import { insertSamplesAsDrafts } from "./queue-inserter";
 import { loadBrandContext, brandOr404 } from "./load-brand";
+import { loadBrandTemplates, countTemplates } from "./load-templates";
 import type { NormalizedGenerationInput } from "./types";
 
 /**
@@ -28,20 +29,32 @@ export async function runGeneration(args: {
   dry_run: boolean;
   provider: string;
   prompt_version: string;
+  templates_injected: Record<keyof ReturnType<typeof countTemplates>, number>;
 }> {
-  const prompt = buildPrompt(args.input);
-  const result = await generateSamples({ input: args.input, prompt });
+  // Attach the reusable Templates & Assets library before prompt build.
+  // One retrieval per run — all sibling samples share the same library.
+  // Empty buckets are valid; generation proceeds normally.
+  const templates = await loadBrandTemplates(args.input.brand.id);
+  const inputWithTemplates: NormalizedGenerationInput = {
+    ...args.input,
+    templates,
+  };
+  const templatesInjected = countTemplates(templates);
+
+  const prompt = buildPrompt(inputWithTemplates);
+  const result = await generateSamples({ input: inputWithTemplates, prompt });
 
   const inserted = await insertSamplesAsDrafts({
-    input: args.input,
+    input: inputWithTemplates,
     samples: result.samples,
     provider: result.provider,
     dry_run: result.dry_run,
     created_by: args.created_by,
+    templates_injected: templatesInjected,
   });
 
   console.log(
-    `[ai-generator] run complete source=${args.input.source_type} brand=${args.input.brand.id} platform=${args.input.platform} samples=${result.samples.length} provider=${result.provider} dry_run=${result.dry_run} group=${args.input.sample_group_id}`,
+    `[ai-generator] run complete source=${inputWithTemplates.source_type} brand=${inputWithTemplates.brand.id} platform=${inputWithTemplates.platform} samples=${result.samples.length} provider=${result.provider} dry_run=${result.dry_run} group=${inputWithTemplates.sample_group_id} templates=copy:${templatesInjected.copy},cta:${templatesInjected.cta},banner:${templatesInjected.banner},prompt:${templatesInjected.prompt},asset:${templatesInjected.asset}`,
   );
 
   return {
@@ -50,6 +63,7 @@ export async function runGeneration(args: {
     dry_run: result.dry_run,
     provider: result.provider,
     prompt_version: prompt.prompt_version,
+    templates_injected: templatesInjected,
   };
 }
 

@@ -77,11 +77,111 @@ Templates & Assets is **NOT a rule layer**. It never overrides brand or
 event context; it only supplies building blocks when those rule layers
 reach for one. The page UI restates this to prevent drift.
 
-Phase 4 does not yet wire template/asset retrieval into the prompt
-builder — that's a later enhancement once the live AI provider is
-chosen. The library surface is ready; the retrieval call is trivial to
-add because every entry is already keyed by `template_type`, `brand_id`
-(null for global), and `active`.
+### Templates & Assets — prompt injection (2026-04-22)
+
+Wired via `src/lib/ai/load-templates.ts`. The orchestrator
+(`src/lib/ai/generate.ts#runGeneration`) calls it once per run and
+attaches results to `NormalizedGenerationInput.templates` before the
+prompt builder runs.
+
+**Retrieval strategy** (deterministic, no ranking):
+- Only `active = true` entries
+- Brand-scoped first; globals (`brand_id IS NULL`) top up when
+  brand-scoped < cap
+- Ordered `updated_at DESC` within each bucket
+- Per-type caps (bound prompt size):
+  `copy=3, cta=5, banner=5, prompt=3, asset=5`
+- 5 parallel Prisma queries; missing brand / missing templates return
+  empty buckets (generation still runs)
+
+**Prompt framing.** The prompt builder emits up to 5 conditional
+sections, each skipped when its bucket is empty:
+1. **Reference patterns** (copy) — "optional — imitate structure, don't
+   copy verbatim"
+2. **Reusable CTA examples** (cta) — "reference for CTA style; final
+   CTA must still match the Brand's CTA style"
+3. **Reusable banner examples** (banner) — "optional — short overlay-
+   text patterns"
+4. **Reference prompt scaffolds** (prompt) — "structural cues for the
+   image_prompt field"
+5. **Reference visual assets** (asset) — "mention descriptively in
+   image_prompt where relevant; do not fabricate URLs"
+
+**Precedence guarantee.** A new HARD RULE line in the system
+instruction states: "REFERENCE sections are OPTIONAL patterns you MAY
+imitate for structure and tone. They are NEVER rules. Brand, Source
+Facts, and Event Brief always take precedence. Do not copy reference
+entries verbatim." Templates cannot override banned phrases / topics,
+the language style sample, audience persona, event rules, or positioning.
+
+**Per-run metadata.** `generation_context_json.templates_injected`
+stores per-bucket counts for every inserted draft:
+```
+{ copy: N, cta: N, banner: N, prompt: N, asset: N }
+```
+Counts only — template content is not snapshotted. The counts are
+enough for future learning work to correlate reuse with approval /
+refinement outcomes (Phase 6).
+
+**Prompt version.** `PROMPT_VERSION = "v2-2026-04-22"`. Bumped from
+`v1-2026-04-21` so historical drafts remain traceable to the older
+prompt shape.
+
+---
+
+## AI generator — real provider (Anthropic Claude)
+
+As of 2026-04-22 a real text-generation provider is wired behind the
+client boundary at `src/lib/ai/client.ts`.
+
+**Activation.** `AI_PROVIDER=anthropic` + `ANTHROPIC_API_KEY` (required).
+Optional `ANTHROPIC_MODEL` (defaults to `claude-sonnet-4-6`). With these
+unset the pipeline runs on the deterministic stub — safe default for
+dev / staging / review.
+
+**Fields generated.** `headline`, `caption`, `cta`, `banner_text` (or
+`null` when not applicable), and `image_prompt`. The `image_prompt` is
+text only — image rendering remains deferred; no image model is locked.
+
+**Request shape.** One `messages.create` call per generation run. The
+provider-agnostic `StructuredPrompt` (from
+`src/lib/ai/prompt-builder.ts`) is serialized by
+`src/lib/ai/serialize-prompt.ts`:
+
+- `system` carries role-level guardrails (source-fact discipline,
+  banned-list enforcement, language-style imitation, output format).
+- `user` carries the labeled sections (brand positioning, voice,
+  audience, language style, brand notes, restrictions, default
+  hashtags, sample captions, platform guidance, source facts, and —
+  when event-derived — the event override section). The output schema
+  is restated inline with the exact JSON shape and the required sample
+  count.
+- `messages[]` pre-fills the assistant turn with `{` so Claude emits
+  JSON from the first token rather than wrapping it in prose.
+
+**Response parsing.** `src/lib/ai/parse-response.ts` extracts the first
+top-level JSON object (handles both raw JSON and accidental
+markdown-fenced output), validates against a Zod schema mirroring
+`GeneratedSample`, truncates extras, and throws on shortage / schema
+drift. The event route catches per-slot so a single bad slot never
+poisons the rest of the run.
+
+**Sample count.** Per-source defaults unchanged
+(`defaultSampleCount()`); `?samples_per_slot=N` still works on
+`/api/events/[id]/generate-drafts`.
+
+**Precedence preserved.** The `StructuredPrompt` is built by the same
+prompt builder regardless of provider — Brand Management is the base
+layer, Event brief overrides on conflict, Templates & Assets stays a
+reusable non-rule supporting library.
+
+**Deferred.**
+- Prompt caching (Anthropic's cache_control). Worth adding once we
+  have real production volume for the same brand; skipped for MVP.
+- Image-generation model selection + wire-up.
+- Tool-use / structured-output mode. The assistant-pre-fill + Zod
+  combo is reliable enough for current output shape; tool-use is
+  lower priority.
 
 ---
 
