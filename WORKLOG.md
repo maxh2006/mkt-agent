@@ -29,7 +29,136 @@ Current execution priority (per ROADMAP.md):
 
 
 
+
 ## Done Tasks
+
+### 2026-04-23
+- Task: Phase 4 — Visual input architecture + hidden prompt compiler (spec + backend)
+  - Status: Complete (backend + spec + docs; UI rollout, image model, and overlay renderer remain as follow-ups)
+  - Files added (new module `src/lib/ai/visual/`):
+    - `types.ts` — canonical enums (`VISUAL_STYLES`, `VISUAL_EMPHASES`,
+      `MAIN_SUBJECT_TYPES`, `LAYOUT_FAMILIES`, `PLATFORM_FORMATS`) +
+      typed interfaces (`BrandVisualDefaults`, `EventVisualOverride`,
+      `LayoutTemplate`, `SafeZone` / `TextZone` / `LogoSlot` /
+      `GradientOverlay`, `CompiledVisualPrompt`, `SafeZoneConfig`,
+      `RenderIntent`). `visual_style` intentionally omitted from
+      `EventVisualOverride` to keep brand-level consistency across a
+      brand's event lineup.
+    - `layouts.ts` — `LAYOUT_TEMPLATES` record: `center_focus`,
+      `left_split`, `right_split`, `bottom_heavy`. Each carries
+      resolution-independent text zones, safe zones
+      (quiet/solid_background/gradient_darkened/empty), a logo slot,
+      optional gradient overlay, CTA alignment, and emphasis area.
+      `DEFAULT_LAYOUT_BY_FORMAT` + `resolveLayout(preferred, format)`
+      handle format-incompatibility fallback.
+    - `compile.ts` — `compileVisualPrompt()` pure function. Takes
+      `{brand, event?, platform, source_facts?}` and returns
+      `CompiledVisualPrompt`. Flow: resolve effective inputs
+      (Brand ← Event per-field with `overridden_by_event` tracking) →
+      resolve platform format (Event > platform-appropriate > Brand
+      default) → pick layout → derive subject focus from source
+      facts when available → compose positive prompt
+      (style → emphasis → subject → emphasis_area → aspect →
+      safe-zone instruction → brand/event notes → hardcoded "no
+      text" rule) → compose negative prompt starting from
+      `BASELINE_NEGATIVES` (text / letters / numbers / typography /
+      watermarks / brand names drawn / logos drawn in pixels /
+      subtitles / signage / UI elements / menus / buttons) plus
+      Brand + Event negatives, deduped. `render_intent` locked to
+      `"ai_background_then_overlay"`.
+    - `validation.ts` — `brandVisualDefaultsSchema` +
+      `eventVisualOverrideSchema` Zod schemas + `DEFAULT_BRAND_VISUAL_DEFAULTS`.
+      Standalone — NOT yet wired into existing brand/event Zod
+      validators or API routes, so the shape lands without touching
+      live surfaces. UI task wires it in when it arrives.
+    - `scripts/visual-compile-smoke.ts` — live compiler smoke test.
+  - Files modified:
+    - `package.json` — added `visual:smoke` npm script.
+    - `docs/00-architecture.md` — "Image generation" paragraph
+      replaced with a full "Visual input architecture" subsection:
+      module layout, precedence, smoke-test pointer, explicit
+      out-of-scope note.
+    - `docs/03-ui-pages.md` — Brand Management Design tab + Event
+      create form gain "Planned Simple Mode" sub-bullets documenting
+      the target UI shape (structured pickers, not prose fields).
+    - `docs/07-ai-boundaries.md` — new locked PRODUCT RULE: "AI
+      generates backgrounds only; app renders final text + logos via
+      deterministic overlay." Full Simple Mode control table.
+      Explicit note that `BASELINE_NEGATIVES` cannot be shadowed or
+      overridden. Safe zones documented as a first-class concept
+      (injected into positive prompt AND echoed in `safe_zone_config`
+      for the renderer).
+    - `ROADMAP.md` — Phase 4 item 4 sub-bullets updated: 4 of 6 now
+      have status markers (1 + 2 🟢 spec done, 4 + 5 ✅ code done,
+      3 + 6 ⏳ pending UI/renderer).
+  - Product rule locked (documented in docs/07 + enforced in
+    compile.ts): **AI image model generates BACKGROUNDS/ART ONLY.
+    Never text, letters, numbers, typography, brand names drawn in
+    pixels, watermarks, logos, UI elements, or signage.** The
+    hardcoded `BASELINE_NEGATIVES` list enforces this in every
+    compiled output regardless of Brand/Event inputs. The app
+    renders FINAL TEXT + LOGOS as a deterministic overlay.
+  - Precedence preserved and explicitly documented: Brand
+    Management (base) → source facts (context) → Event brief
+    (override, per-field) → Templates (supporting library, never
+    authoritative). `visual_style` has no Event override by design.
+  - Safe zones are first-class:
+    - Each layout template declares explicit zones with
+      resolution-independent rectangles.
+    - Compiler injects zone descriptions into the positive prompt
+      ("Composition must leave these zones visually quiet so text
+      can be overlaid later: …").
+    - Compiler also echoes zones in `safe_zone_config` of the
+      output so the overlay renderer knows where to composite text.
+    - AI is never trusted to place readable space perfectly on its
+      own.
+  - Compiler output shape:
+    - `background_image_prompt` — full positive prompt for image
+      model (AI input)
+    - `negative_prompt` — forbidden content, baseline + brand + event
+    - `layout_key` — `LayoutFamily` the renderer will use
+    - `safe_zone_config` — `{ zones, gradient_overlay? }`
+    - `render_intent` — locked `"ai_background_then_overlay"`
+    - `platform_format` — resolved format
+    - `visual_emphasis` — echoed for renderer
+    - `subject_focus` — concrete subject string (derived from source
+      facts when present)
+    - `effective_inputs` — audit echo: `{visual_style, visual_emphasis,
+      main_subject_type, layout_family, overridden_by_event}`
+  - Verification:
+    - `npx tsc --noEmit` clean (after a precedence fix on platform
+      format resolution — TikTok and similar platforms now correctly
+      resolve to their natural format even when Brand's generic
+      default is square).
+    - `npm run visual:smoke` — **27/27 assertions passed across 6
+      cases**: brand-defaults + big_win facts, event override wins
+      for layout + emphasis, layout fallback when preferred doesn't
+      support format, negative prompt always includes baseline
+      anti-text, platform format override on event wins, no-facts
+      subject fallback.
+  - What's ready to plug in (once the next tasks land):
+    - Image model adapter can consume `background_image_prompt` +
+      `negative_prompt` + `platform_format` directly
+    - Overlay renderer can consume `layout_key` + `safe_zone_config`
+      + Post text fields directly
+    - Brand/Event UI forms can use the Zod schemas without changes
+  - Follow-ups (out of scope for this task, in rough priority order):
+    1. Brand Management Design-tab UI — add Simple Mode structured
+       visual defaults (pickers + tag input); persist into existing
+       `design_settings_json`
+    2. Event form UI — add Visual Override section; requires new
+       `Event.visual_settings_json` Prisma column (migration)
+    3. Wire `brandVisualDefaultsSchema` / `eventVisualOverrideSchema`
+       into `src/lib/validations/brand.ts` + `src/lib/validations/event.ts`
+       once persistence exists
+    4. Deprecate the six free-text design notes once operators have
+       migrated to Simple Mode (read-only during transition)
+    5. Image-rendering provider adapter (Stable Diffusion / Imagen /
+       similar) + `compileVisualPrompt()` wiring into the AI
+       generation flow
+    6. Deterministic overlay renderer (Satori + sharp or similar)
+       that reads `safe_zone_config` and composites text + logos on
+       top of the AI background
 
 ### 2026-04-23
 - Task: docs — promote "Visual Prompt Simplification + Hidden Prompt Compiler" to near-term Phase 4 priority

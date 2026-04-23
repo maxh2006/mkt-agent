@@ -566,25 +566,62 @@ Post[] (draft, grouped by sample_group_id)
   rows, live)
 - `educational` — 2 samples default (structured packet; fixture only)
 
-**Image generation.** Near-term Phase 4 priority (see `ROADMAP.md` §
-"Image generation pipeline — structured inputs + split rendering").
-Every generated sample carries an `image_prompt` string today — this is
-an **interim narrative shape**. The production plan splits the pipeline:
+**Image generation — visual input architecture (2026-04-23 backend + spec; UI + model still pending).**
 
-- Operators fill **STRUCTURED visual inputs** (palette, style, subject,
-  mood, layout template) — NOT freeform prompts.
-- A **hidden prompt compiler** (backend-only) turns those structured
-  inputs into the actual AI image prompt. Operators never see the
-  compiled prompt.
-- AI renders **backgrounds / art only**.
-- The app renders **final text + logos as a server-side overlay** per
-  safe-zone rules defined by the selected layout template.
+The image pipeline intentionally splits into two halves:
 
-This removes operator prompt-engineering burden and eliminates
-unreliable AI typography for branded overlays. No schema changes have
-landed for this yet — `Post.image_url` + the media-validation layer
+1. **AI generates backgrounds / art only** — never typography, never
+   text, never drawn logos.
+2. **The app renders final text + logos as a deterministic overlay**
+   using the chosen layout template's safe zones. This is the only
+   way to guarantee crisp typography, exact wording, and zero
+   spelling hallucination on branded copy.
+
+**Module layout** (all under [`src/lib/ai/visual/`](../src/lib/ai/visual/)):
+
+- `types.ts` — `BrandVisualDefaults`, `EventVisualOverride`,
+  `LayoutTemplate`, `SafeZone`, `TextZone`, `CompiledVisualPrompt`,
+  plus the canonical enums: `VISUAL_STYLES`, `VISUAL_EMPHASES`,
+  `MAIN_SUBJECT_TYPES`, `LAYOUT_FAMILIES`, `PLATFORM_FORMATS`.
+  Operators pick from these enums via Simple Mode controls — they
+  never author freeform visual prompts.
+- `layouts.ts` — `LAYOUT_TEMPLATES`: `center_focus` / `left_split` /
+  `right_split` / `bottom_heavy`. Each has resolution-independent
+  text zones + safe zones + logo slot + optional gradient overlay +
+  CTA alignment + emphasis area. `resolveLayout(preferred, format)`
+  handles format-incompatibility fallback.
+- `compile.ts` — `compileVisualPrompt()`. Pure function:
+  `brand + event? + platform + source_facts? → CompiledVisualPrompt`.
+  Merges Brand ← Event (per-field override tracking), resolves
+  platform format with precedence Event > platform-appropriate >
+  Brand default, derives subject focus from source facts when
+  available, composes the background prompt + safe-zone instruction,
+  composes the negative prompt starting from a hardcoded baseline
+  (no text / letters / typography / logos / watermarks / signage)
+  with Brand + Event negatives appended. Locks `render_intent` to
+  `"ai_background_then_overlay"`.
+- `validation.ts` — `brandVisualDefaultsSchema` +
+  `eventVisualOverrideSchema` Zod schemas, plus
+  `DEFAULT_BRAND_VISUAL_DEFAULTS`. Standalone (not yet wired into
+  the existing brand/event Zod validators) so the shape can land
+  without touching active API routes.
+
+**Precedence** (mirrors the text pipeline):
+`Brand Management (base) → Source facts (context) → Event brief (override) → Templates (supporting library)`.
+Visual compiler only reads Brand + Event + source; Templates do not
+elevate to a policy layer.
+
+**Product rule.** No schema has landed for this yet — Brand visual
+defaults live in the existing `design_settings_json`; Event visual
+override will need a new JSON column when the UI lands (tracked as a
+follow-up task). `Post.image_url` + the media-validation layer
 (shipped 2026-04-23) already support any image-rendering backend once
-the structured-input + compiler + template stack is in place.
+the structured-input UI + image model + overlay renderer are in place.
+
+**Live smoke.** `npm run visual:smoke` runs 27 assertions across 6
+cases exercising Brand-only / Event-override / layout fallback /
+baseline negatives / format precedence / source-facts fallback.
+Exits 0 on all-clear.
 
 **Dev entry point.** `POST /api/ai/generate-from-fixture` is an
 admin-only dev route gated by `ALLOW_AI_FIXTURES=true`. It feeds a

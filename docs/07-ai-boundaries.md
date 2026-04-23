@@ -153,16 +153,57 @@ generator does NOT populate `image_url` — it only emits
 `image_prompt`; a future image-rendering provider is the piece that
 fills `image_url`.
 
-**Future shape (Phase 4 priority, see ROADMAP.md).** The current
-narrative `image_prompt` is **interim**. The production pipeline moves
-to STRUCTURED operator inputs (palette / style / subject / mood /
-layout template) compiled into the AI prompt by a hidden compiler —
-operators never author prompts directly. AI renders background art
-only; branded text + logos are rendered deterministically by the app
-via layout templates with safe-zone rules. This removes the operator
-prompt-engineering burden and eliminates unreliable AI typography for
-branded overlays. Until that stack lands, `image_prompt` + narrative
-prompting remains the interim path.
+**Visual input architecture (backend + spec landed 2026-04-23; UI + image
+model + overlay renderer still pending).** The current narrative
+`image_prompt` is **interim advisory output** — never sent directly to
+an image model. It may inform `subject_focus` derivation inside the
+hidden prompt compiler, nothing more.
+
+**PRODUCT RULE (locked).** For any branded post:
+- The AI image model generates the **BACKGROUND / ART ONLY**.
+  Never text, letters, numbers, typography, brand names drawn in
+  pixels, watermarks, logos, UI elements, or signage. The hidden
+  prompt compiler enforces this both in the positive prompt ("leave
+  quiet space for text overlay per safe zones") AND in a hardcoded
+  baseline negative prompt that applies to every compiled output
+  regardless of Brand / Event inputs. See
+  [`src/lib/ai/visual/compile.ts`](../src/lib/ai/visual/compile.ts) —
+  `BASELINE_NEGATIVES` cannot be shadowed or overridden.
+- The app renders **FINAL TEXT + LOGOS AS A DETERMINISTIC OVERLAY**
+  on top of the AI background, using the chosen layout template's
+  safe zones + text zones + logo slot. This is the only way to
+  guarantee crisp typography, exact wording, zero spelling
+  hallucination, and brand-consistent logo rendering.
+
+**Operator experience (Simple Mode first).** Operators do NOT author
+visual prompts. They pick from structured enum controls defined in
+[`src/lib/ai/visual/types.ts`](../src/lib/ai/visual/types.ts):
+
+| Control | Values |
+|---|---|
+| `visual_style` | photographic / illustrated / 3d / vector / cinematic / minimalist |
+| `visual_emphasis` | reward-forward / winner-forward / game-forward / brand-forward / lifestyle |
+| `main_subject_type` | human / object / game-element / symbol / abstract |
+| `layout_family` | center_focus / left_split / right_split / bottom_heavy |
+| `platform_format` | square / portrait / landscape / story |
+| `negative_visual_elements` | pickable/taggable list of forbidden elements |
+| `visual_notes` | optional 200-char nudge (NOT a prompt, advisory only) |
+
+**Precedence** (mirrors the text pipeline): Brand Management (base) →
+source facts (context) → Event brief (override) → Templates (supporting
+library, never authoritative). Event override is per-field —
+unspecified fields fall through to Brand defaults. `visual_style` has
+no Event override by design (stays brand-level for consistency across
+a brand's event lineup).
+
+**Safe zones are first-class.** Each layout template declares explicit
+safe zones (quiet / solid_background / gradient_darkened / empty) with
+resolution-independent rectangles (0–100% of canvas). The compiler
+injects these zones' human-readable descriptions directly into the
+positive prompt so the AI leaves them visually quiet, AND echoes them
+in the `safe_zone_config` of the compiled output so the overlay
+renderer knows where to composite text. The AI is never trusted to
+place readable space perfectly on its own.
 
 **Request shape.** One `messages.create` call per generation run. The
 provider-agnostic `StructuredPrompt` (from

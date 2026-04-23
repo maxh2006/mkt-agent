@@ -11,7 +11,8 @@
     "promotions:preview": "tsx scripts/promotions-preview.ts",
     "big-wins:preview": "tsx scripts/big-wins-preview.ts",
     "hot-games:preview": "tsx scripts/hot-games-preview.ts",
-    "media:smoke": "tsx scripts/media-validation-smoke.ts"
+    "media:smoke": "tsx scripts/media-validation-smoke.ts",
+    "visual:smoke": "tsx scripts/visual-compile-smoke.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.90.0",

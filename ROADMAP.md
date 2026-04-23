@@ -139,27 +139,12 @@ Includes:
 
    Scope — land these before wiring an image-rendering provider:
 
-   1. **Simplify Brand Management visual defaults** — replace freeform
-      prompt-heavy fields with structured controls (palette, style,
-      subject, mood, do/don't lists as enums/tags rather than prose).
-   2. **Simplify Event visual override inputs** — same structural
-      treatment as brand defaults; Brand→Event precedence preserved.
-   3. **Replace freeform prompt-heavy inputs with structured controls**
-      across the app wherever an operator is currently asked to
-      describe a visual in free text.
-   4. **Hidden prompt compiler** — pure backend module that takes the
-      structured Brand + Event + Source inputs and produces the actual
-      AI image prompt. Operators never see the compiled prompt.
-   5. **Layout template specs + safe-zone rules** — deterministic
-      templates (e.g. "hero", "reward-forward", "carousel-tile") with
-      explicit slots for image, banner text, CTA, logo. Template choice
-      is a structured operator input; safe-zone rules prevent
-      AI-generated subjects from colliding with overlays.
-   6. **Deterministic text + logo overlay rendering** — app-side
-      (server-side image composition) renders the final creative by
-      layering structured text + logos onto the AI-generated background
-      per the selected template. **AI does backgrounds; app does
-      typography.** Eliminates unreliable AI typography.
+   1. 🟢 **Simplify Brand Management visual defaults** — **Spec + types + Zod done 2026-04-23.** Structured enums (`visual_style`, `visual_emphasis`, `main_subject_type`, `layout_family`, `platform_format_default`, `negative_visual_elements`, optional `visual_notes`) live in [`src/lib/ai/visual/types.ts`](src/lib/ai/visual/types.ts) + [`src/lib/ai/visual/validation.ts`](src/lib/ai/visual/validation.ts). UI rollout on the Brand Management Design tab is the next concrete step.
+   2. 🟢 **Simplify Event visual override inputs** — **Spec + types + Zod done 2026-04-23.** Per-field-optional `EventVisualOverride` with the same controls as Brand (minus `visual_style`, which stays brand-level for cross-event consistency). UI rollout on the Event create/edit page pending.
+   3. ⏳ **Replace freeform prompt-heavy inputs with structured controls** across the app — audit pending after Brand + Event UI rollouts land.
+   4. ✅ **Hidden prompt compiler** — **Done 2026-04-23.** [`src/lib/ai/visual/compile.ts#compileVisualPrompt()`](src/lib/ai/visual/compile.ts). Merges Brand ← Event per-field, resolves platform format (Event > platform-appropriate > Brand default), derives subject focus from source facts when available, composes positive prompt with safe-zone instructions, composes negative prompt anchored on a hardcoded baseline (no text / letters / typography / logos drawn / watermarks / signage). `render_intent` locked to `"ai_background_then_overlay"`. Operators never see the compiled prompt. Verified via `npm run visual:smoke` (27/27 assertions across 6 cases).
+   5. ✅ **Layout template specs + safe-zone rules** — **Done 2026-04-23.** [`src/lib/ai/visual/layouts.ts`](src/lib/ai/visual/layouts.ts). Four canonical templates (`center_focus`, `left_split`, `right_split`, `bottom_heavy`) with resolution-independent text zones, safe zones (quiet / solid_background / gradient_darkened / empty), logo slot, optional gradient overlay, CTA alignment, and emphasis area. `resolveLayout(preferred, format)` handles format-incompatibility fallback.
+   6. ⏳ **Deterministic text + logo overlay rendering** — spec complete (safe zones + text zones + logo slots are fully described per layout); the rendering engine itself (Satori / sharp / similar) is not yet implemented. Gated behind UI + image-model landing so there's real data to overlay.
 
    Image-rendering provider work (the originally-deferred step — picking
    the model, wiring the adapter, converting structured inputs →

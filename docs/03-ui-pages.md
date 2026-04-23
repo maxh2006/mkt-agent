@@ -167,6 +167,14 @@ Create form includes:
 - B. Campaign Brief — target audience, CTA, tone, platform scope, notes for AI
 - C. Posting Schedule — frequency: Generate Now / Daily / Weekly / Monthly. "Generate Now" hides recurrence controls and auto-generate toggle (it is the explicit intent).
 - D. Auto-generate toggle (hidden in Generate Now mode)
+- **Planned E. Visual Override (Simple Mode)** (spec landed 2026-04-23,
+  UI rollout pending — see `src/lib/ai/visual/`). Operator fills ONLY
+  the fields that differ from Brand defaults for this specific event;
+  everything unspecified falls through to the brand. Controls:
+  `visual_emphasis`, `main_subject_type`, `layout_family`,
+  `platform_format`, `negative_visual_elements`, optional
+  `visual_notes`. `visual_style` intentionally has no Event override —
+  stays brand-level for consistency across the brand's event lineup.
 
 Right-side panel on the Create page: **Sample Event Brief** — reference-only guidance.
 Shows 8 rows (Theme, Objective, Rules, Reward, Target Audience, CTA, Tone, Notes for AI)
@@ -321,6 +329,22 @@ error.
   - Benchmark Assets repeater — upload banner samples / mascots / recurring
     visual cues for AI image reference. Same upload-storage caveat as logos:
     the URL input persists, drag-drop is preview-only in this build.
+  - **Planned Simple Mode Visual Defaults** (spec landed 2026-04-23, UI
+    rollout pending — see `src/lib/ai/visual/`). Replaces the six
+    free-text notes with structured pickers that feed the hidden prompt
+    compiler + layout spec:
+    - `visual_style` — photographic / illustrated / 3d / vector / cinematic / minimalist
+    - `visual_emphasis` — reward-forward / winner-forward / game-forward / brand-forward / lifestyle
+    - `main_subject_type` — human / object / game-element / symbol / abstract
+    - `layout_family` — center_focus / left_split / right_split / bottom_heavy
+    - `platform_format_default` — square / portrait / landscape / story
+    - `negative_visual_elements` — tag input ("do-not-include" list)
+    - `visual_notes` — optional 200-char nudge (NOT a prompt)
+    Operators do NOT author detailed visual prompts. Existing free-text
+    notes remain readable during rollout but are deprecated as an
+    authoritative visual rule source. See
+    `docs/07-ai-boundaries.md` → "Visual input architecture" for the
+    product rule and precedence.
 - **E. Sample Captions** — repeater of `{ title, type, text, notes }`.
   `title` and `text` are now **required**. A per-card Clone button copies an
   existing caption as a template for faster entry.
