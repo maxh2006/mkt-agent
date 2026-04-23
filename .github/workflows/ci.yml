@@ -1,0 +1,55 @@
+name: CI
+
+# Runs on every push to master and on every PR targeting master.
+# Also exposes a manual "Run workflow" button via workflow_dispatch so
+# you can re-run CI against any branch on demand.
+#
+# Intentionally CI-only — deploy is still `sudo bash scripts/deploy.sh`
+# on the VM (see docs/08-deployment.md). This workflow verifies the code
+# compiles; it does NOT ship anything.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+# If you push a second time to the same branch before the first run
+# finishes, cancel the earlier run — the newer commit is the one that
+# matters.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # src/generated/prisma is gitignored (same as on the VM), so the
+      # client has to be generated before tsc can resolve @/generated/*
+      # imports. Does not hit the database — purely a codegen step.
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      # Lint is deliberately NOT run here yet — the codebase has two
+      # pre-existing eslint errors (react-hooks + prefer-const) that
+      # would make CI red on first run. Fix those as a follow-up, then
+      # add `- run: npm run lint` below this step.
+      - name: Typecheck
+        run: npx tsc --noEmit
