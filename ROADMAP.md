@@ -51,10 +51,23 @@ Includes:
 9. ~~Decide whether refine-after-approval is allowed~~ — **Decided 2026-04-21: NO in MVP.** Enforced in UI (Queue row gating + EditPostModal defensive lockout) and server (PATCH `/api/posts/[id]` only accepts draft/rejected). See docs/06-workflows-roles.md.
 10. ~~Add approved payload snapshot if refine-after-approval is allowed~~ — **Deferred** under the locked "no refine-after-approval" policy; dispatcher safely reads live Post fields at dispatch and retry.
 
-**Phase 2 status: all items resolved.** Remaining "go-live" work (wiring
-`MANUS_AGENT_ENDPOINT` to a real Manus instance, rotating secrets,
-upgrading the Cloud Scheduler target from raw HTTP to HTTPS behind a
-domain) is operational, not product scope — tracked in docs/08-deployment.md.
+**Phase 2 status: all original items resolved.** Remaining "go-live" work
+(wiring `MANUS_AGENT_ENDPOINT` to a real Manus instance, rotating
+secrets, upgrading the Cloud Scheduler target from raw HTTP to HTTPS
+behind a domain) is operational, not product scope — tracked in
+docs/08-deployment.md.
+
+**Post-resolution hardening** — bridge work landed between original
+Phase 2 sign-off and live Manus traffic:
+1. ~~AI provider toggle + stub rollback playbook~~ — **Done 2026-04-22.** `AI_PROVIDER=stub|anthropic` env switch at `src/lib/ai/client.ts`; 60-second flip-back procedure in docs/08-deployment.md.
+2. ~~Retryable vs fatal delivery failure classification~~ — **Done 2026-04-23.** `src/lib/manus/retryability.ts` parses `[CODE]` prefix from `last_error`; retry route returns 422 on fatal; Delivery Status modal shows "Retryable" / "Retryable (cause unknown)" / "Fatal — fix first" chips.
+3. ~~Platform-specific handoff payload mapping~~ — **Done 2026-04-23.** `src/lib/manus/platform-payload.ts` produces a `PublishPayload` discriminated union per platform (facebook / instagram / twitter / tiktok / telegram) alongside the existing flat `content` block.
+4. ~~Pre-dispatch media URL validation~~ — **Done 2026-04-23.** `src/lib/manus/media-validation.ts` — syntactic + scheme + host-privacy + reachability (HEAD with GET-Range fallback). Failures mark delivery failed with `[MEDIA_ERROR] <reason>`, route through the fatal path. `npm run media:smoke`.
+5. ~~`Post.image_url` field + UI/API/handoff plumbing~~ — **Done 2026-04-23.** Migration `20260423120000_post_image_url` (nullable TEXT); Zod-validated; editable on queue detail; `collectMediaUrls()` live-sourced. Activates the pre-dispatch validation for real traffic.
+
+**CI / deploy infrastructure** (operational but worth noting):
+- GitHub Actions typecheck workflow — `.github/workflows/ci.yml` (Node 22, `prisma generate` → `tsc --noEmit`). 2026-04-23.
+- Root-owned deploy model on the VM via `scripts/deploy.sh`. Documented in docs/08-deployment.md.
 
 Target lifecycle:
 - Draft
@@ -85,19 +98,19 @@ Source split:
 - Running Promotions → API
 
 Includes:
-1. Confirm BigQuery access/auth is stable
-2. Finalize Big Wins BQ field mapping
-3. Finalize Hot Games BQ field mapping
-4. Confirm username/display handle availability in shared.users
-5. Finalize dedupe keys for Big Wins
-6. Keep schema adapter / mapping layer isolated
-7. Keep Running Promotions on separate operational API
-8. Avoid leaking raw schema assumptions into UI/rule configs
+1. ~~Confirm BigQuery access/auth is stable~~ — **Done 2026-04-22.** SA impersonation wired at `src/lib/bq/client.ts`; billing pinned to `mktagent-493404`; unqualified-table guardrail + `npm run bq:smoke` end-to-end verified against `shared.brands` / `users` / `transactions` / `games`.
+2. ~~Finalize Big Wins BQ field mapping~~ — **Done 2026-04-23.** `src/lib/big-wins/` — types + query + normalize + adapter; emits `BigWinFacts[]` + applies `maskUsername()`; admin preview route + `npm run big-wins:preview` CLI; missing-table tolerant.
+3. ~~Finalize Hot Games BQ field mapping~~ — **Done 2026-04-23.** `src/lib/hot-games/` — ranked aggregation (static RTP + round_count tie-break) + frozen-snapshot `HotGamesFacts`; admin preview + `npm run hot-games:preview` CLI; input-validates time mapping before any BQ call.
+4. ⏳ **Confirm username/display handle availability in shared.users** — **Blocked** on platform team provisioning `shared.game_rounds`. Adapter code uses `shared.users.username` scoped by `brand_id` and applies `maskUsername()`; live end-to-end confirmation pending the missing table.
+5. ⏳ **Finalize dedupe keys for Big Wins** — **Blocked** on same. Adapter uses derived `bq-big-win-<user>-<timestamp>-<payout>` until platform confirms whether a real `win_id` column exists; swap is a one-line change in `src/lib/big-wins/normalize.ts`.
+6. ~~Keep schema adapter / mapping layer isolated~~ — **Done 2026-04-22.** `src/lib/bq/shared-schema.ts` exports `SHARED_TABLES` + `SHARED_PROJECT` + `SHARED_DATASET`; `src/lib/bq/shared-types.ts` holds `GameRoundRow`, `UserRow`, etc; `runQuery()` guardrail rejects unqualified refs at the boundary.
+7. ~~Keep Running Promotions on separate operational API~~ — **Done 2026-04-22.** `src/lib/promotions/` — per-brand REST adapter (not BigQuery) consuming `Brand.integration_settings_json`; tolerant Zod parser accepts envelope + bare-array shapes; admin preview + `npm run promotions:preview` CLI.
+8. ⏳ Avoid leaking raw schema assumptions into UI/rule configs — no known active leaks (all UI + rule-config code goes through the adapter layer), but no explicit audit yet.
 
 Definition of done:
-- backend knows how to fetch candidate facts cleanly from each source
-- rule engine stays source-agnostic
-- schema volatility is contained in mapping/adapters only
+- backend knows how to fetch candidate facts cleanly from each source ✅
+- rule engine stays source-agnostic ✅
+- schema volatility is contained in mapping/adapters only ✅
 
 ---
 
@@ -108,41 +121,19 @@ Build the real content-generation engine that turns source/context into
 queue-ready drafts.
 
 Includes:
-1. Prompt/context builder
-   - Big Wins
-   - Running Promotions
-   - Hot Games
-   - Adhoc Events
-   - Educational
-
-2. Draft generation flow
-   - multiple samples
-   - source-aware grouping
-   - insert into Content Queue
-
-3. Source-constrained refine flow
-   - visual/tone/presentation edits only
-   - fixed campaign/source rules stay locked
-
-4. Image generation flow
-   - decide text-on-image vs caption logic
-   - support reward/mechanics emphasis when appropriate
-
-5. Brand-aware generation
-   - brand voice
-   - CTA style
-   - language style
-   - design notes
-   - sample captions
-
-6. Operator sample comparison / selection support
-7. Preserve edit/reject/approval metadata for future learning
+1. ~~Prompt/context builder — Big Wins / Running Promotions / Hot Games / Adhoc Events / Educational~~ — **Done 2026-04-21.** `src/lib/ai/prompt-builder.ts` + per-source `src/lib/ai/source-normalizers/*`; typed `SourceFacts` discriminated union covers all 5 types.
+2. ~~Draft generation flow (multiple samples, source-aware grouping, insert into Content Queue)~~ — **Done 2026-04-21.** `src/lib/ai/generate.ts#runGeneration()` orchestrator; per-source sample_count defaults (big_win=3, promo=3, hot_games=2, event=1, educational=2); shared `sample_group_id` + `sample_index`/`sample_total` in `generation_context_json`.
+3. ~~Source-constrained refine flow~~ — **Policy-locked 2026-04-21: NO refine after approval.** Refine allowed only in Draft / Pending Approval / Rejected. Fixed source rules / reward / campaign period / snapshot never change. Enforced in row gating, modal, and server PATCH. See docs/06-workflows-roles.md.
+4. ⏳ **Image generation flow** — deferred. AI generator emits `image_prompt` (narrative) today. Supporting plumbing shipped 2026-04-23: `Post.image_url` column + pre-dispatch URL validation + queue detail edit UI + preview image render. What's missing is the image-rendering provider that converts `image_prompt` → hosted `image_url` + the text-on-image vs caption decision.
+5. ~~Brand-aware generation (voice / CTA style / language style / design notes / sample captions)~~ — **Done 2026-04-22.** Brand Management is the base AI profile; Event brief overrides on event-derived generation; Templates & Assets act as a supporting reference library (never a rule source). Precedence: Brand base → Event override → Templates reference. Real Anthropic Claude provider wired behind the boundary; `AI_PROVIDER=stub` default.
+6. ⏳ **Operator sample comparison / selection support** — partial. `sample_group_id` + `sample_index`/`sample_total` are persisted; Queue rows show a "Sample N/M" chip and shared left-edge accent color for sibling recognition. A dedicated side-by-side comparison/selection UI hasn't been built yet.
+7. ✅ **Preserve edit/reject/approval metadata for future learning** — the data path is preserved: `generation_context_json` carries per-draft AI metadata + frozen source snapshot + `templates_injected` counts + `ai_provider` + `ai_dry_run` + `prompt_version`; edit/reject/approve/schedule/retry transitions all flow through `audit_logs` with before/after snapshots. Phase 6 consumes this; the signals are captured today.
 
 Definition of done:
-- source facts can produce AI draft samples into Content Queue
-- drafts are brand-aware and source-aware
-- refine flow respects locked business rules
-- operators can compare and choose between samples
+- source facts can produce AI draft samples into Content Queue ✅
+- drafts are brand-aware and source-aware ✅
+- refine flow respects locked business rules ✅
+- operators can compare and choose between samples ⏳ (data + sibling chip present; dedicated selection UI pending)
 
 ---
 
@@ -216,13 +207,17 @@ Definition of done:
 
 ## EXECUTION PRIORITY
 
-Current practical priority order:
-1. Finish Manus publishing lifecycle
-2. Finalize BigQuery/API source layer
-3. Build AI content generator agent
-4. Automate draft creation flows
-5. Close learning loop
-6. Continue secondary audits/polish
+Current practical priority order (updated 2026-04-23):
+1. ✅ Phase 2 Manus publishing lifecycle — original 10 items resolved; ongoing bridge-hardening landing as needed
+2. 🟡 Phase 3 BigQuery/API source layer — 5 of 8 done; items 4 & 5 blocked on platform team `shared.game_rounds` provisioning
+3. 🟡 Phase 4 AI content generator agent — core done (prompt builder, draft flow, brand-aware, learning metadata); image generation and dedicated sample-comparison UI remaining
+4. **Phase 5 automate draft creation flows** — next major focus. Scheduler that calls `fetchPromotionsForBrand()` / `fetchBigWinsForBrand()` / `fetchHotGamesForBrand()` on each brand's `automation_rules.config_json` cadence + routes the resulting facts through the AI pipeline.
+5. Phase 6 close learning loop
+6. Phase 1 & 7 secondary audits/polish
+
+**Known unblockers needed** before resuming blocked Phase 3/4 items:
+- Platform team provisions `shared.game_rounds` → unlocks Phase 3 #4/#5 + exercises Big Wins / Hot Games adapters against live data.
+- Anthropic credits top-up → flip `AI_PROVIDER=anthropic`, re-test Generate Drafts with real model output.
 
 ---
 
