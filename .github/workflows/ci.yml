@@ -15,6 +15,14 @@ on:
     branches: [master]
   workflow_dispatch:
 
+# Opt in to Node 24 for GitHub's own JavaScript actions (checkout,
+# setup-node, etc.) ahead of the June 2 2026 forced switch. Without
+# this, each run emits a deprecation warning because those actions
+# still default to Node 20 internally. Removing the line reverts to
+# the current default if the Node 24 runtime ever causes issues.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 # If you push a second time to the same branch before the first run
 # finishes, cancel the earlier run — the newer commit is the one that
 # matters.
