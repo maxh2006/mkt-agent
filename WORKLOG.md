@@ -25,7 +25,85 @@ Current execution priority (per ROADMAP.md):
 
 
 
+
 ## Done Tasks
+
+### 2026-04-23
+- Task: Phase 2 hardening — Manus retryable vs fatal delivery failure classification
+  - Status: Complete
+  - Goal: classify Manus delivery failures into `retryable` vs `fatal`
+    and surface the distinction in operator-facing UI + retry gating.
+    Derivation from stored `last_error` text — no schema migration.
+  - Files added:
+    - `src/lib/manus/retryability.ts` — pure classifier module:
+      - `RETRYABLE_ERROR_CODES` + `FATAL_ERROR_CODES` sets
+      - `ERROR_CODE_LABELS` — short operator-facing label per code
+      - `parseManusErrorCode(last_error)` — pulls `[CODE]` prefix out
+        of stored error; returns null for legacy text-only rows
+      - `classifyFailure(last_error)` — returns
+        `{retryable, code, source: "classified"|"default", label, hint}`
+      - `FATAL_RETRY_REJECTION_MESSAGE` — shared copy for the retry
+        route's 422 body
+      - Build-time exhaustiveness guard via `_AssertExhaustive` type —
+        forces reconciliation when a new `ManusErrorCode` is added
+    - No new API route, no new component.
+  - Files modified:
+    - `src/app/api/posts/[id]/deliveries/[platform]/retry/route.ts` —
+      added `classifyFailure()` check after the `status === "failed"`
+      guard; returns 422 with `FATAL_RETRY_REJECTION_MESSAGE` on fatal.
+    - `src/app/api/posts/[id]/deliveries/route.ts` — enriches each
+      delivery row with `failure_class` (null for non-failed rows, full
+      classification object for failed rows) so the UI consumes a typed
+      flag rather than re-parsing `last_error` client-side.
+    - `src/lib/posts-api.ts` — added `DeliveryFailureClass` interface +
+      `PlatformDelivery.failure_class` field.
+    - `src/components/posts/delivery-status-modal.tsx`:
+      - New `FailureClassChip` — retryable (amber) / retryable+unknown
+        (muted) / fatal (red). Hover hint shows full operator guidance.
+      - Retry button gating — hidden on fatal, shows "Fix required"
+        text with hover hint instead.
+      - Footer "Retry All Failed" → "Retry All Retryable" (only when
+        >1 retryable failure exists); skips fatal rows.
+      - Helper note under the table — second red-text line shown when
+        any fatal failure is present, telling operator fatal failures
+        need content/config fix outside the modal.
+    - `docs/00-architecture.md` — new "Retryability layer" subsection
+      under "Error taxonomy" with full mapping table + rationale.
+    - `docs/03-ui-pages.md` — Delivery Status modal section describes
+      the three-way chip + gated Retry buttons.
+    - `docs/06-workflows-roles.md` — new "Delivery retry classification"
+      subsection under Retries documenting policy + default + backend
+      enforcement.
+  - Classification mapping chosen:
+    - **Retryable**: `NETWORK_ERROR`, `RATE_LIMITED`, `TEMPORARY_UPSTREAM_ERROR`
+    - **Fatal**: `AUTH_ERROR`, `INVALID_PAYLOAD`, `MEDIA_ERROR`, `PLATFORM_REJECTED`
+    - **Default (retryable, "cause unknown" label)**: `UNKNOWN_ERROR`,
+      missing code, unrecognized `[CODE]` prefix, legacy text-only
+      errors. Rationale: retry route is role-gated (brand_manager+);
+      policy-level rejections are already classified as `PLATFORM_REJECTED`,
+      so unknowns are more likely transient than hard rejects; blocking
+      retry on pre-taxonomy rows would regress UX without benefit.
+  - Retry gating:
+    - Backend `/api/posts/.../retry` returns 422 with
+      `FATAL_RETRY_REJECTION_MESSAGE` when the classifier returns
+      `retryable=false`.
+    - UI hides the per-row Retry button on fatal, shows "Fix required".
+    - Footer "Retry All Retryable" only appears when >1 retryable exists
+      and only iterates over retryable rows.
+  - Schema changes: **none**. `failure_class` is derived server-side
+    from `last_error` prefix on every GET — no DB column, no migration.
+  - Verification captured:
+    - `npx tsc --noEmit` clean.
+    - Classifier smoke-tested against 11 inputs (all 8 codes + legacy
+      no-code + unrecognized-prefix + null) — every case produced the
+      expected `retryable` + `source` + `label`.
+  - Recommended next Manus task after this: **persisted error_code
+    column on PostPlatformDelivery** — would replace the prefix-parse
+    with a structured column, unlock filter-by-code in list views, and
+    enable metrics-by-code dashboards. Requires a migration so deferred
+    until there's a concrete operator ask. Alternative: wire a simple
+    "last N failures by code" tile into Insights once metrics tables
+    grow.
 
 ### 2026-04-23
 - Task: Phase 3 — Big Wins + Hot Games BigQuery adapters

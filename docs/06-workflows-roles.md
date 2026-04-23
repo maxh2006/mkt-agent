@@ -169,13 +169,40 @@ Retries:
 - Happen at the platform delivery level (see PostPlatformDelivery model)
 - Resend the same approved content payload
 - Do NOT regenerate content, re-run automation source logic, or require re-approval
-- Available from the Delivery Status modal per failed platform
+- Available from the Delivery Status modal per failed platform, gated by
+  failure classification (see "Delivery retry classification" below)
 - API: `POST /api/posts/[id]/deliveries/[platform]/retry`. Allowed only when
-  delivery status is `failed`. Resets status to `queued`, sets
-  `scheduled_for = now()`, bumps `retry_count`, clears `last_error`, writes
-  `delivery.retried` to audit_logs. Cloud Scheduler's next dispatcher tick
-  claims and re-dispatches the row — no operator action needed after the
-  retry click. Role-gated to brand_manager+.
+  delivery status is `failed` AND the failure is classified as retryable.
+  Resets status to `queued`, sets `scheduled_for = now()`, bumps
+  `retry_count`, clears `last_error`, writes `delivery.retried` to
+  audit_logs. Cloud Scheduler's next dispatcher tick claims and
+  re-dispatches the row — no operator action needed after the retry
+  click. Role-gated to brand_manager+.
+
+Delivery retry classification (2026-04-23):
+- Each failure is classified as `retryable` (safe to resend same content)
+  or `fatal` (content/config must be fixed first) by
+  `classifyFailure()` at `src/lib/manus/retryability.ts`. Derived from
+  the stored `last_error` `"[CODE] ..."` prefix — no DB column.
+- **Retryable codes**: `NETWORK_ERROR`, `RATE_LIMITED`,
+  `TEMPORARY_UPSTREAM_ERROR`.
+- **Fatal codes**: `AUTH_ERROR`, `INVALID_PAYLOAD`, `MEDIA_ERROR`,
+  `PLATFORM_REJECTED`.
+- **Default (UNKNOWN_ERROR / missing code / legacy text-only rows)**:
+  retryable, labelled "cause unknown" in the UI. Rationale: retry route
+  is role-gated; unknown causes are more often transient than policy
+  rejects; blocking retry on legacy rows would regress pre-taxonomy UX.
+- Operator-facing behaviour in the Delivery Status modal:
+  - Retryable failure → Retry button visible, chip reads "Retryable"
+    (or "Retryable (cause unknown)" on default-classification rows).
+  - Fatal failure → Retry button hidden; cell shows "Fix required"
+    with a hover hint; footer reminds operator to correct content or
+    configuration outside the modal. There is **no Return to Review**
+    in MVP, so the recourse is to create a new post.
+- Backend enforcement: the retry route returns **422** with a fixed
+  message when a fatal failure is retried — UI gating is defence-in-depth,
+  not the only line of defence.
+- There is no auto-retry / backoff. Every retry is operator-initiated.
 
 Refinement:
 - Content Queue refinements are constrained to visual/tone/presentation only

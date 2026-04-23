@@ -86,15 +86,29 @@ Delivery Status modal:
 - Shows one row per delivery with: platform, delivery status chip, scheduled time,
   publish attempted time, posted_at / external_post_id on success, last_error /
   retry_count on failure.
-- Retry button appears per failed row. A "Retry All Failed" footer button appears
-  when more than one delivery has failed.
+- **Failure classification chip** (2026-04-23): each failed row shows a
+  retryability chip alongside the error text:
+  - `Retryable` (amber) — transient code (NETWORK_ERROR / RATE_LIMITED /
+    TEMPORARY_UPSTREAM_ERROR). Retry button visible.
+  - `Retryable (cause unknown)` (muted) — UNKNOWN_ERROR, missing code, or
+    legacy text-only row. Retry button visible (operator has agency).
+  - `Fatal — fix first` (red) — fatal code (AUTH_ERROR / INVALID_PAYLOAD /
+    MEDIA_ERROR / PLATFORM_REJECTED). Retry button is replaced with
+    "Fix required" text; operator must correct content/config before any
+    retry makes sense.
+  See `docs/06-workflows-roles.md` → "Delivery retry classification" for
+  the full taxonomy and backend-gate behaviour (422 on fatal retry).
+- Retry All button in the footer is labelled **Retry All Retryable**
+  (only when >1 retryable failure exists) and skips fatal rows.
 - Retry resets a delivery to `queued` with `scheduled_for = now()`, bumps
   `retry_count`, clears `last_error`, and writes a `delivery.retried` audit
   entry. It reuses the same approved content payload — no regeneration, no
   re-approval. Cloud Scheduler picks up the requeued delivery on the next
   dispatcher tick.
 - A short helper note under the deliveries table reinforces the same-payload
-  guarantee whenever there is at least one failed delivery.
+  guarantee whenever there is at least one failed delivery. When any fatal
+  failure is present, a second red-text line tells the operator fatal
+  failures require a content/config fix outside the modal.
 - When no delivery rows exist yet (post freshly scheduled, Manus hasn't dispatched),
   the modal shows an informational empty state.
 

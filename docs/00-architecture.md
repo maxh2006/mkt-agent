@@ -264,6 +264,29 @@ platform outcome arrives asynchronously via the callback.
 Manus may send codes outside this list; we accept and log them without
 rejecting the callback (forward compat).
 
+**Retryability layer (2026-04-23).** On top of the taxonomy above, each
+delivery failure is classified as `retryable` or `fatal` by a pure helper
+at [`src/lib/manus/retryability.ts`](../src/lib/manus/retryability.ts).
+The classifier is shared by the retry API route (gates retries) and the
+Delivery Status modal (shows operator-facing label + hint).
+
+| Code | Class | Reason |
+|---|---|---|
+| `NETWORK_ERROR` | retryable | transient |
+| `RATE_LIMITED` | retryable | transient throttle |
+| `TEMPORARY_UPSTREAM_ERROR` | retryable | named transient |
+| `AUTH_ERROR` | fatal | fix platform credentials first |
+| `INVALID_PAYLOAD` | fatal | fix content/payload first |
+| `MEDIA_ERROR` | fatal | fix asset/media first |
+| `PLATFORM_REJECTED` | fatal | content violates policy |
+| `UNKNOWN_ERROR`, missing code, legacy text-only | retryable (default, labelled "cause unknown") | operator has agency; retry route is role-gated; unknowns are more often transient than policy-rejects |
+
+No DB column for the classification — it's derived from parsing the
+`"[CODE] ..."` prefix of stored `last_error`. The derivation is exact
+(strict regex + known-code set) so no ambiguity. Backend retry route
+returns 422 with a fixed message when a fatal is retried (defence in
+depth — UI hides the button too).
+
 **`last_error` storage format.** When `error_code` is provided on a failed
 callback, we format the stored string as `"[CODE] human message"`
 (e.g. `"[RATE_LIMITED] Meta graph API 429"`). If only `error` is sent the

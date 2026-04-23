@@ -9,8 +9,18 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { RefreshCw, AlertCircle, CheckCircle2, Clock, Loader2, CircleDot } from "lucide-react";
-import { postsApi, type PlatformDelivery } from "@/lib/posts-api";
+import {
+  RefreshCw,
+  AlertCircle,
+  CheckCircle2,
+  Clock,
+  Loader2,
+  CircleDot,
+  ShieldAlert,
+  RotateCcw,
+  HelpCircle,
+} from "lucide-react";
+import { postsApi, type PlatformDelivery, type DeliveryFailureClass } from "@/lib/posts-api";
 import { cn } from "@/lib/utils";
 
 interface DeliveryStatusModalProps {
@@ -39,6 +49,39 @@ function DeliveryStatusChip({ status }: { status: string }) {
     <span className={cn("inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] font-medium", meta.className)}>
       <Icon className="h-3 w-3" />
       {meta.label}
+    </span>
+  );
+}
+
+/**
+ * Retryable / Fatal / Cause-unknown chip rendered next to the error
+ * text on failed deliveries. Drives the Retry button gating below.
+ */
+function FailureClassChip({ fc }: { fc: DeliveryFailureClass }) {
+  let Icon = RotateCcw;
+  let className = "bg-amber-500/10 text-amber-700 border-amber-500/20";
+  let label = "Retryable";
+
+  if (!fc.retryable) {
+    Icon = ShieldAlert;
+    className = "bg-destructive/10 text-destructive border-destructive/20";
+    label = "Fatal — fix first";
+  } else if (fc.source === "default") {
+    Icon = HelpCircle;
+    className = "bg-muted text-muted-foreground border-border";
+    label = "Retryable (cause unknown)";
+  }
+
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] font-medium",
+        className,
+      )}
+      title={fc.hint}
+    >
+      <Icon className="h-3 w-3" />
+      {label}
     </span>
   );
 }
@@ -90,7 +133,11 @@ export function DeliveryStatusModal({ postId, open, onClose }: DeliveryStatusMod
 
   async function retryAllFailed() {
     if (!postId) return;
-    const failed = deliveries.filter((d) => d.status === "failed");
+    // Only iterate over retryable failures — fatal ones require a
+    // content/config fix outside this modal.
+    const failed = deliveries.filter(
+      (d) => d.status === "failed" && d.failure_class?.retryable,
+    );
     for (const d of failed) {
       setRetrying(d.platform);
       try { await postsApi.retryDelivery(postId, d.platform); }
@@ -104,6 +151,12 @@ export function DeliveryStatusModal({ postId, open, onClose }: DeliveryStatusMod
   }
 
   const anyFailed = deliveries.some((d) => d.status === "failed");
+  const retryableCount = deliveries.filter(
+    (d) => d.status === "failed" && d.failure_class?.retryable,
+  ).length;
+  const anyFatal = deliveries.some(
+    (d) => d.status === "failed" && d.failure_class && !d.failure_class.retryable,
+  );
   const hasRows = deliveries.length > 0;
 
   return (
@@ -163,7 +216,17 @@ export function DeliveryStatusModal({ postId, open, onClose }: DeliveryStatusMod
                         ) : d.status === "failed" ? (
                           <div className="space-y-0.5">
                             <div className="text-destructive">{d.last_error ?? "Unknown error"}</div>
-                            <div className="text-[10px] text-muted-foreground">Retries: {d.retry_count}</div>
+                            {d.failure_class && (
+                              <div className="flex items-center gap-1.5">
+                                <FailureClassChip fc={d.failure_class} />
+                                <span className="text-[10px] text-muted-foreground">
+                                  Retries: {d.retry_count}
+                                </span>
+                              </div>
+                            )}
+                            {!d.failure_class && (
+                              <div className="text-[10px] text-muted-foreground">Retries: {d.retry_count}</div>
+                            )}
                           </div>
                         ) : (
                           <span className="text-muted-foreground">—</span>
@@ -171,16 +234,30 @@ export function DeliveryStatusModal({ postId, open, onClose }: DeliveryStatusMod
                       </td>
                       <td className="px-3 py-2 text-right">
                         {d.status === "failed" ? (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => retry(d.platform)}
-                            disabled={retrying !== null}
-                            className="gap-1 h-7"
-                          >
-                            <RefreshCw className={cn("h-3 w-3", retrying === d.platform && "animate-spin")} />
-                            Retry
-                          </Button>
+                          d.failure_class?.retryable !== false ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => retry(d.platform)}
+                              disabled={retrying !== null}
+                              className="gap-1 h-7"
+                            >
+                              <RefreshCw
+                                className={cn(
+                                  "h-3 w-3",
+                                  retrying === d.platform && "animate-spin",
+                                )}
+                              />
+                              Retry
+                            </Button>
+                          ) : (
+                            <span
+                              className="text-[11px] text-muted-foreground"
+                              title={d.failure_class?.hint}
+                            >
+                              Fix required
+                            </span>
+                          )
                         ) : null}
                       </td>
                     </tr>
@@ -189,27 +266,41 @@ export function DeliveryStatusModal({ postId, open, onClose }: DeliveryStatusMod
               </table>
             </div>
             {anyFailed && (
-              <p className="text-[11px] text-muted-foreground leading-relaxed">
-                Retry resends the same approved content to the failed platform.
-                It does not regenerate content or require re-approval. Manus
-                reattempts on the next dispatcher tick.
-              </p>
+              <div className="space-y-1.5">
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  Retry resends the same approved content to the failed platform.
+                  It does not regenerate content or require re-approval. Manus
+                  reattempts on the next dispatcher tick.
+                </p>
+                {anyFatal && (
+                  <p className="text-[11px] text-destructive leading-relaxed">
+                    Fatal failures (auth, payload, media, platform policy)
+                    are not retryable from this modal — fix the underlying
+                    content or configuration first.
+                  </p>
+                )}
+              </div>
             )}
             </>
           )}
         </div>
 
         <DialogFooter>
-          {anyFailed && deliveries.filter((d) => d.status === "failed").length > 1 && (
+          {retryableCount > 1 && (
             <Button
               variant="outline"
               size="sm"
               onClick={retryAllFailed}
               disabled={retrying !== null}
               className="gap-1"
+              title={
+                anyFatal
+                  ? `Retries ${retryableCount} retryable failure(s). Fatal failures are skipped — fix them first.`
+                  : undefined
+              }
             >
               <RefreshCw className={cn("h-3.5 w-3.5", retrying !== null && "animate-spin")} />
-              Retry All Failed
+              Retry All Retryable
             </Button>
           )}
           <Button variant="outline" onClick={onClose}>Close</Button>

@@ -148,6 +148,17 @@ export interface PlatformDelivery {
   worker: string | null;
   created_at: string;
   updated_at: string;
+  /** Server-side classification derived from `last_error`. Null for
+   *  non-failed rows. See `src/lib/manus/retryability.ts`. */
+  failure_class: DeliveryFailureClass | null;
+}
+
+export interface DeliveryFailureClass {
+  retryable: boolean;
+  code: string | null;
+  source: "classified" | "default";
+  label: string;
+  hint: string;
 }
 
 export interface EventBriefContext {

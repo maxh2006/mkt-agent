@@ -4,6 +4,10 @@ import { db } from "@/lib/db";
 import { getActiveBrand } from "@/lib/active-brand";
 import { ok, Errors, sessionUser, assertCanApprove } from "@/lib/api";
 import { writeAuditLog, AuditAction } from "@/lib/audit";
+import {
+  classifyFailure,
+  FATAL_RETRY_REJECTION_MESSAGE,
+} from "@/lib/manus/retryability";
 
 /**
  * POST /api/posts/[id]/deliveries/[platform]/retry
@@ -14,7 +18,15 @@ import { writeAuditLog, AuditAction } from "@/lib/audit";
  * docs/08-deployment.md). Retry reuses the SAME approved content payload —
  * no regeneration, no re-approval, no source re-run.
  *
- * State changes:
+ * Gating (in order):
+ *   1. Must be a failed delivery (other statuses → 422).
+ *   2. Must be classified retryable by `classifyFailure()` (fatal codes
+ *      like AUTH_ERROR / INVALID_PAYLOAD / MEDIA_ERROR / PLATFORM_REJECTED
+ *      → 422). UNKNOWN_ERROR, legacy no-code rows, and recognized
+ *      transient codes all pass — see `src/lib/manus/retryability.ts`
+ *      for the full taxonomy.
+ *
+ * State changes on success:
  *   status           failed → queued
  *   scheduled_for    → now()
  *   retry_count      += 1
@@ -50,6 +62,11 @@ export async function POST(
 
   if (delivery.status !== "failed") {
     return Errors.VALIDATION("Only failed deliveries can be retried");
+  }
+
+  const failureClass = classifyFailure(delivery.last_error);
+  if (!failureClass.retryable) {
+    return Errors.VALIDATION(FATAL_RETRY_REJECTION_MESSAGE);
   }
 
   const now = new Date();
