@@ -124,7 +124,48 @@ Includes:
 1. ~~Prompt/context builder — Big Wins / Running Promotions / Hot Games / Adhoc Events / Educational~~ — **Done 2026-04-21.** `src/lib/ai/prompt-builder.ts` + per-source `src/lib/ai/source-normalizers/*`; typed `SourceFacts` discriminated union covers all 5 types.
 2. ~~Draft generation flow (multiple samples, source-aware grouping, insert into Content Queue)~~ — **Done 2026-04-21.** `src/lib/ai/generate.ts#runGeneration()` orchestrator; per-source sample_count defaults (big_win=3, promo=3, hot_games=2, event=1, educational=2); shared `sample_group_id` + `sample_index`/`sample_total` in `generation_context_json`.
 3. ~~Source-constrained refine flow~~ — **Policy-locked 2026-04-21: NO refine after approval.** Refine allowed only in Draft / Pending Approval / Rejected. Fixed source rules / reward / campaign period / snapshot never change. Enforced in row gating, modal, and server PATCH. See docs/06-workflows-roles.md.
-4. ⏳ **Image generation flow** — deferred. AI generator emits `image_prompt` (narrative) today. Supporting plumbing shipped 2026-04-23: `Post.image_url` column + pre-dispatch URL validation + queue detail edit UI + preview image render. What's missing is the image-rendering provider that converts `image_prompt` → hosted `image_url` + the text-on-image vs caption decision.
+4. 🟡 **Image generation pipeline — structured inputs + split rendering** (near-term priority as of 2026-04-23)
+
+   Why now: operators are struggling with prompt-heavy inputs; we do
+   NOT want them to become prompt engineers. AI-rendered typography is
+   unreliable for branded overlays (reward amount, banner text, logo).
+   The image-rendering provider must land AFTER this foundation, not
+   before — otherwise we'd build the provider against the wrong input
+   surface and have to rework it.
+
+   Supporting plumbing already shipped 2026-04-23: `Post.image_url`
+   column + pre-dispatch URL validation + queue detail edit UI +
+   preview image render (operators can paste a hosted image URL today).
+
+   Scope — land these before wiring an image-rendering provider:
+
+   1. **Simplify Brand Management visual defaults** — replace freeform
+      prompt-heavy fields with structured controls (palette, style,
+      subject, mood, do/don't lists as enums/tags rather than prose).
+   2. **Simplify Event visual override inputs** — same structural
+      treatment as brand defaults; Brand→Event precedence preserved.
+   3. **Replace freeform prompt-heavy inputs with structured controls**
+      across the app wherever an operator is currently asked to
+      describe a visual in free text.
+   4. **Hidden prompt compiler** — pure backend module that takes the
+      structured Brand + Event + Source inputs and produces the actual
+      AI image prompt. Operators never see the compiled prompt.
+   5. **Layout template specs + safe-zone rules** — deterministic
+      templates (e.g. "hero", "reward-forward", "carousel-tile") with
+      explicit slots for image, banner text, CTA, logo. Template choice
+      is a structured operator input; safe-zone rules prevent
+      AI-generated subjects from colliding with overlays.
+   6. **Deterministic text + logo overlay rendering** — app-side
+      (server-side image composition) renders the final creative by
+      layering structured text + logos onto the AI-generated background
+      per the selected template. **AI does backgrounds; app does
+      typography.** Eliminates unreliable AI typography.
+
+   Image-rendering provider work (the originally-deferred step — picking
+   the model, wiring the adapter, converting structured inputs →
+   background image → hosted URL) becomes **sub-item 7** once 1–6 are
+   in place. Until then, operator-populated `image_url` continues to
+   flow through the existing media-validation + Manus handoff path.
 5. ~~Brand-aware generation (voice / CTA style / language style / design notes / sample captions)~~ — **Done 2026-04-22.** Brand Management is the base AI profile; Event brief overrides on event-derived generation; Templates & Assets act as a supporting reference library (never a rule source). Precedence: Brand base → Event override → Templates reference. Real Anthropic Claude provider wired behind the boundary; `AI_PROVIDER=stub` default.
 6. ⏳ **Operator sample comparison / selection support** — partial. `sample_group_id` + `sample_index`/`sample_total` are persisted; Queue rows show a "Sample N/M" chip and shared left-edge accent color for sibling recognition. A dedicated side-by-side comparison/selection UI hasn't been built yet.
 7. ✅ **Preserve edit/reject/approval metadata for future learning** — the data path is preserved: `generation_context_json` carries per-draft AI metadata + frozen source snapshot + `templates_injected` counts + `ai_provider` + `ai_dry_run` + `prompt_version`; edit/reject/approve/schedule/retry transitions all flow through `audit_logs` with before/after snapshots. Phase 6 consumes this; the signals are captured today.

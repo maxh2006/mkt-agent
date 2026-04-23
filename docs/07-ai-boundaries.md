@@ -153,6 +153,17 @@ generator does NOT populate `image_url` — it only emits
 `image_prompt`; a future image-rendering provider is the piece that
 fills `image_url`.
 
+**Future shape (Phase 4 priority, see ROADMAP.md).** The current
+narrative `image_prompt` is **interim**. The production pipeline moves
+to STRUCTURED operator inputs (palette / style / subject / mood /
+layout template) compiled into the AI prompt by a hidden compiler —
+operators never author prompts directly. AI renders background art
+only; branded text + logos are rendered deterministically by the app
+via layout templates with safe-zone rules. This removes the operator
+prompt-engineering burden and eliminates unreliable AI typography for
+branded overlays. Until that stack lands, `image_prompt` + narrative
+prompting remains the interim path.
+
 **Request shape.** One `messages.create` call per generation run. The
 provider-agnostic `StructuredPrompt` (from
 `src/lib/ai/prompt-builder.ts`) is serialized by

@@ -32,6 +32,49 @@ Current execution priority (per ROADMAP.md):
 ## Done Tasks
 
 ### 2026-04-23
+- Task: docs — promote "Visual Prompt Simplification + Hidden Prompt Compiler" to near-term Phase 4 priority
+  - Status: Complete (docs-only, no code)
+  - Why this is being prioritized NOW:
+    - Operator input experience for image generation is too
+      prompt-heavy. Regular operators are not skilled enough to
+      write detailed visual prompts reliably, and we do NOT want
+      them to become prompt engineers.
+    - AI-rendered typography is unreliable for branded overlays
+      (reward amount, banner text, logo).
+    - Image generation must land AFTER this foundation, not
+      before — otherwise the image-rendering provider gets built
+      against the wrong input surface.
+  - Intended split pipeline:
+    - AI → background / art only
+    - App → final text + logo overlays, rendered server-side
+  - What changed in the roadmap:
+    - Phase 4 item 4 expanded from a single "deferred" bullet into
+      a 6-part structured subsection: simplify Brand visual
+      defaults; simplify Event visual override inputs; replace
+      freeform prompt fields with structured controls; build a
+      hidden prompt compiler; define layout template specs +
+      safe-zone rules; deterministic app-side text/logo overlay
+      rendering.
+    - Image-rendering provider work (originally item 4) explicitly
+      re-positioned as sub-item 7, dependent on 1–6.
+    - Existing "supporting plumbing already shipped 2026-04-23"
+      note preserved (Post.image_url + media validation + queue
+      detail UI + preview render) — nothing deleted.
+    - Items 1, 2, 3, 5, 6, 7 of Phase 4 unchanged.
+  - Docs updated:
+    - docs/00-architecture.md — "Image generation. Deferred."
+      paragraph replaced with a forward-looking note about the
+      split pipeline + pointer to the ROADMAP section.
+    - docs/07-ai-boundaries.md — image_prompt clarification gains
+      one "Future shape (Phase 4 priority)" paragraph describing
+      the structured-input + hidden-compiler direction.
+  - No Ongoing Tasks entry — nothing is being built yet. The first
+    concrete implementation step (audit Brand Management visual
+    fields + design structured-input schema) kicks off as its own
+    task when picked up.
+  - No code, no schema, no Prisma migration.
+
+### 2026-04-23
 - Task: Phase 2 hardening — `Post.image_url` field + UI / API / media handoff plumbing
   - Status: Complete
   - Goal: activate the pre-dispatch media validation layer (shipped

@@ -566,9 +566,25 @@ Post[] (draft, grouped by sample_group_id)
   rows, live)
 - `educational` — 2 samples default (structured packet; fixture only)
 
-**Image generation.** Deferred. Every generated sample carries an
-`image_prompt` string; the image-rendering provider + model are picked
-in a later task. No schema changes needed when it lands.
+**Image generation.** Near-term Phase 4 priority (see `ROADMAP.md` §
+"Image generation pipeline — structured inputs + split rendering").
+Every generated sample carries an `image_prompt` string today — this is
+an **interim narrative shape**. The production plan splits the pipeline:
+
+- Operators fill **STRUCTURED visual inputs** (palette, style, subject,
+  mood, layout template) — NOT freeform prompts.
+- A **hidden prompt compiler** (backend-only) turns those structured
+  inputs into the actual AI image prompt. Operators never see the
+  compiled prompt.
+- AI renders **backgrounds / art only**.
+- The app renders **final text + logos as a server-side overlay** per
+  safe-zone rules defined by the selected layout template.
+
+This removes operator prompt-engineering burden and eliminates
+unreliable AI typography for branded overlays. No schema changes have
+landed for this yet — `Post.image_url` + the media-validation layer
+(shipped 2026-04-23) already support any image-rendering backend once
+the structured-input + compiler + template stack is in place.
 
 **Dev entry point.** `POST /api/ai/generate-from-fixture` is an
 admin-only dev route gated by `ALLOW_AI_FIXTURES=true`. It feeds a
