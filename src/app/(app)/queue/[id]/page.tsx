@@ -114,6 +114,7 @@ export default function PostDetailPage() {
       cta: post.cta ?? "",
       banner_text: post.banner_text ?? "",
       image_prompt: post.image_prompt ?? "",
+      image_url: post.image_url ?? "",
     });
     setSaveError(null);
     setEditing(true);
@@ -349,6 +350,18 @@ export default function PostDetailPage() {
                   maxLength={1000}
                   rows={3}
                 />
+                <div className="space-y-1">
+                  <EditableField
+                    label="Image URL"
+                    name="image_url"
+                    value={editData.image_url ?? ""}
+                    onChange={(v) => setEditData((d) => ({ ...d, image_url: v }))}
+                    maxLength={2048}
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    Public URL for publishing. Must be reachable (http or https). Leave blank for text-only posts.
+                  </p>
+                </div>
               </>
             ) : (
               <>
@@ -357,6 +370,7 @@ export default function PostDetailPage() {
                 <Field label="CTA" value={post.cta} />
                 <Field label="Banner Text" value={post.banner_text} />
                 <Field label="Image Prompt" value={post.image_prompt} />
+                <Field label="Image URL" value={post.image_url} />
               </>
             )}
           </div>
@@ -423,14 +437,32 @@ function PostPreview({ post }: { post: PreviewPost }) {
   const caption = post.caption;
   const cta = post.cta;
   const bannerText = post.banner_text;
+  const imageUrl = post.image_url;
 
   const hasContent = headline || caption || cta || bannerText;
 
   return (
     <div className="rounded-xl border border-border bg-muted/20 overflow-hidden">
-      {/* Simulated image area */}
-      <div className="flex items-center justify-center bg-muted h-40">
-        {bannerText ? (
+      {/* Image / banner area. When image_url is set we render it directly;
+          banner_text renders over a muted background as today otherwise. */}
+      <div className="relative flex items-center justify-center bg-muted h-40 overflow-hidden">
+        {imageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={imageUrl}
+            alt="Post media"
+            className="h-full w-full object-cover"
+            onError={(e) => {
+              // If the URL fails to load, fall back to the banner_text
+              // placeholder by hiding the broken img. Pre-dispatch
+              // validation catches unreachable URLs before publishing;
+              // this keeps the preview resilient to CORS / hotlink
+              // blocking that can affect browser fetches but not
+              // Manus's server-side fetch.
+              (e.currentTarget as HTMLImageElement).style.display = "none";
+            }}
+          />
+        ) : bannerText ? (
           <div className="flex items-center justify-center rounded-lg bg-primary/10 px-6 py-3 max-w-[80%]">
             <p className="text-center text-sm font-semibold text-primary">{bannerText}</p>
           </div>

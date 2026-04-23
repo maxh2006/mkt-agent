@@ -65,23 +65,24 @@ const MAX_REDIRECTS = 3;
 
 /**
  * Returns the list of media URLs associated with a Post that should be
- * validated before dispatch.
+ * validated before dispatch. Activated 2026-04-23 once `Post.image_url`
+ * landed.
  *
- * TODAY (2026-04-23): returns `[]` for every Post — no per-post media URL
- * field exists yet (`grep image_url|media_url` over the codebase returns
- * zero hits). `Post.image_prompt` is narrative AI input, NOT a URL, so it
- * is NEVER returned here.
+ * MVP shape: single-image. Returns `[post.image_url]` when non-empty,
+ * `[]` otherwise. `Post.image_prompt` is narrative AI input (NOT a URL)
+ * — never returned here.
  *
- * FUTURE extension point: when `Post.image_url` (or a structured
- * `media_urls: string[]`) lands as a column, return the non-empty values
- * from here. That is the full integration required to activate this
- * layer for real traffic — the dispatcher is already wired.
+ * When media grows to an array (e.g. carousels, per-platform variants)
+ * the returned shape is already `string[]`, so the dispatcher call site
+ * stays unchanged.
  */
-export function collectMediaUrls(_post: Pick<Post, "image_prompt">): string[] {
-  // Intentionally empty. See JSDoc for the future extension shape.
-  // `_post` parameter is retained so the call site stays stable when the
-  // extension lands (no dispatcher code change needed for the plumbing).
-  return [];
+export function collectMediaUrls(
+  post: Pick<Post, "image_url">,
+): string[] {
+  const url = post.image_url;
+  if (!url) return [];
+  const trimmed = url.trim();
+  return trimmed.length > 0 ? [trimmed] : [];
 }
 
 // ─── Public validators ──────────────────────────────────────────────────────

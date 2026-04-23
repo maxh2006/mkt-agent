@@ -143,10 +143,15 @@ dev / staging / review.
 `null` when not applicable), and `image_prompt`. The `image_prompt` is
 **narrative text only** — it describes what an image should look like,
 it is NEVER a URL. Image rendering remains deferred; no image model is
-locked. When real media URLs start flowing to Manus (future task),
-they travel in a separate `media_urls` field on the publish payload,
+locked. A separate nullable `Post.image_url` field (added 2026-04-23)
+carries the public media URL when one exists — populated by operator
+edit today, by AI image generation in the future. `image_url` is
 validated pre-dispatch by
-[`src/lib/manus/media-validation.ts`](../src/lib/manus/media-validation.ts).
+[`src/lib/manus/media-validation.ts`](../src/lib/manus/media-validation.ts)
+(syntactic + scheme + host-privacy + reachability). The AI content
+generator does NOT populate `image_url` — it only emits
+`image_prompt`; a future image-rendering provider is the piece that
+fills `image_url`.
 
 **Request shape.** One `messages.create` call per generation run. The
 provider-agnostic `StructuredPrompt` (from

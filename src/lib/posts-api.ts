@@ -23,6 +23,9 @@ export interface Post {
   cta: string | null;
   banner_text: string | null;
   image_prompt: string | null;
+  /** Public media URL for publishing. Validated pre-dispatch by
+   *  src/lib/manus/media-validation.ts. null when post is text-only. */
+  image_url: string | null;
   source_type: string | null;
   source_id: string | null;
   source_instance_key: string | null;

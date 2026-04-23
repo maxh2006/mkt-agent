@@ -431,14 +431,17 @@ if (mediaUrls.length > 0) {
 }
 ```
 
-**Today's URL source.** `collectMediaUrls(post)` returns `[]` for every
-post. No `Post.image_url` / `media_url` column exists yet;
-`Post.image_prompt` is narrative AI input (NOT a URL) and is never
-returned here. The validation layer is shipworthy + smoke-tested but
-the dispatcher hook is a no-op for current traffic. When AI image
-generation or operator-uploaded assets land, the only change needed
-to activate live validation is updating `collectMediaUrls()` to return
-the new field — dispatcher wiring is already in place.
+**URL source.** Activated 2026-04-23 — `collectMediaUrls(post)` returns
+`[post.image_url]` when `Post.image_url` is a non-empty trimmed string,
+`[]` otherwise (`Post.image_prompt` is narrative AI input, NEVER a URL
+— never returned here). Text-only posts and posts with null/empty
+`image_url` short-circuit with zero validation. Operators populate
+`image_url` via the queue detail page's edit UI (gated to Draft /
+Rejected per the no-refine-after-approval rule); future AI image
+generation will populate the same field programmatically. MVP shape is
+a single URL per post — the return type is already `string[]` so
+carousels / per-platform variants can evolve without a dispatcher code
+change.
 
 **Retryability.** `[MEDIA_ERROR] <reason>` is parsed by
 `parseManusErrorCode()` → maps to fatal in

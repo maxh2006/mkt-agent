@@ -83,7 +83,8 @@ so renames can be absorbed in one place.
 - caption
 - cta
 - banner_text
-- image_prompt
+- image_prompt — narrative AI input (describes what an image should look like); NEVER a URL
+- image_url — optional public media URL for publishing (nullable string, added 2026-04-23). Validated pre-dispatch by `src/lib/manus/media-validation.ts`; MVP single-image shape. Leave null for text-only posts.
 - source_type
 - source_id
 - source_instance_key (occurrence datetime key for event-derived posts)

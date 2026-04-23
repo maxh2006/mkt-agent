@@ -74,6 +74,7 @@ Edit modal (renamed to "Refine Post"):
 Post detail:
 - Source ID links to the source event for event-derived posts.
 - Rejection block now shows rejected_at timestamp and rejected_by (in addition to reason).
+- **Image URL field** (2026-04-23): editable when post is in Draft or Rejected (same gate as other fields). Helper text: "Public URL for publishing. Must be reachable (http or https). Leave blank for text-only posts." The field is an optional URL up to 2048 chars; syntactic sanity is enforced by the post Zod schema, and full public-URL reachability is enforced pre-dispatch by `src/lib/manus/media-validation.ts`. The post preview at the top of the page renders the image when `image_url` is set (with a broken-image fallback to the banner_text placeholder if the browser fails to load it — this is a browser CORS / hotlink resilience concern, not a validation signal).
 
 Row actions (target model — refine per implementation):
 - Core (visible): View, Refine, Approve (or Approve & Post when immediate), Reject

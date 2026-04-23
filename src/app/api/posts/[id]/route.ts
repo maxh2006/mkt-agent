@@ -82,6 +82,8 @@ export async function PATCH(
       caption: existing.caption,
       cta: existing.cta,
       banner_text: existing.banner_text,
+      image_prompt: existing.image_prompt,
+      image_url: existing.image_url,
     },
     after: parsed.data,
   });

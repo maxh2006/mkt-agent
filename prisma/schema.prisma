@@ -159,6 +159,10 @@ model Post {
   cta          String?
   banner_text  String?
   image_prompt String?
+  /// Public media URL for publishing (MVP single-image). Validated
+  /// pre-dispatch by src/lib/manus/media-validation.ts. Narrative
+  /// image_prompt stays separate — it is AI input, never a URL.
+  image_url    String?
   source_type         SourceType?
   source_id            String?
   source_instance_key  String?

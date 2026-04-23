@@ -28,7 +28,126 @@ Current execution priority (per ROADMAP.md):
 
 
 
+
 ## Done Tasks
+
+### 2026-04-23
+- Task: Phase 2 hardening — `Post.image_url` field + UI / API / media handoff plumbing
+  - Status: Complete
+  - Goal: activate the pre-dispatch media validation layer (shipped
+    in the previous task) by giving posts a real `image_url` field.
+    MVP shape is a nullable single URL — matches media-validation's
+    expectation, keeps the change tight, and evolves cleanly into
+    richer media arrays later without another dispatcher-code
+    change.
+  - Final field shape chosen: `Post.image_url String?`
+    (nullable TEXT column). `image_prompt` remains separate +
+    unchanged — it is narrative AI input, NEVER a URL.
+  - Migration name: `20260423120000_post_image_url` — one
+    `ALTER TABLE "posts" ADD COLUMN "image_url" TEXT;` (non-destructive,
+    backfill-safe for existing rows).
+  - Files modified:
+    - `prisma/schema.prisma` — added the nullable column with a
+      triple-slash doc comment pointing at the media-validation
+      module.
+    - `prisma/migrations/20260423120000_post_image_url/migration.sql`
+      — the schema migration (new directory).
+    - `src/lib/validations/post.ts` — new `optionalImageUrl` Zod
+      preprocess: empty/whitespace → `undefined` (follows existing
+      save-with-empty convention so a blank save doesn't overwrite a
+      stored URL), non-empty → `z.string().url().max(2048)`. Scheme
+      check (http/https) deliberately NOT duplicated here — it lives
+      in media-validation.ts. Applied to both `createPostSchema` and
+      `updatePostSchema`.
+    - `src/lib/posts-api.ts` — added
+      `image_url: string | null` to the client-side `Post`
+      interface with a JSDoc pointer.
+    - `src/lib/manus/media-validation.ts` — `collectMediaUrls(post)`
+      now returns `[post.image_url]` when the URL is a non-empty
+      trimmed string, `[]` otherwise. Signature simplified from
+      `Pick<Post, "image_prompt">` to `Pick<Post, "image_url">` to
+      reflect the source-of-truth correction (`image_prompt` is
+      narrative only). No dispatcher-code change needed — the
+      collector is already called with the full Post.
+    - `src/app/(app)/queue/[id]/page.tsx`:
+      - `startEdit()` seeds `image_url` into editData
+      - Edit mode: new `EditableField` under "Image Prompt" with a
+        helper line ("Public URL for publishing. Must be reachable
+        (http or https). Leave blank for text-only posts.")
+      - Read mode: `<Field label="Image URL" value={post.image_url} />`
+      - Post preview now renders the image via `<img>` with
+        `object-cover` when `image_url` is set; falls back to the
+        existing banner_text placeholder on load error (browser
+        CORS / hotlink resilience — pre-dispatch validation is the
+        real reachability gate).
+    - `src/app/api/posts/[id]/route.ts` — PATCH route's audit log
+      `before` snapshot now captures `image_prompt` and `image_url`
+      alongside the existing text fields.
+    - `docs/02-data-model.md` — Post field list gains `image_url`
+      with purpose + pointer to media-validation.ts;
+      `image_prompt` line clarified as "narrative AI input, never a
+      URL".
+    - `docs/03-ui-pages.md` — Post detail section gains an
+      "Image URL field (2026-04-23)" bullet covering edit gating,
+      operator hint text, Zod syntactic check, pre-dispatch
+      reachability check, and preview-image rendering behavior.
+    - `docs/07-ai-boundaries.md` — the previously-forward-looking
+      line about a "future `media_urls`" field replaced with
+      confirmation that `Post.image_url` has landed; clarifies the
+      AI generator populates only `image_prompt`, not `image_url`.
+    - `docs/00-architecture.md` — the Manus media handoff
+      subsection's "URL source" paragraph replaced: dispatcher hook
+      now live-sourced, no longer a no-op; still `string[]` return
+      type for future carousel growth.
+  - Where `image_url` is now accepted / displayed:
+    - Accepted at create + update (PATCH) via the Zod schemas
+    - Displayed in queue detail read mode (Field row)
+    - Editable in queue detail edit mode (EditableField + hint),
+      gated to Draft / Rejected via existing refine-after-approval
+      rule
+    - Rendered in the post preview image area (with onError
+      fallback to banner_text placeholder)
+    - Audited — PATCH route's `before` snapshot records it
+  - How dispatcher / media validation now use it:
+    - Dispatcher calls `collectMediaUrls(post)` exactly as before
+    - `collectMediaUrls` now returns `[post.image_url]` when set
+      instead of always-empty
+    - `validateMediaUrls()` runs syntactic + scheme + host-privacy
+      + reachability (HEAD with GET-Range fallback, 5s timeout,
+      3-hop redirect cap) — unchanged from the prior task
+    - On validation failure: delivery marked `failed` with
+      `[MEDIA_ERROR] <reason>`, parent post reconciled, `continue`
+      skips `dispatchToManus()` — unchanged path
+    - Log line `[manus-media] delivery=<id> platform=<p> urls=N
+      result=ok|failed issues=<reasons> action=dispatched|blocked`
+      now fires for posts that carry an image_url; text-only
+      deliveries still emit zero media lines
+  - Verification:
+    - `npx tsc --noEmit` clean
+    - `collectMediaUrls()` sanity-tested against 5 shape cases
+      (null / blank / empty / valid URL / URL with whitespace) —
+      all behaved as documented; whitespace is trimmed before
+      dispatch.
+  - What remains deferred:
+    - Real media-URL source flows — today populated by operator
+      hand-entry at the queue detail edit surface; AI image
+      generation that auto-populates `image_url` is a separate
+      future task (image-rendering provider, asset hosting).
+    - Multi-image / carousel / per-platform-variant support — the
+      return type of `collectMediaUrls()` is already `string[]`,
+      but the field is single-image; shape evolution needs a
+      column migration + collector update.
+    - File upload / object storage — no change; operators provide
+      externally-hosted URLs.
+    - Per-platform media constraints (aspect ratio, mime type,
+      size caps, video duration, carousel constraints) — still
+      out of scope.
+    - "Clear image_url" UX — following the repo-wide
+      empty-save-doesn't-overwrite convention; if operators need
+      to explicitly unset a stored URL, a small API extension can
+      handle that later.
+  - Docs updated: `docs/00-architecture.md`, `docs/02-data-model.md`,
+    `docs/03-ui-pages.md`, `docs/07-ai-boundaries.md`, `WORKLOG.md`.
 
 ### 2026-04-23
 - Task: Phase 2 hardening — Manus media handoff + public URL validation
