@@ -479,6 +479,101 @@ The actual scheduler that calls `fetchPromotionsForBrand()` on a
 cadence is **Phase 5** — the adapter is complete source-side but is
 not yet wired to an automation.
 
+### Big Wins live adapter — `src/lib/big-wins/`
+
+BigQuery-sourced (global dataset, not per-brand API). Reads from
+`shared.game_rounds` joined against `shared.users` (for username,
+brand-scoped) and `shared.games` (for name + vendor).
+
+Shipped on top of the provisional `GameRoundRow` interface while the
+platform team finishes provisioning `shared.game_rounds` — the adapter
+detects the missing table and degrades to `status: "missing"` without
+crashing, exactly like the BQ smoke test.
+
+Module map:
+- `types.ts` — `BigWinAdapterInput`, `BigWinAdapterResult`,
+  `BigWinAdapterStatus` (`ok` / `missing` / `error`),
+  `BigWinAdapterErrorCode` (`INVALID_INPUT` / `BQ_ERROR`),
+  `BigWinRow` (adapter-internal row shape with joined user + game
+  fields — used by automation-rule evaluation).
+- `query.ts` — `buildBigWinsQuery()`. Parameterized SQL via
+  `SHARED_TABLES.*`, WHERE brand + `status='settled'` +
+  `settled_at >= since` + thresholds combined by `logic` ("AND" or
+  "OR"). OR vs AND branches at build time so parameters stay clean.
+  `ORDER BY settled_at DESC LIMIT N`.
+- `normalize.ts` — `lift()` (raw row → `BigWinRow` with unwrapped
+  timestamps), `toBigWinFacts()` (`BigWinRow` → `BigWinFacts` applying
+  `maskUsername()`; falls back to `"[anon]"` on null username),
+  `buildSourceRowKey()` (derived dedupe key
+  `bq-big-win-<user>-<timestamp>-<payout>`; final `win_id`-based key
+  is a follow-up pending platform confirmation).
+- `adapter.ts` — `fetchBigWinsForBrand(input)` orchestrator.
+  Missing-table detection: `/Not found: Table/i.test(errorMessage)` →
+  `status: "missing"` without populating `error`. Never throws on
+  expected conditions.
+
+Two output layers on purpose:
+- `result.rows[]` — raw adapter rows for automation-rule eval (custom
+  ranges etc. applied in-memory caller-side).
+- `result.facts[]` — 1:1 with rows, pre-masked, matching the exact
+  `BigWinFacts` shape from `src/lib/ai/types.ts`. Ready to hand to
+  `normalizeBigWin()`.
+
+Observability line: `[big-wins] brand=<id> status=<ok|missing|error> rows=<N> facts=<N> err=<code?>`.
+
+### Hot Games live adapter — `src/lib/hot-games/`
+
+BigQuery aggregation over `shared.game_rounds` filtered by rolling
+window (`bet_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL N MINUTE)`)
+joined to `shared.games` for display metadata (name, vendor, icon,
+static RTP). Ranking: `g.rtp DESC`, tie-break on `round_count DESC`.
+Intentionally simple — observed-payout ranking is a clean follow-up
+once real data reveals whether it beats the static-RTP ordering.
+
+Unlike Big Wins (many `facts[]`), Hot Games produces ONE frozen
+snapshot per call — `result.facts` is a single `HotGamesFacts` (or
+`null` on missing/error). The **frozen-snapshot contract** from
+docs/07-ai-boundaries.md is honored here: the adapter result IS the
+snapshot; refine cycles must reuse the facts baked into
+`Post.generation_context_json` at draft creation time (not re-scan).
+
+Module map:
+- `types.ts` — `HotGamesAdapterInput` (brand, `source_window_minutes`
+  30/60/90/120, `hot_games_count` 3..10, `time_mapping: string[]`),
+  `HotGamesAdapterResult`, `HotGameRow`.
+- `query.ts` — `buildHotGamesQuery()`. Parameterized aggregation
+  grouping on `game_code` + joined game columns, `HAVING g.rtp IS NOT NULL`
+  (games without RTP can't be ranked by the static-RTP ordering).
+- `normalize.ts` — `liftHotGame()`, `validateHotGamesInput()`
+  (window enum + count range + time_mapping length + `"HH:MM"` regex +
+  strictly-ascending per operator rule), `toHotGamesFacts()` (builds
+  `ranked_games[]` with per-rank `time_slot_iso` composed from
+  operator mapping; auto-derives `time_slot_summary` like
+  `"6pm–11pm tonight"` when unset).
+- `adapter.ts` — `fetchHotGamesForBrand(input)` orchestrator. Same
+  missing-table detection as Big Wins. Validation runs before any BQ
+  call — bad input returns `status: "error"` + `INVALID_INPUT`
+  immediately.
+
+Observability line: `[hot-games] brand=<id> status=<ok|missing|error> rows=<N> window=<N>m err=<code?>`.
+
+### Verification surfaces (both BQ adapters)
+
+- Admin dev routes gated by `ALLOW_ADMIN_BQ_PREVIEW=true` (shared env
+  flag — single switch controls both):
+  - `POST /api/big-wins/fetch-preview`
+  - `POST /api/hot-games/fetch-preview`
+- CLI scripts (runnable via `tsx`, bypass the route gate — operator's
+  shell already authenticates):
+  - `npm run big-wins:preview -- <brand_id> [--min-payout N] [--min-multiplier N] [--logic AND|OR] [--since ISO] [--limit N] [--currency CCY] [--self-check]`
+  - `npm run hot-games:preview -- <brand_id> [--window 30|60|90|120] [--count 3..10] [--mapping HH:MM,HH:MM,...] [--summary TEXT] [--self-check]`
+- Both CLIs auto-run a **normalizer self-check** when live BQ returns
+  `status: "missing"` — hand-rolls a row through the lift → normalize
+  pipeline and asserts the produced facts match the shape from
+  `src/lib/ai/fixtures/big-win.ts` / `hot-games.ts`. This means
+  shape regressions are caught today, before `shared.game_rounds`
+  lands.
+
 ### External Data Source — Shared BigQuery
 Primary operational facts come from a shared BigQuery dataset maintained by the platform team.
 Tables: `shared.users`, `shared.transactions`, `shared.game_rounds`, `shared.games`.

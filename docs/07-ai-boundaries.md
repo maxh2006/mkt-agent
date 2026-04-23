@@ -295,6 +295,13 @@ maintained by the platform team. AI consumes pre-computed facts — not raw quer
 - AI never executes SQL, never sees raw rows, never fetches data itself.
 - Column references are centralized in a single adapter. Schema changes are
   absorbed there, not in the AI input layer.
+- Live adapters shipped 2026-04-23:
+  - `src/lib/big-wins/` — produces `BigWinFacts[]` (pre-masked)
+  - `src/lib/hot-games/` — produces a single frozen `HotGamesFacts` snapshot
+  - Both are missing-table-tolerant (`status: "missing"`) while
+    `shared.game_rounds` is still being provisioned by the platform team.
+    Normalizer self-checks exercise the AI-fact shape in isolation, so
+    shape regressions are caught today, independent of live-table timing.
 
 ### Running Promotions live source
 

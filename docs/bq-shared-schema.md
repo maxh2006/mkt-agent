@@ -197,6 +197,15 @@ for Big Wins and Hot Games automation adapters. Table existence is
 smoke-tested; constant already present in `SHARED_TABLES` so adapter
 code can be written ahead of the table landing.
 
+**Consumers** (shipped 2026-04-23, missing-table-tolerant until the
+table lands — they return `status: "missing"` rather than throwing):
+- [`src/lib/big-wins/`](../src/lib/big-wins/) —
+  `fetchBigWinsForBrand()` → typed `BigWinAdapterResult` (raw rows +
+  AI-ready `BigWinFacts[]`).
+- [`src/lib/hot-games/`](../src/lib/hot-games/) —
+  `fetchHotGamesForBrand()` → typed `HotGamesAdapterResult` with a
+  single frozen `HotGamesFacts` snapshot.
+
 ### `shared.games`
 
 - `id`

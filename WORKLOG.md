@@ -24,7 +24,106 @@ Current execution priority (per ROADMAP.md):
 
 
 
+
 ## Done Tasks
+
+### 2026-04-23
+- Task: Phase 3 — Big Wins + Hot Games BigQuery adapters
+  - Status: Complete
+  - Goal: ship both live BQ adapters on top of the provisional
+    `shared.game_rounds` architecture so they are drop-in-ready the
+    moment the table lands. Both degrade gracefully
+    (`status: "missing"` — do not crash) while the table is absent.
+  - Files added (under `src/lib/big-wins/` + `src/lib/hot-games/`):
+    - Each module: `types.ts`, `query.ts`, `normalize.ts`, `adapter.ts`.
+    - Big Wins: parameterized SQL joining `game_rounds` + `users` +
+      `games`, WHERE brand + `status='settled'` + thresholds combined
+      by `logic` ("AND"/"OR") — OR/AND branches at SQL-build time to
+      keep parameters clean. Normalizer applies `maskUsername()` and
+      falls back to `"[anon]"` on null username. `buildSourceRowKey()`
+      uses `bq-big-win-<user>-<timestamp>-<payout>` until platform
+      confirms a real `win_id` column exists.
+    - Hot Games: aggregation over `game_rounds` joined to
+      `shared.games`, rolling window via
+      `TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL N MINUTE)`,
+      `HAVING g.rtp IS NOT NULL`, ranking `g.rtp DESC, round_count DESC`.
+      Input validation runs BEFORE any BQ call (window enum, count
+      3..10, time_mapping length + `"HH:MM"` regex + strictly-
+      ascending per operator rule). Normalizer builds a single frozen
+      `HotGamesFacts` snapshot — frozen-snapshot contract from
+      docs/07-ai-boundaries.md is honored.
+    - Both adapters: missing-table detection via
+      `/Not found: Table/i.test(errorMessage)` — same pattern as
+      `scripts/bq-smoke-test.ts:195`. Degrade to `status: "missing"`
+      without populating `error`; non-missing throws → `status: "error"`
+      with `BQ_ERROR`. Never throws on expected conditions.
+    - Admin dev routes at `/api/big-wins/fetch-preview` and
+      `/api/hot-games/fetch-preview`, gated by shared
+      `ALLOW_ADMIN_BQ_PREVIEW=true` env + admin role.
+    - CLI scripts
+      (`npm run big-wins:preview -- <brand_id> [flags]`,
+      `npm run hot-games:preview -- <brand_id> [flags]`) with a
+      `--self-check` flag that hand-rolls a raw row through
+      `lift → normalize → toFacts` and asserts the shape against the
+      AI-pipeline fact interfaces. Auto-runs self-check when adapter
+      returns `status: "missing"` — so shape regressions are caught
+      today, independent of when `shared.game_rounds` lands.
+  - Output layers (per adapter):
+    - `result.rows[]` — raw adapter rows for automation-rule eval
+      (custom-rule range checks applied caller-side).
+    - Big Wins `result.facts[]` — 1:1 with rows, pre-masked, matching
+      the exact `BigWinFacts` shape from `src/lib/ai/types.ts`.
+    - Hot Games `result.facts` — single frozen `HotGamesFacts`
+      snapshot (or null on missing/error).
+  - Files modified:
+    - `package.json` — added `big-wins:preview` + `hot-games:preview`
+      tsx scripts.
+    - `.env.production.example` — new `ALLOW_ADMIN_BQ_PREVIEW`
+      (default `false`, shared flag for both BQ preview routes).
+    - `docs/00-architecture.md` — new "Big Wins live adapter" +
+      "Hot Games live adapter" subsections + shared "Verification
+      surfaces" block, placed directly after the Running Promotions
+      adapter subsection.
+    - `docs/04-automations.md` — "Live adapter" pointers under both
+      Big Wins + Hot Games field-mapping sections.
+    - `docs/07-ai-boundaries.md` — Shared BigQuery Data Source
+      section updated to note live adapters now exist + are
+      missing-table-tolerant.
+    - `docs/bq-shared-schema.md` — "Consumers" block under
+      `shared.game_rounds` listing the new adapter modules.
+  - Verification captured:
+    - `npx tsc --noEmit` clean.
+    - Big Wins CLI live run against brand `c77da037-...` with
+      `BQ_IMPERSONATE_SA=mkt-agent-bq@mktagent-493404...` —
+      `status=missing`, `[big-wins] ... (game_rounds not yet provisioned)`
+      log line, normalizer self-check 9/9 assertions passed, exit 0.
+    - Hot Games CLI live run against same brand — `status=missing`,
+      `[hot-games] ... window=120m (game_rounds not yet provisioned)`,
+      self-check 9/9 passed, exit 0.
+    - Hot Games invalid-input path — `time_mapping.length=3` vs
+      `hot_games_count=4` correctly returned `status=error`,
+      `error.code=INVALID_INPUT`, exit 1, no BQ round-trip.
+    - `--self-check` only — `npm run big-wins:preview -- brand-x
+      --self-check` exit 0 with no BQ auth, confirms shape
+      verification runs standalone.
+  - What's ready immediately vs waits on live `game_rounds`:
+    - Ready now: module shape, typecheck, SQL guardrail coverage,
+      `maskUsername()` wiring, frozen-snapshot assembly, input
+      validation, missing-table tolerance, admin preview routes,
+      CLI verification. AI pipeline can consume the facts today
+      against hand-rolled rows.
+    - Waits on table: actual row counts, observed payout ratios,
+      real dedupe-key column names. Schema reconciliation — re-run
+      `npm run bq:smoke`, diff `fixtures/bq-shared-schema.json`,
+      adjust `GameRoundRow` / adapter SQL if column names drift.
+  - Out of scope (explicit, documented):
+    - Phase 5 scheduler driving these on automation-rule cadence.
+    - Observed-payout ranking for Hot Games (static RTP for now).
+    - Currency lookup from `shared.brands` (adapter accepts arg;
+      default `"PHP"`).
+    - Final `source_row_key` strategy pending platform `win_id`
+      confirmation.
+  - No schema migration. No IAM changes. No UI changes.
 
 ### 2026-04-22
 - Task: Phase 3 — Running Promotions live API adapter

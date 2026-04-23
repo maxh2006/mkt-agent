@@ -47,10 +47,14 @@ Platform is still being built. Columns may be renamed or added.
 - username → `shared.users.username` scoped by `brand_id` (pending platform team confirmation; see follow-ups). Masked via `maskUsername()` before display.
 - dedupe key: current config options (`win_id`, `transaction_id`) do not map directly to `shared.game_rounds` columns — flagged as a follow-up, likely derived from `user_id + bet_at + payout_amount`.
 
+**Live adapter** (2026-04-23): `src/lib/big-wins/` — `fetchBigWinsForBrand(input)` produces both `rows[]` (for custom-rule range checks) and `facts[]` (AI-ready `BigWinFacts` with `maskUsername()` applied). Missing-table tolerant while `shared.game_rounds` is still being provisioned. See `docs/00-architecture.md` → "Big Wins live adapter" for module map.
+
 ### Hot Games field mapping
 - per-game RTP aggregated from `shared.game_rounds` over `source_window_minutes`
 - joined to `shared.games` for name, icon, vendor
 - partition-friendly filter on `bet_at`
+
+**Live adapter** (2026-04-23): `src/lib/hot-games/` — `fetchHotGamesForBrand(input)` produces a single frozen `HotGamesFacts` snapshot per call. Ranking is static `g.rtp DESC` with `round_count` tie-break (observed-payout ranking is a documented follow-up). Input validation enforces strictly-ascending `time_mapping[]` before any BQ call. See `docs/00-architecture.md` → "Hot Games live adapter" for module map.
 
 ### Multi-brand identity
 The same username (e.g. `maxtest`) can exist across brands. The effective identity is `(username, brand_id)`. All joins and dedupes must be brand-scoped.
