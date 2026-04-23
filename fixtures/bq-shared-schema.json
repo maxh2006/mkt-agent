@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-04-22T10:55:51.927Z",
+  "generated_at": "2026-04-23T03:50:39.218Z",
   "billing_project": "mktagent-493404",
   "shared_project": "newgen-492518",
   "shared_dataset": "shared",
@@ -77,7 +77,7 @@
         "channel": "Smart",
         "phone_verified": false,
         "updated_at": {
-          "value": "2026-04-21T07:14:24.936429000Z"
+          "value": "2026-04-22T14:16:22.303414000Z"
         },
         "email_verified": false,
         "is_active": true,
@@ -109,7 +109,7 @@
       "table": "transactions",
       "fully_qualified": "`newgen-492518.shared.transactions`",
       "status": "ok",
-      "row_count": 17,
+      "row_count": 19,
       "column_count": 13,
       "columns": [
         "updated_at",

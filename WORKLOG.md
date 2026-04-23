@@ -16,9 +16,160 @@ Current execution priority (per ROADMAP.md):
 
 ## Ongoing Tasks
 
+- **⏳ REMINDER — Top up Anthropic credits** (console.anthropic.com → Billing)
+  - Blocks: real AI generation in prod (Anthropic returns `403 Request not allowed` until credits exist)
+  - Current account plan: Evaluation access (free, zero credits)
+  - Ballpark: $5 minimum top-up ≈ 150+ full Event generate-drafts runs at sonnet-4.6 rates
+  - When done: say "credits added" to the session → resume Phase 4 validation
+
 
 
 ## Done Tasks
+
+### 2026-04-22
+- Task: Phase 3 — Running Promotions live API adapter
+  - Status: Complete
+  - Goal: fetch live per-brand promo data from the brand's own API,
+    validate defensively, normalize to `PromoFacts[]`, and expose it as
+    a drop-in replacement for `promoFixture()` so the existing AI
+    pipeline can consume real source data.
+  - Files added (`src/lib/promotions/`):
+    - `types.ts` — `PromoAdapterResult`, `PromoAdapterErrorCode`
+      (`BRAND_NOT_CONFIGURED` / `NETWORK_ERROR` / `HTTP_ERROR` /
+      `PARSE_ERROR` / `SCHEMA_ERROR`), `PromoIntegrationConfig`,
+      `PromoAdapterSkippedRow`.
+    - `load-integration.ts` — Prisma helper reading the three
+      integration fields from `Brand.integration_settings_json`;
+      returns `null` (treated as `BRAND_NOT_CONFIGURED`) when either
+      required field is absent/blank.
+    - `client.ts` — `fetchPromotionsRaw(config)`. Stateless native
+      `fetch()`, does not interpret status / does not parse JSON /
+      does not throw on non-2xx. Sends `X-Brand-Code` when
+      `external_brand_code` is configured. URL constructed via
+      `new URL(endpoint, base)` so absolute + relative both work.
+      Same small-boundary shape as `src/lib/manus/client.ts`.
+    - `normalize.ts` — tolerant parser. Accepts both `{data: []}`
+      envelope and bare array. Required-for-inclusion fields:
+      `id` / `promo_id` / `promoId` (coerced to string) +
+      `title` / `name` (trimmed non-empty). Optional fields mapped
+      best-effort across common aliases. Malformed rows land in
+      `skipped[]` with a reason; batch survives.
+    - `adapter.ts` — `fetchPromotionsForBrand(brandId)` orchestrator.
+      Never throws on expected conditions; all surface through
+      `result.error`. `error` + `promos` not mutually exclusive —
+      SCHEMA_ERROR may still ship a subset of valid promos.
+      One log line per fetch:
+      `[promotions] brand=<id> endpoint=<url> status=<http> count=<N> skipped=<M> err=<code?>`.
+  - Verification surfaces:
+    - `src/app/api/promotions/fetch-preview/route.ts` — admin dev
+      route gated by `ALLOW_ADMIN_PROMO_PREVIEW=true` env + admin
+      role (same pattern as `/api/ai/generate-from-fixture`).
+    - `scripts/promotions-preview.ts` — CLI script runnable as
+      `npm run promotions:preview -- <brand_id>`; prints summary +
+      full JSON dump, exit code 1 on any `error` field.
+  - Config updates:
+    - `package.json` — added `promotions:preview` npm script.
+    - `.env.production.example` — documented
+      `ALLOW_ADMIN_PROMO_PREVIEW="false"` with rationale.
+  - Docs updated:
+    - `docs/00-architecture.md` — new "Running Promotions live
+      adapter" subsection with module map + verification surfaces +
+      AI pipeline hookup snippet; updated AI module-map note that
+      promo is now live-sourced; updated source-types list to
+      reflect live adapter status.
+    - `docs/02-data-model.md` — Brand.integration_settings_json
+      bullet expanded with adapter consumption notes.
+    - `docs/07-ai-boundaries.md` — new "Running Promotions live
+      source" subsection under Shared BigQuery clarifying per-brand
+      API (not BQ) source + backend-side validation boundary.
+  - Verification captured:
+    - `npx tsc --noEmit` clean after a narrowing fix (added
+      `kind: "ok"` discriminator to `PromoFetchRawResult` so
+      adapter can narrow against the `network_error` sibling).
+    - Normalizer self-check with 4 payloads (envelope with good +
+      malformed row; bare array with mixed field names + numeric
+      id coerced to string; invalid JSON; unknown object shape)
+      produced the expected `ok` / `parse_error` / `schema_error`
+      branches with the right `promos[]` + `skipped[]` splits.
+  - Out of scope here (explicit, documented in plan + docs):
+    - Scheduler that calls the adapter on a cadence (Phase 5).
+    - Big Wins / Hot Games live adapters (still waiting on
+      platform team to provision `shared.game_rounds`).
+    - Retry/backoff/cache tuning — upstream reliability unknown;
+      add when real traffic justifies it.
+    - Schema hardening — tighten `normalize.ts` once platform
+      publishes the final contract; `skipped[]` output from early
+      production runs will reveal actual shape variance.
+  - No schema migration, no IAM changes, no UI changes.
+
+
+
+### 2026-04-22
+- Task: Production hotfix — revert AI generation to stub until Anthropic credits are active
+  - Status: Complete
+  - Context:
+    - First enabled `AI_PROVIDER=anthropic` on the VM earlier today.
+      User clicked Generate Drafts on event "test event" (id
+      `cmoa17kvq0000z30lzat1v7gs`, brand `brand_test_01`) — all slots
+      failed with `403 "Request not allowed"`. Direct Anthropic API
+      ping from the VM also returned 403 on
+      `GET /v1/models` (lowest-privilege endpoint). Root cause: the
+      Anthropic account is on the free "Evaluation access" plan with
+      zero API credits purchased. Anthropic rejects all API calls
+      until credits exist.
+    - Our app's per-slot try/catch surfaced the error cleanly; no
+      drafts were silently stubbed, no drafts were inserted for that
+      event slot. Correct failure behavior.
+  - What was changed (operational only — no code changes):
+    - `/opt/mkt-agent/.env` on the VM:
+      - `AI_PROVIDER=anthropic` → **`AI_PROVIDER=stub`**
+      - `ANTHROPIC_API_KEY=<key>` — left in place, dormant (code only
+        reads it when `AI_PROVIDER=anthropic`)
+      - `ANTHROPIC_MODEL=claude-sonnet-4-6` — left in place, dormant
+    - `sudo pm2 restart mkt-agent --update-env` ran clean; PM2 pid
+      698394, online, Next.js Ready in 258ms.
+  - Verification captured:
+    - `.env` inspection: `AI_PROVIDER=stub` ✓
+    - PM2 status: online, uptime 2m post-restart ✓
+    - Dispatcher smoke `POST /api/jobs/dispatch` → 200 + expected
+      dry-run payload ✓
+    - Recent AI-generator log lines: only pre-rollback entries (old
+      403 lines from the Anthropic attempt + older stub runs from
+      before Anthropic was ever enabled). **Zero fresh AI activity
+      since the rollback restart** → confirms no Anthropic calls in
+      the current process.
+  - Anthropic support preserved in code:
+    - `src/lib/ai/client.ts` provider switch unchanged
+    - `src/lib/ai/serialize-prompt.ts`, `src/lib/ai/parse-response.ts`
+      still shipped
+    - `@anthropic-ai/sdk` still installed
+    - Re-enabling is purely an env + PM2 restart — no build, no
+      deploy, no code change
+  - **Flip-back procedure** (once credits are active — 60 seconds):
+    1. SSH to the VM and flip the env line:
+       ```
+       sudo sed -i 's/^AI_PROVIDER=.*/AI_PROVIDER=anthropic/' /opt/mkt-agent/.env
+       ```
+    2. Restart PM2 with `--update-env`:
+       ```
+       sudo pm2 restart mkt-agent --update-env
+       ```
+    3. Verify credits unlocked (direct Anthropic ping — cheapest
+       endpoint, model listing):
+       ```
+       KEY=$(sudo grep ^ANTHROPIC_API_KEY /opt/mkt-agent/.env | cut -d= -f2-)
+       curl -sS -w "\nhttp_code=%{http_code}\n" https://api.anthropic.com/v1/models \
+         -H "x-api-key: $KEY" -H "anthropic-version: 2023-06-01" | head -20
+       ```
+       - `http_code=200` → proceed; `403 Request not allowed` → credits
+         not yet propagated, wait ~1 min + retry
+    4. User clicks Generate Drafts on an Event in the UI.
+    5. Pull PM2 logs + DB drafts → quality review.
+  - Docs updated:
+    - `docs/08-deployment.md` — new "AI provider toggle (safe prod
+      rollback)" subsection under the operational runbook
+    - `docs/07-ai-boundaries.md` — small note clarifying stub is a
+      valid prod fallback
 
 ### 2026-04-22
 - Task: Phase 3 — BQ architecture hardening for game_rounds (not-yet-live table)

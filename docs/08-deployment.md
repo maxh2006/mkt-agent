@@ -71,6 +71,57 @@ sudo bash /opt/mkt-agent/scripts/deploy.sh
 
 ---
 
+## AI provider toggle (safe prod rollback)
+
+The AI text-generation provider is env-switched at
+`src/lib/ai/client.ts` — no code path is hard-wired. This is the
+escape hatch if the Anthropic account hits a billing / rate-limit /
+outage wall: flip back to `stub` in 60 seconds without any code
+change or deploy.
+
+**Current prod provider** (as of 2026-04-22): `stub` — dormant
+Anthropic envs left in place pending credit purchase. See WORKLOG
+entry 2026-04-22 for context.
+
+### To flip to Anthropic (once credits are active)
+
+```bash
+# Flip the single env line
+sudo sed -i 's/^AI_PROVIDER=.*/AI_PROVIDER=anthropic/' /opt/mkt-agent/.env
+
+# PM2 must re-read env on restart
+sudo pm2 restart mkt-agent --update-env
+
+# Verify credits unlocked (Anthropic's lowest-privilege endpoint)
+KEY=$(sudo grep ^ANTHROPIC_API_KEY /opt/mkt-agent/.env | cut -d= -f2-)
+curl -sS -w "\nhttp_code=%{http_code}\n" https://api.anthropic.com/v1/models \
+  -H "x-api-key: $KEY" -H "anthropic-version: 2023-06-01" | head -20
+# 200 → proceed; 403 "Request not allowed" → credits not yet propagated, retry
+```
+
+### To flip back to stub
+
+```bash
+sudo sed -i 's/^AI_PROVIDER=.*/AI_PROVIDER=stub/' /opt/mkt-agent/.env
+sudo pm2 restart mkt-agent --update-env
+```
+
+**What stub does**: `src/lib/ai/client.ts#stubProvider()` returns
+deterministic placeholder samples shaped like real Anthropic output
+(`headline`, `caption` prefixed with `(STUB sample N of M)`, `cta`,
+`banner_text`, `image_prompt`). Drafts still land in Content Queue,
+still carry `generation_context_json` metadata, still respect sample
+grouping. Marked `provider=stub` and `ai_dry_run=true` in the
+metadata so operators can filter them out. **Zero external API
+calls, zero cost.** Safe to leave in prod indefinitely while any
+provider-side issue is being resolved.
+
+`ANTHROPIC_API_KEY` and `ANTHROPIC_MODEL` can stay in `/opt/mkt-agent/.env`
+while `AI_PROVIDER=stub` — the code only reads them when the provider
+switch selects the `anthropic` case. No cost, no side effect.
+
+---
+
 ## GCP Cloud Scheduler — dispatcher trigger
 
 The Manus dispatcher (`src/lib/manus/dispatcher.ts`) is a *pull* worker: it

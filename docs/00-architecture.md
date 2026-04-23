@@ -321,7 +321,10 @@ Post[] (draft, grouped by sample_group_id)
   `NormalizedGenerationInput` from raw per-source facts.
 - `fixtures/*` — mock per-source facts for dev. Live source adapters
   (BigQuery for big_win + hot_games, per-brand API for promo) land in
-  Phase 3 work and will produce the exact same `*Facts` shapes.
+  Phase 3 work and will produce the exact same `*Facts` shapes. The
+  `promo` live adapter ships as `src/lib/promotions/` (see below);
+  big_win + hot_games remain fixture-only until
+  `shared.game_rounds` is provisioned.
 - `prompt-builder.ts` — builds a structured `StructuredPrompt` with
   labeled sections (positioning, voice, audience, language style,
   notes, restrictions, hashtags, sample captions, platform hint,
@@ -377,7 +380,9 @@ Post[] (draft, grouped by sample_group_id)
 
 **Source types supported** (Phase 4 MVP):
 - `big_win` — 3 samples default (BigQuery-shaped facts; fixture only)
-- `promo` — 3 samples default (per-brand API-shaped; fixture only)
+- `promo` — 3 samples default (per-brand API — **live adapter** in
+  `src/lib/promotions/`, with `src/lib/ai/fixtures/promo.ts` as a
+  drop-in replaceable fallback)
 - `hot_games` — 2 samples default (BigQuery-shaped scan; fixture only)
 - `event` — 1 sample per (occurrence × platform) default (real Event
   rows, live)
@@ -404,6 +409,75 @@ visual/tone/presentation, the generator's `generation_context_json`
 snapshot is the same shape the existing refine modal already expects —
 especially the Hot Games `type: "hot_games_snapshot"` + `ranked_games`
 fields, which the queue-inserter writes for every hot_games draft.
+
+### Running Promotions live adapter — `src/lib/promotions/`
+
+Pulls live promo data from each brand's own API. Per-brand (not
+BigQuery), so it ships independently of the `shared.game_rounds` work
+that gates big_win + hot_games. Consumes
+`Brand.integration_settings_json` fields (`api_base_url`,
+`promo_list_endpoint`, `external_brand_code`). Produces
+`PromoFacts[]` — the exact shape that
+`src/lib/ai/source-normalizers/promo.ts#normalizePromo()` consumes.
+
+Module map (everything under `src/lib/promotions/`):
+- `types.ts` — `PromoAdapterResult`, `PromoAdapterErrorCode`
+  (`BRAND_NOT_CONFIGURED` / `NETWORK_ERROR` / `HTTP_ERROR` /
+  `PARSE_ERROR` / `SCHEMA_ERROR`), `PromoIntegrationConfig`.
+- `load-integration.ts` — thin Prisma helper. Reads the three
+  integration fields from `Brand.integration_settings_json`; returns
+  `null` (treated as `BRAND_NOT_CONFIGURED`) when either required
+  field is absent or blank.
+- `client.ts` — `fetchPromotionsRaw(config)`. Native `fetch()`,
+  stateless, does not interpret HTTP status / does not parse JSON /
+  does not throw on non-2xx. Sends `X-Brand-Code` when
+  `external_brand_code` is configured. Constructs the URL via
+  `new URL(promo_list_endpoint, api_base_url)` so both absolute and
+  relative endpoint values work. Same small-boundary shape as
+  `src/lib/manus/client.ts`.
+- `normalize.ts` — tolerant per-row parser. Accepts **both** upstream
+  shapes: `{ data: Promotion[] }` envelope and bare `Promotion[]`.
+  Required-for-inclusion fields: `id` (or `promo_id` / `promoId`) +
+  `title` (or `name`). Optional fields mapped best-effort:
+  `mechanics` / `description` / `summary` → `mechanics`;
+  `reward` / `prize` → `reward`;
+  `period_start` / `startsAt` / `start_date` → `period_start`
+  (ISO-coerced); same pattern for `period_end`; `min_deposit` /
+  `minimum_deposit` → `min_deposit`; `terms` / `terms_summary` /
+  `tnc` → `terms_summary`. Malformed rows land in `skipped[]`
+  with a reason — batch survives.
+- `adapter.ts` — `fetchPromotionsForBrand(brandId)` orchestrator.
+  Never throws on expected conditions; all surface through
+  `result.error`. `error` + `promos` are **not** mutually exclusive
+  (SCHEMA_ERROR may still return a subset of valid promos for
+  partial-ingest recovery). Emits one log line per call:
+  `[promotions] brand=<id> endpoint=<url> status=<http> count=<N> skipped=<M> err=<code?>`.
+
+Verification surfaces:
+- Admin dev route `POST /api/promotions/fetch-preview` — gated by
+  `ALLOW_ADMIN_PROMO_PREVIEW=true` env + admin role. Returns the raw
+  `PromoAdapterResult`. Same gating pattern as
+  `/api/ai/generate-from-fixture`.
+- CLI script `npm run promotions:preview -- <brand_id>` — runs the
+  adapter directly, prints a summary + full JSON dump. Exit code 1
+  on any `error` field, 0 otherwise.
+
+AI pipeline hookup (same shape the existing fixture produces, so it's
+drop-in):
+
+```ts
+const res = await fetchPromotionsForBrand(brandId);
+for (const facts of res.promos) {
+  for (const platform of targetPlatforms) {
+    const input = normalizers.normalizePromo({ brand, facts, platform });
+    await runGeneration({ input, created_by: "system" });
+  }
+}
+```
+
+The actual scheduler that calls `fetchPromotionsForBrand()` on a
+cadence is **Phase 5** — the adapter is complete source-side but is
+not yet wired to an automation.
 
 ### External Data Source — Shared BigQuery
 Primary operational facts come from a shared BigQuery dataset maintained by the platform team.

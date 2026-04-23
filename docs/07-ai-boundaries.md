@@ -183,6 +183,19 @@ reusable non-rule supporting library.
   combo is reliable enough for current output shape; tool-use is
   lower priority.
 
+### Stub provider as a valid prod fallback
+
+`AI_PROVIDER=stub` (the default) is a fully-supported production
+configuration — not just a dev mode. If Anthropic is unreachable for
+any reason (billing, outage, rate-limit, account issue), flipping
+`AI_PROVIDER` back to `stub` + `pm2 restart --update-env` keeps Generate
+Drafts functional with deterministic placeholder samples until the
+Anthropic-side issue clears. Drafts produced under the stub are clearly
+marked (`(STUB sample N of M)` in captions, `provider=stub` +
+`ai_dry_run=true` in `generation_context_json`) so operators can filter
+them out of review queues. See docs/08-deployment.md → "AI provider
+toggle" for the exact commands.
+
 ---
 
 ## Output Contract
@@ -282,6 +295,25 @@ maintained by the platform team. AI consumes pre-computed facts — not raw quer
 - AI never executes SQL, never sees raw rows, never fetches data itself.
 - Column references are centralized in a single adapter. Schema changes are
   absorbed there, not in the AI input layer.
+
+### Running Promotions live source
+
+Unlike Big Wins + Hot Games, Running Promotions does **not** come from
+the shared BigQuery dataset — each brand has its own promo API. The
+live adapter (`src/lib/promotions/`, landed 2026-04-22) reads
+`api_base_url` + `promo_list_endpoint` (+ optional
+`external_brand_code`) from `Brand.integration_settings_json` and
+returns `PromoFacts[]` — the exact shape the fixture at
+`src/lib/ai/fixtures/promo.ts` produces. Callers loop over the
+returned promos and feed each through the existing
+`normalizePromo()` normalizer, so nothing downstream changes.
+
+The AI layer is still source-clean: the adapter runs backend-side,
+validates defensively, sends nothing to the model until normalized
+`PromoFacts` are handed off through the normal generation pipeline.
+The fixture is kept and is drop-in replaceable with
+`fetchPromotionsForBrand()` — useful for dev and for admin-triggered
+fixture runs from `/api/ai/generate-from-fixture`.
 
 ### Username in Big Wins content
 Username is a display handle chosen by the user (not PII under the guide's
