@@ -137,8 +137,12 @@ deliveries to Manus. Triggered by POST `/api/jobs/dispatch` (secret-gated via
    concurrent dispatchers. Future-dated `scheduled` rows become eligible the
    moment `scheduled_for` passes and transition directly to `publishing`.
 2. Loads the parent posts in a single batch query (no N+1).
-3. Builds a flat `ManusDispatchPayload` per claimed delivery from the approved
-   post fields (no regeneration, no re-approval, no source re-run).
+3. Builds a `ManusDispatchPayload` per claimed delivery from the approved
+   post fields (no regeneration, no re-approval, no source re-run). The
+   payload carries both a flat `content` block (backward-safe) AND a
+   platform-shaped `publish_payload` produced by
+   [`buildPublishPayload()`](../src/lib/manus/platform-payload.ts) — see
+   "Manus platform payload mapping" below.
 4. Hands each payload to `dispatchToManus()` at `src/lib/manus/client.ts`.
 
 The Manus client is a thin, replaceable boundary. If `MANUS_AGENT_ENDPOINT` is
@@ -311,6 +315,79 @@ filter-by-code work.
 **Out of scope (Phase 2 closed).** Retry with exponential backoff,
 approved-payload snapshot (deferred — no refine-after-approval in MVP),
 multi-platform posts.
+
+### Manus platform payload mapping (2026-04-23)
+
+Between the generic delivery row and the Manus HTTP handoff, the
+dispatcher routes the approved content through a per-platform mapper at
+[`src/lib/manus/platform-payload.ts`](../src/lib/manus/platform-payload.ts).
+The mapper is pure, typed, dispatcher-independent, and never rewrites
+approved content — it only rearranges existing fields into slots each
+platform is most likely to want.
+
+**`ManusDispatchPayload` shape** (after 2026-04-23):
+
+```
+{
+  post_id, delivery_id, platform, brand, scheduled_for, source, retry_count,
+  content:          { headline, caption, cta, banner_text, image_prompt },  // unchanged flat block
+  publish_payload:  PublishPayload,                                          // NEW discriminated union
+}
+```
+
+`content` is preserved as-is for backward safety — stub/dry-run code
+and any existing Manus-side readers that only consume it continue to
+work. `publish_payload` is the recommended forward-path consumption
+target.
+
+**Per-platform shapes** (all fields `| null` when source was empty):
+
+| Platform | Primary text field | Supporting fields | Notes |
+|---|---|---|---|
+| `facebook` | `primary_text` (caption → headline fallback) | `headline`, `call_to_action`, `banner_text`, `image_prompt` | Caption-focused; headline retained for ads-like posts |
+| `instagram` | `caption` (caption → headline fallback) | `call_to_action`, `banner_text`, `image_prompt` | Caption-focused; hashtags stay inline in caption (AI layer already baked them in) |
+| `twitter` | `tweet_text` (caption → headline fallback) | `call_to_action`, `image_prompt` | No `banner_text` — X has no native overlay; burn into media at render time |
+| `tiktok` | `caption` (caption → headline fallback) | `call_to_action`, `banner_text`, `image_prompt` | Media-first; caption shapes as supporting text; `image_prompt` is narrative anchor, not final video |
+| `telegram` | `text` (caption → headline fallback) | `headline`, `call_to_action`, `banner_text`, `image_prompt` | No `parse_mode` hint — plain text only; HTML/Markdown support deferred until AI content escape-safety is confirmed |
+
+**Observability.** `buildPublishPayload()` emits one line per call:
+
+```
+[manus-payload] delivery=<id> platform=<p> mapper=<p> present=<a,b,...> omitted=<c,d,...>
+```
+
+No content values in the log — operators inspect actual content via
+the Delivery Status modal. `present`/`omitted` surfaces why a field
+was left empty (the source Post field was null or empty after trim).
+
+**What this layer intentionally does NOT do.**
+
+- No character-count enforcement (e.g. Twitter 280). Text is passed
+  through verbatim — content validation is a separate concern and not
+  yet defined.
+- No hashtag normalization or count enforcement. Hashtags are already
+  inline in the AI-generated caption; we preserve them there.
+- No media URL verification or hosting. `image_prompt` is a narrative
+  pass-through reference; final media pipeline (asset hosting,
+  public-URL validation, per-platform format rules) is the next Manus
+  hardening task.
+- No mutation of approved content. The mapper picks first-non-empty
+  between `caption` and `headline` for the platform's primary text
+  slot but never modifies the string (no trimming, no hashtag moving,
+  no casing changes).
+
+**Extension pattern.** Adding a new platform means:
+
+1. Add the value to the Prisma `Platform` enum (migration).
+2. Declare a `XxxPublishPayload` interface in `platform-payload.ts`
+   with `platform: "xxx"` discriminator.
+3. Add to the `PublishPayload` union.
+4. Write `mapXxx(source)` + add a case to `buildPublishPayload()`'s
+   switch. The `_exhaustive: never` default forces TypeScript to
+   fail if step 4 is skipped.
+
+No dispatcher change, no callback change, no retry change — the
+generic envelope absorbs the new platform transparently.
 
 ### AI content generator
 

@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { dispatchToManus } from "./client";
+import { buildPublishPayload } from "./platform-payload";
 import type { DispatcherSummary, ManusDispatchPayload } from "./types";
 
 /**
@@ -86,6 +87,21 @@ export async function runManusDispatcher(options: { batchSize?: number } = {}): 
       continue;
     }
 
+    const content = {
+      headline: post.headline,
+      caption: post.caption,
+      cta: post.cta,
+      banner_text: post.banner_text,
+      image_prompt: post.image_prompt,
+    };
+
+    // Shape the platform-specific publish payload. Pure function; emits
+    // one [manus-payload] log line per dispatch showing present/omitted
+    // slots (no content values). Does not mutate `content`.
+    const publish_payload = buildPublishPayload(row.platform, content, {
+      delivery_id: row.id,
+    });
+
     const payload: ManusDispatchPayload = {
       post_id: post.id,
       delivery_id: row.id,
@@ -94,13 +110,8 @@ export async function runManusDispatcher(options: { batchSize?: number } = {}): 
         id: post.brand.id,
         name: post.brand.name,
       },
-      content: {
-        headline: post.headline,
-        caption: post.caption,
-        cta: post.cta,
-        banner_text: post.banner_text,
-        image_prompt: post.image_prompt,
-      },
+      content,
+      publish_payload,
       scheduled_for: row.scheduled_for ? row.scheduled_for.toISOString() : null,
       source: {
         post_type: post.post_type,

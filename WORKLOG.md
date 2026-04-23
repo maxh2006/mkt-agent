@@ -26,7 +26,90 @@ Current execution priority (per ROADMAP.md):
 
 
 
+
 ## Done Tasks
+
+### 2026-04-23
+- Task: Phase 2 hardening — Manus platform-specific handoff payload mapping
+  - Status: Complete
+  - Goal: inject a platform-aware shaping step between the generic
+    delivery row and the Manus handoff so each target platform gets
+    a payload shape it's most likely to need — without redesigning
+    the dispatcher, callback, or retry flow. Mapper is pure, typed,
+    and shared with no infra changes.
+  - Files added:
+    - `src/lib/manus/platform-payload.ts` — discriminated
+      `PublishPayload` union (Facebook / Instagram / Twitter /
+      TikTok / Telegram), `PublishPayloadSource` input shape,
+      `buildPublishPayload(platform, source, ctx?)` selector with
+      exhaustive-switch guard (`_exhaustive: never` forces new
+      platforms to add a mapper), five `map*` functions, and a
+      `logPayloadShaping()` helper that emits the per-dispatch
+      observability line.
+  - Files modified:
+    - `src/lib/manus/types.ts` — imported `PublishPayload`; added
+      `publish_payload: PublishPayload` to `ManusDispatchPayload`
+      with a JSDoc pointer to the mapper + backward-safety note
+      about `content`.
+    - `src/lib/manus/dispatcher.ts` — extracted the `content` block
+      into a local const; called `buildPublishPayload(row.platform,
+      content, {delivery_id: row.id})` once per delivery; wired
+      `publish_payload` onto the outgoing `ManusDispatchPayload`.
+      No change to the claim query, the retry-reset path, or the
+      Manus client.
+    - `docs/00-architecture.md` — new "Manus platform payload
+      mapping (2026-04-23)" subsection with the augmented payload
+      shape, per-platform table, observability format, explicit
+      "what this layer intentionally does NOT do" list, and
+      extension pattern for future platforms. Dispatcher
+      description updated to mention the two-block payload.
+  - Final handoff payload structure:
+    - `ManusDispatchPayload` unchanged at the envelope level (same
+      post_id, delivery_id, platform, brand, scheduled_for, source,
+      retry_count).
+    - `content` kept as the flat backward-safe block.
+    - New `publish_payload` field carries the platform-shaped view
+      — discriminated by `platform` field so Manus's platform
+      routers can `switch` without re-deriving conventions.
+  - Per-platform shaping chosen:
+    - facebook → `primary_text` (caption → headline fallback) +
+      `headline`, `call_to_action`, `banner_text`, `image_prompt`
+    - instagram → `caption` (caption → headline fallback) +
+      `call_to_action`, `banner_text`, `image_prompt`
+    - twitter → `tweet_text` (caption → headline fallback) +
+      `call_to_action`, `image_prompt`. NO `banner_text` — X has
+      no native overlay.
+    - tiktok → `caption` (caption → headline fallback) +
+      `call_to_action`, `banner_text`, `image_prompt` (narrative
+      anchor, not final video URL)
+    - telegram → `text` (caption → headline fallback) + `headline`,
+      `call_to_action`, `banner_text`, `image_prompt`. NO
+      `parse_mode` hint — deferred until AI content escape-safety
+      is confirmed.
+  - Type changes: one new field on `ManusDispatchPayload`
+    (`publish_payload`). No DB migration, no IAM change, no
+    callback protocol change, no retry flow change.
+  - Verification captured:
+    - `npx tsc --noEmit` clean.
+    - Smoke script covered 15 permutations (5 platforms × 3
+      content shapes: full content, caption-only, headline-only
+      fallback) — every permutation produced the documented
+      present/omitted split. X correctly drops `banner_text`;
+      caption → headline fallback works on all five platforms;
+      null source fields correctly surface as `null` in the
+      typed slot.
+  - What remains deferred (next Manus tasks, in rough priority):
+    - Media pipeline: public-URL verification, per-platform media
+      format rules, actual asset hosting. `image_prompt` is still
+      narrative-only.
+    - Per-platform content validation (e.g. Twitter 280-char
+      enforcement, IG caption length, hashtag max counts). The
+      mapper's job is shaping, not validation.
+    - Telegram `parse_mode` hint once we can prove approved content
+      is HTML/Markdown escape-safe.
+    - Operator-configurable per-platform shaping overrides (e.g. a
+      brand wanting to always omit banner_text on FB). Not needed
+      in MVP.
 
 ### 2026-04-23
 - Task: Phase 2 hardening — Manus retryable vs fatal delivery failure classification

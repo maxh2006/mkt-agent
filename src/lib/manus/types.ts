@@ -7,6 +7,8 @@
 // contract" for the full specification (correlation keys, idempotency,
 // error taxonomy).
 
+import type { PublishPayload } from "./platform-payload";
+
 /**
  * Machine-readable error classes Manus is expected to use on failed
  * deliveries. Accepted as free-form strings at the callback Zod boundary
@@ -37,8 +39,13 @@ export interface ManusDispatchPayload {
     name: string;
   };
 
-  /** The approved content payload. Source-of-truth is the parent Post; we snapshot
-   *  the fields relevant for delivery. No regeneration, no re-approval happens here. */
+  /** The approved content payload, flat/generic shape. Source-of-truth is
+   *  the parent Post; we snapshot the fields relevant for delivery. No
+   *  regeneration, no re-approval happens here. Kept unchanged for
+   *  backward safety — stub/dry-run readers and any existing Manus-side
+   *  consumers can continue reading this block directly.
+   *
+   *  For platform-shaped consumption, prefer `publish_payload` below. */
   content: {
     headline: string | null;
     caption: string | null;
@@ -46,6 +53,16 @@ export interface ManusDispatchPayload {
     banner_text: string | null;
     image_prompt: string | null;
   };
+
+  /** Platform-shaped publish payload. Discriminated by `platform` so
+   *  Manus platform routers can narrow without re-deriving conventions
+   *  from `content`. Built by
+   *  `src/lib/manus/platform-payload.ts#buildPublishPayload()`.
+   *  Never rewrites approved content — it only rearranges existing
+   *  fields into platform-appropriate slots and marks missing slots as
+   *  `null`. See docs/00-architecture.md → "Manus platform payload
+   *  mapping" for the per-platform shapes. */
+  publish_payload: PublishPayload;
 
   /** Scheduling context. */
   scheduled_for: string | null; // ISO string; null for immediate
