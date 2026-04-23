@@ -27,7 +27,100 @@ Current execution priority (per ROADMAP.md):
 
 
 
+
 ## Done Tasks
+
+### 2026-04-23
+- Task: Phase 2 hardening — Manus media handoff + public URL validation
+  - Status: Complete
+  - Goal: gate the Manus dispatch path with a pre-dispatch media URL
+    reachability check so that when per-post media URLs start flowing
+    (future `Post.image_url` or AI image generation), broken /
+    private / unreachable URLs fail fast with `[MEDIA_ERROR] <reason>`
+    instead of round-tripping through Manus. Plumbing-first: today no
+    per-post URL field exists, so `collectMediaUrls(post)` returns
+    `[]` for every delivery and the dispatcher hook is a no-op.
+    Validation itself is provably correct today via the live smoke.
+  - Files added:
+    - `src/lib/manus/media-validation.ts` — pure validator. Exports
+      `MediaValidationReason` (union: `invalid_url` /
+      `unsupported_scheme` / `private_host` / `unreachable` /
+      `http_error`), `MediaValidationIssue`, `MediaValidationResult`,
+      `validateMediaUrl(url, opts?)`, `validateMediaUrls(urls, opts?)`
+      (dedupes + runs in parallel), `formatMediaErrorMessage(result)`
+      (builds "first issue (+N more)" string for `last_error`),
+      `logMediaCheck(args)`, `collectMediaUrls(post)` — extension
+      point returning `[]` today; documented to return
+      `[post.image_url]` once that field exists.
+    - `scripts/media-validation-smoke.ts` — live smoke test hitting
+      real URLs. Covers all 6 outcomes (`pass`, `http_error`,
+      `private_host` ×5 flavors, `unreachable`, `invalid_url`,
+      `unsupported_scheme` ×2 flavors), plus empty-array + dedup
+      edge cases.
+  - Files modified:
+    - `src/lib/manus/dispatcher.ts` — imports the validation module
+      and `reconcilePostStatus`; inserts the pre-dispatch
+      collect → validate → log → mark-failed branch between payload
+      build and `dispatchToManus()`. Text-only deliveries short-circuit
+      (`mediaUrls.length === 0`). Failed validation marks the row
+      `failed` with `[MEDIA_ERROR] <reason>`, runs reconciler, adds
+      to `summary.errors`, `continue`s the loop (skipping Manus).
+    - `package.json` — added `media:smoke` npm script.
+    - `docs/00-architecture.md` — new "Manus media handoff +
+      pre-dispatch URL validation (2026-04-23)" subsection under the
+      Manus protocol block. Documents validation steps, dispatcher
+      integration, today's no-op behavior, retryability linkage,
+      log format, and explicit out-of-scope list.
+    - `docs/06-workflows-roles.md` — "Delivery retry classification"
+      block gains a bullet explaining pre-dispatch MEDIA_ERROR flows
+      through the same Fatal path as Manus-side MEDIA_ERROR
+      (identical operator UX).
+    - `docs/07-ai-boundaries.md` — small clarification that
+      `image_prompt` is narrative text (AI input) and is NEVER a URL;
+      URLs travel in a separate `media_urls` publish_payload field
+      (future), validated by `src/lib/manus/media-validation.ts`.
+  - Validation steps (short-circuit in this order):
+    1. Syntactic — `new URL(raw)` must parse
+    2. Scheme — http / https only
+    3. Host privacy — rejects localhost, `.local` / `.localhost`
+       suffixes, IPv4 loopback + RFC1918 + link-local + 0/8, IPv6
+       `::1`, link-local `fe80::/10`, ULA `fc00::/7`
+    4. Reachability — HEAD with 5s timeout, 3-hop manual redirect
+       cap (re-checks host privacy on every hop to block
+       open-redirect-to-internal-target), GET `Range: bytes=0-0`
+       fallback on HEAD 405/501 or network error
+  - Failures stored as `[MEDIA_ERROR] <formatted reason>` in
+    `PostPlatformDelivery.last_error`. Existing retryability layer
+    already maps MEDIA_ERROR → fatal → UI shows "Fix required" +
+    backend retry returns 422. **Zero changes** to classifier, UI,
+    retry route, or callback route.
+  - Observability: `[manus-media] delivery=<id> platform=<p>
+    urls=<N> result=<ok|failed> issues=<reason1,reason2>
+    action=<dispatched|blocked>` — one line per check, zero lines
+    when no URLs present, no URL values logged (length only).
+  - Verification captured:
+    - `npx tsc --noEmit` clean.
+    - `npm run media:smoke` — 13/13 cases matched expected outcomes.
+      Every `MediaValidationReason` branch exercised against real
+      inputs: httpbin 200 → pass, httpbin 404 → http_error (status
+      visible), localhost + 127.0.0.1 + 10.0.0.1 + 192.168.1.1 +
+      169.254.1.1 + IPv6 `::1` + `printer.local` → private_host,
+      `*.invalid` TLD → unreachable, malformed string → invalid_url,
+      `ftp://` + `file://` → unsupported_scheme. Empty-array case:
+      `ok=true, checked=[], issues=[]` with no fetch. Dedup case:
+      2 identical inputs → 1 checked.
+  - Ready-to-plug: activating for real traffic is a one-line code
+    change in `collectMediaUrls()` once `Post.image_url` (or similar)
+    is added. The dispatcher wiring, failure path, reconciler
+    integration, classification, UI, and logs all already work end
+    to end.
+  - Recommended next Manus hardening task: **`Post.image_url` schema
+    extension** (a single nullable column migration) to activate this
+    validation layer for real traffic. Alternative: per-platform
+    media rules (aspect/mime/size/duration) once real per-platform
+    specs are available; reclaim pass for pre-existing
+    stuck-in-publishing rows when `accepted=false` leaves the row
+    hung.
 
 ### 2026-04-23
 - Task: Phase 2 hardening — Manus platform-specific handoff payload mapping

@@ -192,6 +192,16 @@ Delivery retry classification (2026-04-23):
   retryable, labelled "cause unknown" in the UI. Rationale: retry route
   is role-gated; unknown causes are more often transient than policy
   rejects; blocking retry on legacy rows would regress pre-taxonomy UX.
+- **Pre-dispatch MEDIA_ERROR** (2026-04-23): the dispatcher validates
+  every media URL on a delivery before handing off to Manus (see
+  docs/00-architecture.md → "Manus media handoff + pre-dispatch URL
+  validation"). A broken / private / unreachable URL marks the
+  delivery `failed` with `[MEDIA_ERROR] <reason>` **before** any
+  Manus round-trip. This flows through the exact same Fatal path as a
+  Manus-side MEDIA_ERROR — "Fix required" action text, backend retry
+  route returns 422, no new operator UX to learn. Operator recourse:
+  create a new post with a valid media URL (consistent with the
+  no-refine-after-approval rule).
 - Operator-facing behaviour in the Delivery Status modal:
   - Retryable failure → Retry button visible, chip reads "Retryable"
     (or "Retryable (cause unknown)" on default-classification rows).

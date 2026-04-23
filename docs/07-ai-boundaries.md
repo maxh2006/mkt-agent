@@ -141,7 +141,12 @@ dev / staging / review.
 
 **Fields generated.** `headline`, `caption`, `cta`, `banner_text` (or
 `null` when not applicable), and `image_prompt`. The `image_prompt` is
-text only — image rendering remains deferred; no image model is locked.
+**narrative text only** — it describes what an image should look like,
+it is NEVER a URL. Image rendering remains deferred; no image model is
+locked. When real media URLs start flowing to Manus (future task),
+they travel in a separate `media_urls` field on the publish payload,
+validated pre-dispatch by
+[`src/lib/manus/media-validation.ts`](../src/lib/manus/media-validation.ts).
 
 **Request shape.** One `messages.create` call per generation run. The
 provider-agnostic `StructuredPrompt` (from

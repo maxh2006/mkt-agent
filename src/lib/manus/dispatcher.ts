@@ -1,6 +1,13 @@
 import { db } from "@/lib/db";
 import { dispatchToManus } from "./client";
 import { buildPublishPayload } from "./platform-payload";
+import {
+  collectMediaUrls,
+  formatMediaErrorMessage,
+  logMediaCheck,
+  validateMediaUrls,
+} from "./media-validation";
+import { reconcilePostStatus } from "./reconcile";
 import type { DispatcherSummary, ManusDispatchPayload } from "./types";
 
 /**
@@ -121,6 +128,43 @@ export async function runManusDispatcher(options: { batchSize?: number } = {}): 
       },
       retry_count: row.retry_count,
     };
+
+    // ─── Pre-dispatch media URL validation ─────────────────────────
+    // Today `collectMediaUrls()` returns [] for every post (no per-post
+    // URL field yet) so this block is a no-op. Once Post.image_url (or
+    // similar) is introduced, `collectMediaUrls` returns its values and
+    // every URL is reachability-checked before the Manus handoff. See
+    // src/lib/manus/media-validation.ts for the full contract.
+    const mediaUrls = collectMediaUrls(post);
+    if (mediaUrls.length > 0) {
+      const validation = await validateMediaUrls(mediaUrls);
+      logMediaCheck({
+        delivery_id: row.id,
+        platform: row.platform,
+        result: validation,
+        action: validation.ok ? "dispatched" : "blocked",
+      });
+      if (!validation.ok) {
+        const now = new Date();
+        const reason = formatMediaErrorMessage(validation);
+        await db.postPlatformDelivery.update({
+          where: { id: row.id },
+          data: {
+            status: "failed",
+            publish_attempted_at: now,
+            last_error: `[MEDIA_ERROR] ${reason}`,
+          },
+        });
+        await reconcilePostStatus(post.id);
+        summary.errors.push({
+          delivery_id: row.id,
+          platform: row.platform,
+          error: `MEDIA_ERROR: ${reason}`,
+        });
+        // Skip the Manus handoff — this delivery is already `failed`.
+        continue;
+      }
+    }
 
     const result = await dispatchToManus(payload);
     if (result.accepted) {

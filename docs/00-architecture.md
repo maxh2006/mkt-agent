@@ -389,6 +389,81 @@ was left empty (the source Post field was null or empty after trim).
 No dispatcher change, no callback change, no retry change — the
 generic envelope absorbs the new platform transparently.
 
+### Manus media handoff + pre-dispatch URL validation (2026-04-23)
+
+Before every dispatch that carries media URLs, the dispatcher runs
+[`validateMediaUrls()`](../src/lib/manus/media-validation.ts) to
+guarantee Manus only receives **publicly fetchable HTTP(S) URLs**.
+Broken / private / unreachable URLs fail pre-dispatch with
+`[MEDIA_ERROR] <reason>` in `last_error` — the existing retryability
+classifier already maps that to fatal, so no new UI or retry-route
+work is needed.
+
+**Validation steps** (short-circuit in this order):
+
+1. **Syntactic** — `new URL(raw)` must parse.
+2. **Scheme** — `http:` or `https:` only.
+3. **Host privacy** — reject `localhost`, `.local` / `.localhost`
+   suffixes, IPv4 loopback (127/8), RFC1918 (10/8, 172.16/12,
+   192.168/16), link-local (169.254/16), 0/8, IPv6 `::1`, link-local
+   `fe80::/10`, ULA `fc00::/7`.
+4. **Reachability** — `HEAD` with 5s timeout, 3-hop manual redirect cap
+   (re-checks host privacy on every hop to block open-redirect → internal
+   target). On HEAD 405/501 or network error, falls back to `GET` with
+   `Range: bytes=0-0`.
+
+Each failure produces a typed
+`MediaValidationIssue = { url, reason, message, http_status? }` where
+`reason ∈ "invalid_url" | "unsupported_scheme" | "private_host" | "unreachable" | "http_error"`.
+
+**Dispatcher integration.** Between payload build and
+`dispatchToManus()`:
+
+```ts
+const mediaUrls = collectMediaUrls(post);
+if (mediaUrls.length > 0) {
+  const validation = await validateMediaUrls(mediaUrls);
+  logMediaCheck({ delivery_id, platform, result: validation,
+                  action: validation.ok ? "dispatched" : "blocked" });
+  if (!validation.ok) {
+    // mark delivery failed, run reconcilePostStatus(), skip dispatch
+  }
+}
+```
+
+**Today's URL source.** `collectMediaUrls(post)` returns `[]` for every
+post. No `Post.image_url` / `media_url` column exists yet;
+`Post.image_prompt` is narrative AI input (NOT a URL) and is never
+returned here. The validation layer is shipworthy + smoke-tested but
+the dispatcher hook is a no-op for current traffic. When AI image
+generation or operator-uploaded assets land, the only change needed
+to activate live validation is updating `collectMediaUrls()` to return
+the new field — dispatcher wiring is already in place.
+
+**Retryability.** `[MEDIA_ERROR] <reason>` is parsed by
+`parseManusErrorCode()` → maps to fatal in
+[retryability.ts](../src/lib/manus/retryability.ts) → Delivery Status
+modal shows "Fatal — fix first" chip + "Fix required" action text;
+backend retry route returns 422. Unified with Manus-side MEDIA_ERROR
+handling — operators see the same UX whether the bad URL was caught
+here or reported back by Manus.
+
+**Observability.** One line per pre-dispatch check, zero lines when
+`mediaUrls` is empty:
+
+```
+[manus-media] delivery=<id> platform=<p> urls=<N> result=<ok|failed> issues=<reason1,reason2> action=<dispatched|blocked>
+```
+
+No URL values logged.
+
+**Out of scope.** No per-platform media rules (aspect ratio, mime type,
+size caps, video duration, carousel constraints) — deferred. No
+approval-time validation (MVP validates at dispatch only; URLs can go
+bad between approval and dispatch, so dispatch-time is the
+last-responsible-moment anyway). No object storage / asset hosting —
+separate task.
+
 ### AI content generator
 
 Lives under `src/lib/ai/`. Turns structured source facts + brand context
