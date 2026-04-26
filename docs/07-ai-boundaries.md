@@ -269,15 +269,22 @@ stub provider continues to work — `image_prompt` field still gets
 emitted, just now aligned with the structured direction. Real
 image-model + overlay rendering remain deferred.
 
-**Background-image provider boundary (2026-04-27 — stub-only).** A
-provider boundary symmetrical to the text-generation client lives at
-`src/lib/ai/image/` (`types.ts` + `client.ts`). Selected via
-`AI_IMAGE_PROVIDER`; default `stub` is the safe-prod fallback (returns
-a placeholder result with `artifact_url: null`, zero cost, zero
-external dependency). Real adapters (`gemini` / `imagen` / `stability`)
-are recognised provider values that throw fail-loud until implemented
-— no silent fallback to stub on misconfig (matches the
-`AI_PROVIDER=anthropic` pattern).
+**Background-image provider boundary (2026-04-27).** A provider
+boundary symmetrical to the text-generation client lives at
+`src/lib/ai/image/` (`types.ts` + `client.ts` + `gemini.ts`).
+Selected via `AI_IMAGE_PROVIDER`:
+- `stub` (default) — safe-prod fallback (returns a placeholder result
+  with `artifact_url: null`, zero cost, zero external dependency).
+- `gemini` — **first real adapter, shipped 2026-04-27**. Calls
+  Nano Banana 2 (developer model id
+  `gemini-3.1-flash-image-preview`; override via `AI_IMAGE_MODEL`)
+  via the Google AI Studio Gemini API using `GEMINI_API_KEY`.
+  Returns inline base64 image bytes encoded as a `data:` URI in
+  `artifact_url`. Fail-loud on missing key — no silent fallback to
+  stub. See `docs/08-deployment.md` "Image generation provider —
+  Gemini / Nano Banana 2" for prod flip + billing-verification.
+- `imagen` / `stability` — recognised provider values that throw
+  fail-loud until implemented (no silent fallback on misconfig).
 
 Inputs (one request per generation run, shared across siblings):
 `background_image_prompt`, `negative_prompt`, `platform_format`,
@@ -313,11 +320,14 @@ background-only artifacts are never auto-shipped to Manus as the
 final creative.
 
 What's deferred:
-- Real image-model adapters (Gemini / Imagen / Stability / etc.).
 - The deterministic overlay renderer that composites text + logos
-  onto the AI background using `safe_zone_config`.
-- Asset hosting / S3 / CDN pipeline for storing real artifacts when
-  the provider returns inline binary data.
+  onto the AI background using `safe_zone_config` and produces the
+  FINAL publishable image. This is the next missing piece before
+  `Post.image_url` can be auto-populated by AI generation.
+- GCS-backed `artifact_url` (currently `data:` URI in MVP — works
+  end-to-end, just bloats `generation_context_json` at scale).
+- Additional real adapters (Imagen / Stability / etc. — Gemini
+  shipped today).
 - Image inspector UI in Content Queue.
 
 **Precedence** (mirrors the text pipeline): Brand Management (base) →

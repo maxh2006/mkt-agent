@@ -28,6 +28,7 @@ import {
   type BackgroundImageResult,
   type ImageProvider,
 } from "./types";
+import { geminiProvider } from "./gemini";
 
 /**
  * Public entry. Returns a `BackgroundImageResult` regardless of provider
@@ -48,6 +49,12 @@ export async function generateBackgroundImage(
       return stubProvider(request);
 
     case "gemini":
+      // Nano Banana 2 / Gemini API adapter (default model
+      // gemini-3.1-flash-image-preview, override via AI_IMAGE_MODEL).
+      // Auth path: GEMINI_API_KEY (Google AI Studio) — see
+      // docs/08-deployment.md for the prod flip procedure.
+      return geminiProvider(request);
+
     case "imagen":
     case "stability":
       // Real-provider adapters land in follow-up tasks. The contract is
@@ -55,7 +62,7 @@ export async function generateBackgroundImage(
       // BackgroundImageResult, mapping provider-specific errors onto
       // the canonical `ImageProviderErrorCode` taxonomy.
       throw new Error(
-        `AI_IMAGE_PROVIDER=${provider} is recognised but its adapter is not implemented yet. Set AI_IMAGE_PROVIDER=stub or implement the adapter in src/lib/ai/image/.`,
+        `AI_IMAGE_PROVIDER=${provider} is recognised but its adapter is not implemented yet. Set AI_IMAGE_PROVIDER=stub or AI_IMAGE_PROVIDER=gemini, or implement the adapter in src/lib/ai/image/.`,
       );
 
     default:

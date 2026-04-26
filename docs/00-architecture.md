@@ -625,24 +625,48 @@ nullable `Event.visual_settings_json` JSONB column). Validated via
 **partial** override — only fields explicitly set are present;
 unspecified fields fall through to Brand defaults at compile time.
 
-**Background-image provider boundary (2026-04-27 — stub-only initial
-landing).** `src/lib/ai/image/` ships a provider boundary symmetrical
-to the text-generation boundary at `src/lib/ai/client.ts`. The
-orchestrator runs `generateBackgroundImage()` AFTER text generation —
-one image request per run, shared across every sibling draft (the
-compiled visual prompt is identical for siblings). The stub provider
-is the safe-prod default and returns `status: "ok"` with
-`artifact_url: null`; real adapters (Gemini / Imagen / Stability) are
-recognised provider values that throw fail-loud until their adapter
-is implemented (no silent fallback to stub on misconfig). Failure is
-isolated: any throw from the image provider is caught, normalized
-into a `status: "error"` result, and the run still inserts text
-drafts. The result is persisted per draft as
+**Background-image provider boundary (2026-04-27 — stub default,
+Gemini / Nano Banana 2 first real adapter shipped).** `src/lib/ai/image/`
+ships a provider boundary symmetrical to the text-generation boundary
+at `src/lib/ai/client.ts`. The orchestrator runs
+`generateBackgroundImage()` AFTER text generation — one image request
+per run, shared across every sibling draft (the compiled visual
+prompt is identical for siblings). Selectable providers:
+- `stub` (default; returns `status: "ok"` with `artifact_url: null`,
+  zero cost, prod-safe fallback)
+- `gemini` (real adapter, `src/lib/ai/image/gemini.ts`) — calls
+  Nano Banana 2 (`gemini-3.1-flash-image-preview` by default; override
+  via `AI_IMAGE_MODEL`). Auth: `GEMINI_API_KEY` from Google AI Studio,
+  fail-loud on absence. Returns inline base64 bytes encoded as a
+  `data:image/png;base64,…` URI in `artifact_url`. See
+  `docs/08-deployment.md` "Image generation provider — Gemini /
+  Nano Banana 2" for the full prod auth / flip / billing-verification
+  procedure.
+- `imagen` / `stability` (recognised but unimplemented; throw
+  fail-loud until shipped — no silent fallback on misconfig).
+
+Failure is isolated: any throw from the image provider is caught,
+normalized into a `status: "error"` result via
+`buildImageErrorResult()`, and the run still inserts text drafts. The
+Gemini adapter additionally returns `status: "error"` results for
+4xx / 5xx / timeout / content-policy responses without throwing —
+each mapped onto the canonical `ImageProviderErrorCode` taxonomy
+(see docs/07-ai-boundaries.md). The result is persisted per draft as
 `Post.generation_context_json.image_generation` — see "AI content
 generator → image_generation block" below for the persisted shape.
 **`Post.image_url` is intentionally untouched** — that field remains
 reserved for the FINAL composited image produced by the deferred
 overlay renderer.
+
+**MVP storage decision (locked 2026-04-27).** Gemini returns inline
+image bytes (no hosted URL). For the smallest clean persistence path
+we encode them as `data:image/png;base64,…` URIs and store directly
+in `image_generation.artifact_url`. DB cost: ~100KB-1MB per draft per
+generation run; acceptable while volume is low. Migrating to a
+GCS-backed `https://…` URL is a follow-up (the field is stable; only
+the URL scheme changes). The future overlay renderer reads the data
+URI directly via `Buffer.from(base64, "base64")` without hitting any
+external storage.
 
 **Compiler activated in the live AI generation pipeline (2026-04-27).**
 `runGeneration()` in `src/lib/ai/generate.ts` now calls

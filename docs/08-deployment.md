@@ -106,6 +106,130 @@ sudo sed -i 's/^AI_PROVIDER=.*/AI_PROVIDER=stub/' /opt/mkt-agent/.env
 sudo pm2 restart mkt-agent --update-env
 ```
 
+---
+
+## Image generation provider — Gemini / Nano Banana 2
+
+The background-image provider boundary at `src/lib/ai/image/client.ts`
+ships with a stub default and a real Gemini adapter
+(`src/lib/ai/image/gemini.ts`). The Gemini adapter calls the
+**Nano Banana 2** model — developer model id
+`gemini-3.1-flash-image-preview` — via the Google AI Studio Gemini API.
+This section documents the EXACT auth path so we don't repeat the
+"wired but unusable" failure mode we hit with Anthropic credits.
+
+**Current prod provider** (as of 2026-04-27): `stub` — Gemini adapter
+shipped but not yet activated in prod env. The flip procedure is
+identical in shape to the AI_PROVIDER=anthropic flip above.
+
+### Auth path (READ FIRST — this is the part that bites)
+
+The Gemini API uses **API-key auth only** in this codebase. We do NOT
+use Vertex AI / ADC for image generation — too much GCP setup for a
+model served identically from the simpler Gemini API endpoint.
+
+Required env vars:
+- `AI_IMAGE_PROVIDER=gemini` — selects the adapter
+- `GEMINI_API_KEY` — required; fails loud on absence with no silent
+  stub fallback
+- `AI_IMAGE_MODEL` — optional; defaults to
+  `gemini-3.1-flash-image-preview`
+
+Where to get the key: **Google AI Studio** at
+https://aistudio.google.com/apikey. Pick "Create API key" → choose an
+existing GCP project or create a new one.
+
+**CRITICAL — billing requirement.** The GCP project the key is linked
+to MUST have billing enabled. Without billing:
+- low free-tier quota (a few requests/minute) — fine for a single
+  manual smoke test
+- production-volume traffic returns `403 PERMISSION_DENIED` or
+  `429 RESOURCE_EXHAUSTED`
+- the adapter classifies these as `AUTH_ERROR` / `RATE_LIMITED`
+  respectively and persists them in `image_generation.error_code`
+
+**To enable billing for your linked project:**
+1. Go to https://console.cloud.google.com/billing → Manage billing accounts
+2. Link a billing account to the project that owns your Gemini API key
+3. Enable the "Generative Language API" on that project at
+   https://console.cloud.google.com/apis/library/generativelanguage.googleapis.com
+
+Anthropic gotcha note: the equivalent failure for Claude is `403
+Request not allowed` when the account is on Evaluation tier. Gemini's
+equivalent is the `403 PERMISSION_DENIED` / `429 RESOURCE_EXHAUSTED`
+combo. Same shape, different vendor — verify billing BEFORE flipping
+the prod env.
+
+### To flip image generation to Gemini in prod
+
+```bash
+# 1. Put the key into the prod env file (root-only readable)
+sudo bash -c 'echo "GEMINI_API_KEY=YOUR_KEY_HERE" >> /opt/mkt-agent/.env'
+# (or edit /opt/mkt-agent/.env directly with $EDITOR if you prefer)
+
+# 2. Flip the provider switch
+sudo sed -i 's/^AI_IMAGE_PROVIDER=.*/AI_IMAGE_PROVIDER=gemini/' /opt/mkt-agent/.env
+
+# 3. PM2 must re-read env on restart
+sudo pm2 restart mkt-agent --update-env
+
+# 4. Verify the key works against Gemini's lowest-privilege endpoint.
+#    A successful list-models call confirms billing + key are good.
+KEY=$(sudo grep ^GEMINI_API_KEY /opt/mkt-agent/.env | cut -d= -f2-)
+curl -sS -w "\nhttp_code=%{http_code}\n" \
+  -H "x-goog-api-key: $KEY" \
+  "https://generativelanguage.googleapis.com/v1beta/models" | head -30
+# 200 → proceed; 403 with "PERMISSION_DENIED" → billing not enabled
+# on the linked project; 401 → bad key.
+```
+
+### To flip back to stub
+
+```bash
+sudo sed -i 's/^AI_IMAGE_PROVIDER=.*/AI_IMAGE_PROVIDER=stub/' /opt/mkt-agent/.env
+sudo pm2 restart mkt-agent --update-env
+```
+
+### What the adapter does + does NOT do
+
+- Generates a BACKGROUND image only. The "Absolutely no text in image"
+  rule from the visual compiler is reinforced in the prompt and via
+  the negative prompt list.
+- Returns the inline base64 image bytes encoded as a `data:image/png;base64,…`
+  URI in `Post.generation_context_json.image_generation.artifact_url`.
+  This is the smallest clean MVP persistence path — when generation
+  volume warrants, migrate to GCS-backed `https://…` URLs (the schema
+  field stays the same).
+- **Does NOT touch `Post.image_url`.** That field stays reserved for
+  the FINAL composited image the deferred deterministic overlay
+  renderer will produce. The Gemini-only background must NEVER be
+  shipped to Manus as the final creative.
+- Failures (network / 4xx / 5xx / blocked content) are caught by the
+  orchestrator's try/catch in `src/lib/ai/generate.ts` — the run
+  always inserts text drafts; image failure shows up as
+  `image_generation.status: "error"` with a normalized
+  `error_code` from the canonical taxonomy
+  (`NETWORK_ERROR` / `AUTH_ERROR` / `RATE_LIMITED` / `INVALID_PROMPT` /
+  `POLICY_REJECTED` / `TEMPORARY_UPSTREAM` / `UNKNOWN`).
+
+### Common errors + meanings
+
+| HTTP | Adapter `error_code` | Likely cause |
+|---|---|---|
+| 400 | `INVALID_PROMPT` | Malformed payload (we should never hit this — fix the request shape) |
+| 400 + body mentions "safety/policy/blocked" | `POLICY_REJECTED` | Gemini content policy refused the prompt |
+| 401 | `AUTH_ERROR` | API key is invalid / revoked / wrong project |
+| 403 + body says `PERMISSION_DENIED` | `AUTH_ERROR` | Billing not enabled, or "Generative Language API" not enabled on the linked project |
+| 429 | `RATE_LIMITED` | Hit free-tier quota OR per-minute production quota |
+| 5xx | `TEMPORARY_UPSTREAM` | Transient — operator can retry by re-running generation |
+| timeout (60s) | `NETWORK_ERROR` | Provider hung; orchestrator continues |
+
+The above persist into `image_generation` on every affected draft —
+operators (or future code) can grep `error_code` across recent
+generation_context_json blocks to spot patterns.
+
+---
+
 **What stub does**: `src/lib/ai/client.ts#stubProvider()` returns
 deterministic placeholder samples shaped like real Anthropic output
 (`headline`, `caption` prefixed with `(STUB sample N of M)`, `cta`,

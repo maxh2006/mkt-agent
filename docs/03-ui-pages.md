@@ -202,10 +202,15 @@ Create form includes:
   explicitly sets override the brand defaults; everything else falls
   through. The audited override list (`overridden_by_event`) is
   persisted on every event-derived draft. **Background-image provider
-  active (2026-04-27, stub-only)**: every generated draft also carries
-  a `generation_context_json.image_generation` block (status / artifact
-  metadata). Final composited image rendering (text + logos overlay) is
-  still deferred — the operator-facing `Post.image_url` field is not
+  active (2026-04-27)**: every generated draft also carries a
+  `generation_context_json.image_generation` block (status / artifact
+  metadata). The first real provider — Nano Banana 2
+  (`gemini-3.1-flash-image-preview`) — is wired and ready to flip on
+  per `docs/08-deployment.md`; until then the safe-prod default
+  remains the stub. When the real provider runs, `artifact_url` is a
+  `data:image/png;base64,…` URI containing the AI-generated background.
+  Final composited image rendering (text + logos overlay) is still
+  deferred — the operator-facing `Post.image_url` field is not
   populated by AI and remains a manual / future-renderer concern.
 
 Right-side panel on the Create page: **Sample Event Brief** — reference-only guidance.

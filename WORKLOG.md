@@ -17,6 +17,7 @@ Current execution priority (per ROADMAP.md):
 ## Ongoing Tasks
 
 - **⏳ REMINDER — Top up Anthropic credits** (console.anthropic.com → Billing)
+- **⏳ REMINDER — Provision Gemini API key + enable billing on linked GCP project** before flipping `AI_IMAGE_PROVIDER=gemini` in prod. See `docs/08-deployment.md` "Image generation provider — Gemini / Nano Banana 2" for the full flip + verification procedure.
   - Blocks: real AI generation in prod (Anthropic returns `403 Request not allowed` until credits exist)
   - Current account plan: Evaluation access (free, zero credits)
   - Ballpark: $5 minimum top-up ≈ 150+ full Event generate-drafts runs at sonnet-4.6 rates
@@ -31,6 +32,54 @@ Current execution priority (per ROADMAP.md):
 
 
 ## Done Tasks
+
+### 2026-04-27
+- Task: Phase 4 — Nano Banana 2 / Gemini real image-provider adapter
+  - Status: Complete (first real background-image provider shipped behind the existing boundary; stub stays default; prod flip procedure + auth path fully documented BEFORE any prod activation)
+  - Why: visual compiler emits a complete `background_image_prompt` + `negative_prompt` per generation but the stub-only image boundary couldn't actually produce an image. This task ships the first real provider so we can move toward real backgrounds, while keeping the safe stub default + same failure isolation.
+  - Files added:
+    - `src/lib/ai/image/gemini.ts` — Gemini API adapter via raw `fetch` (no SDK dep). Auth via `GEMINI_API_KEY` header; default model `gemini-3.1-flash-image-preview` (Nano Banana 2 product name) overridable via `AI_IMAGE_MODEL`. Composes the prompt by passing the compiler's positive prompt verbatim, appending the negative prompt as an explicit "Avoid:…" instruction, and adding a platform-format hint at the end. Encodes inline base64 response bytes as a `data:image/png;base64,…` URI in `artifact_url`. Maps HTTP status / network failures / safety-blocked responses onto the canonical `ImageProviderErrorCode` taxonomy (`INVALID_PROMPT` / `POLICY_REJECTED` / `AUTH_ERROR` / `RATE_LIMITED` / `TEMPORARY_UPSTREAM` / `NETWORK_ERROR` / `UNKNOWN`). 60s timeout; AbortController on the fetch. One observability log line on success and on failure. Module-header comment includes the auth-path runbook so a future agent can't miss the Anthropic-style billing trap.
+  - Files modified:
+    - `src/lib/ai/image/client.ts` — `case "gemini":` now dispatches to `geminiProvider()` (replaces the previous fail-loud throw). `imagen` / `stability` remain throw-stubs. Unknown values still fail loud.
+    - `.env.production.example` — added `GEMINI_API_KEY=""` with a billing-requirement callout and a pointer to `docs/08-deployment.md`. Updated the `AI_IMAGE_PROVIDER` and `AI_IMAGE_MODEL` doc-comments to reflect that `gemini` is now wired and to spell out the default model id.
+    - `docs/08-deployment.md` — new section "Image generation provider — Gemini / Nano Banana 2": auth path (API key only, no Vertex AI for now), where to get the key (Google AI Studio at https://aistudio.google.com/apikey), billing requirement (linked GCP project must have billing enabled + "Generative Language API" enabled — otherwise 403 PERMISSION_DENIED / 429 RESOURCE_EXHAUSTED), prod flip procedure (`sed` + `pm2 restart --update-env` mirroring the AI_PROVIDER=anthropic flip), verification curl against the lowest-privilege list-models endpoint, common errors + meanings table mapping HTTP statuses to the canonical adapter `error_code`. Explicit Anthropic-failure-mode parallel called out so the operator knows what to verify BEFORE flipping in prod.
+    - `docs/00-architecture.md` — Visual input architecture "Background-image provider boundary" subsection extended with the Gemini adapter row + the locked MVP storage decision (data URI in `artifact_url`; GCS migration is a follow-up; the field name is stable).
+    - `docs/07-ai-boundaries.md` — Background-image provider boundary subsection updated to list Gemini as the first real adapter alongside the existing stub. Deferred-list updated: deterministic overlay renderer is now the next missing piece.
+    - `docs/03-ui-pages.md` — Brand Design + Event Visual Override "Active in generation" notes updated to mention the real provider is wired and ready to activate per docs/08.
+    - `ROADMAP.md` — Phase 4 sub-bullet 7 flipped 🟡 → ✅ (boundary + first real adapter shipped). Cross-references docs/08 for the prod auth path.
+    - `WORKLOG.md` — this entry; Ongoing entry removed; new reminder added to provision Gemini key + verify billing before flipping in prod.
+  - Provider/env contract:
+    - `AI_IMAGE_PROVIDER=stub` (default; safe-prod fallback). Returns placeholder result with `artifact_url: null`. Zero cost.
+    - `AI_IMAGE_PROVIDER=gemini` → `geminiProvider()`. Default model `gemini-3.1-flash-image-preview`; override via `AI_IMAGE_MODEL`. Requires `GEMINI_API_KEY`; fails loud on absence (no silent fallback to stub).
+    - `AI_IMAGE_PROVIDER=imagen|stability` → recognised but unimplemented; throw fail-loud (unchanged).
+    - Unknown value → throw fail-loud (unchanged).
+  - How the Gemini adapter was implemented:
+    - **Auth**: `x-goog-api-key: ${GEMINI_API_KEY}` header (kept out of access logs vs query-param). API-key-only; we deliberately did NOT wire Vertex AI / ADC for image generation — too much GCP setup for a model served identically from the simpler Gemini API endpoint. The auth path is identical to other Anthropic-style API providers in this codebase.
+    - **Endpoint**: `POST https://generativelanguage.googleapis.com/v1beta/models/<model>:generateContent`.
+    - **Body**: `{contents: [{role:"user", parts:[{text}]}], generationConfig:{responseModalities:["IMAGE"]}}`. Image-only response (no text rationale we'd discard).
+    - **Prompt composition**: visual compiler's positive prompt (already includes safe-zone instruction + "no text in image" rule + brand/event notes) + explicit "Avoid:…" instruction sourced from the compiled negative_prompt + a platform-format hint at the end.
+    - **Aspect ratio mapping**: encoded in the prompt text via the format hint (square 1:1 / portrait 4:5 / landscape 16:9 / story 9:16). Gemini doesn't have a stable aspect-ratio body parameter across all image-capable models, so prompt-based steering is the durable approach for now.
+    - **Response parsing**: walk `candidates[].content.parts[]` for the first `inlineData` part; extract `mimeType` + `data`. If absent and `promptFeedback.blockReason` is set → `POLICY_REJECTED` error result.
+    - **No SDK dependency added**: raw fetch keeps the dependency tree lean and the contract explicit. ~250 lines including types, error mapping, prompt composition, response parsing.
+  - Where artifact output is stored:
+    - **Inline `data:image/png;base64,…` URI** in `Post.generation_context_json.image_generation.artifact_url`. This is the smallest clean MVP persistence path — no bucket, no Nginx alias, no filesystem permissions to manage. Works end-to-end through the existing `image_generation` block schema. The future overlay renderer can decode the data URI directly via `Buffer.from(base64, "base64")`.
+    - DB cost: ~100KB-1MB per draft per generation run inside `generation_context_json`. Acceptable while volume is low (Anthropic credits aren't even paid up). The migration path to GCS-backed `https://…` URLs is a follow-up — the schema field is stable; only the URL scheme changes.
+    - **Crucially: `Post.image_url` is NOT touched.** That field remains reserved for the FINAL composited image the deferred overlay renderer will produce. Background-only artifacts MUST NEVER be auto-shipped to Manus as the final creative — Manus media-validation runs only against `Post.image_url`.
+  - Failure handling (preserves the existing isolation contract):
+    - Any throw from the adapter (e.g. `GEMINI_API_KEY` missing) is caught by the orchestrator's try/catch in `src/lib/ai/generate.ts` and normalized via `buildImageErrorResult()` to a `status: "error"` result with `error_code: "NOT_CONFIGURED"` (or `"UNKNOWN"`). Text drafts still ship.
+    - Adapter-level failures (4xx / 5xx / timeout / network / content-policy block) DON'T throw — they return a `status: "error"` result directly with the precise `error_code` from the canonical taxonomy. Cleaner than throwing for every transient hiccup.
+    - All failure paths persist `error_code` + `error_message` into `image_generation` per draft so operators / future code can grep and triage.
+  - What remains deferred for the overlay-renderer step:
+    - **Deterministic overlay renderer** (Satori + sharp or similar) — the next missing piece. Composites `Post.headline/caption/cta/banner_text` + brand logos onto the AI background using `safe_zone_config` from `visual_compiled`. Output of THAT step is what populates `Post.image_url` (the final publishable image).
+    - GCS-backed `artifact_url` (data URIs work for MVP; bucket migration is the durability/cost move).
+    - Additional real adapters (Imagen / Stability — Gemini is the first, contract is locked; each new adapter ≈ this one's shape).
+    - Image inspector UI in Content Queue.
+    - Automatic Manus publishing of the final composited image.
+  - Verification:
+    - `npx tsc --noEmit` clean (EXIT=0).
+    - `npm run visual:smoke` clean (27/27 assertions across 6 cases) — confirms the visual compiler is unchanged and the new adapter doesn't disturb existing test paths.
+    - **Adapter NOT exercised against a real Gemini key this session** — terminal-only, no key provisioned yet. Code paths are typecheck-clean; the prod activation procedure is documented in `docs/08-deployment.md`. Recommended first prod smoke: provision the key per the docs, flip AI_IMAGE_PROVIDER=gemini, run a single Event "Generate Drafts", inspect `Post.generation_context_json.image_generation` — expect `provider="gemini"`, `status="ok"`, `artifact_url` starting with `data:image/png;base64,`.
+  - Per the durable commit-batching rule: ROADMAP + 4 docs (00, 03, 07, 08) + env example + WORKLOG + 2 source files (1 new, 1 modified) land in the same commit.
 
 ### 2026-04-27
 - Task: Phase 4 — Background-image provider adapter (boundary + stub)
