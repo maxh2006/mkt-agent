@@ -1,4 +1,21 @@
 import { z } from "zod";
+import {
+  brandVisualDefaultsSchema,
+  DEFAULT_BRAND_VISUAL_DEFAULTS,
+  type BrandVisualDefaultsInput,
+} from "@/lib/ai/visual/validation";
+import {
+  VISUAL_STYLES,
+  VISUAL_EMPHASES,
+  MAIN_SUBJECT_TYPES,
+  LAYOUT_FAMILIES,
+  PLATFORM_FORMATS,
+  type VisualStyle,
+  type VisualEmphasis,
+  type MainSubjectType,
+  type LayoutFamily,
+  type PlatformFormat,
+} from "@/lib/ai/visual/types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -171,6 +188,15 @@ export const benchmarkAssetSchema = z.object({
 
 export type BenchmarkAsset = z.infer<typeof benchmarkAssetSchema>;
 
+// `visual_defaults` is the structured Simple Mode block authored by
+// operators on the Brand Management Design tab. It feeds the hidden
+// visual prompt compiler at `src/lib/ai/visual/compile.ts`. Optional on
+// the wire so brands created before this UI shipped continue to validate;
+// the form seeds DEFAULT_BRAND_VISUAL_DEFAULTS when missing on load.
+// Legacy free-text design notes (`design_theme_notes`,
+// `preferred_visual_style`, etc.) remain accepted for backward
+// compatibility but are no longer the authoritative visual rule source —
+// the structured `visual_defaults` block is.
 export const designSettingsSchema = z.object({
   design_theme_notes: optionalText(2000),
   preferred_visual_style: optionalText(500),
@@ -180,6 +206,7 @@ export const designSettingsSchema = z.object({
   color_usage_notes: optionalText(2000),
   logos: brandLogosSchema.optional(),
   benchmark_assets: z.array(benchmarkAssetSchema).max(20).optional(),
+  visual_defaults: brandVisualDefaultsSchema.optional(),
 });
 
 export type DesignSettings = z.infer<typeof designSettingsSchema>;
@@ -194,6 +221,68 @@ export const DEFAULT_DESIGN_SETTINGS: DesignSettings = {
   color_usage_notes: undefined,
   logos: { main: "", square: "", horizontal: "", vertical: "" },
   benchmark_assets: [],
+  visual_defaults: { ...DEFAULT_BRAND_VISUAL_DEFAULTS },
+};
+
+// ─── Visual defaults — operator-facing labels + helper text ──────────────────
+//
+// Re-exports of the canonical enum values from `src/lib/ai/visual/types.ts`,
+// paired with operator-friendly labels and short helpers. The Brand
+// Management Design tab consumes these for Simple Mode controls.
+
+export {
+  VISUAL_STYLES,
+  VISUAL_EMPHASES,
+  MAIN_SUBJECT_TYPES,
+  LAYOUT_FAMILIES,
+  PLATFORM_FORMATS,
+};
+export type {
+  VisualStyle,
+  VisualEmphasis,
+  MainSubjectType,
+  LayoutFamily,
+  PlatformFormat,
+  BrandVisualDefaultsInput,
+};
+
+export const VISUAL_STYLE_LABELS: Record<VisualStyle, string> = {
+  photographic: "Photographic — realistic, camera-feel",
+  illustrated: "Illustrated — 2D flat illustration",
+  "3d": "3D — rendered, dimensional",
+  vector: "Vector — clean shapes, bold colors",
+  cinematic: "Cinematic — dramatic lighting, depth",
+  minimalist: "Minimalist — sparse, high negative space",
+};
+
+export const VISUAL_EMPHASIS_LABELS: Record<VisualEmphasis, string> = {
+  "reward-forward": "Reward-forward — the prize is the hero",
+  "winner-forward": "Winner-forward — a person celebrating",
+  "game-forward": "Game-forward — game artwork is the hero",
+  "brand-forward": "Brand-forward — brand identity prominent",
+  lifestyle: "Lifestyle — aspirational moment",
+};
+
+export const MAIN_SUBJECT_TYPE_LABELS: Record<MainSubjectType, string> = {
+  human: "Human — person, face, hands",
+  object: "Object — coin, trophy, bonus item",
+  "game-element": "Game element — reel, card, chip, artwork",
+  symbol: "Symbol — crown, star, spark, abstract mark",
+  abstract: "Abstract — pattern, gradient, no literal subject",
+};
+
+export const LAYOUT_FAMILY_LABELS: Record<LayoutFamily, string> = {
+  center_focus: "Center focus — subject centered, text below",
+  left_split: "Left split — subject left, text right",
+  right_split: "Right split — subject right, text left",
+  bottom_heavy: "Bottom heavy — subject top, text dominant below",
+};
+
+export const PLATFORM_FORMAT_LABELS: Record<PlatformFormat, string> = {
+  square: "Square (1:1) — IG / FB feed",
+  portrait: "Portrait (4:5) — IG feed alt, TikTok, Reels",
+  landscape: "Landscape (16:9) — FB / Twitter",
+  story: "Story (9:16) — IG / FB stories",
 };
 
 // ─── E. Sample Captions ───────────────────────────────────────────────────────

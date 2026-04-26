@@ -323,27 +323,48 @@ error.
   - Banned Topics (tag input) — category-level guardrails (new in 2026-04-21)
   - Default Hashtags (tag input)
 - **D. Design**
-  - Six free-text notes: design theme, preferred visual style, headline style,
-    button / CTA style, promo text style, color usage notes. Empty strings
-    are no longer silently stored — unset fields are omitted from the JSON.
+  - **Simple Mode Visual Defaults** (UI shipped 2026-04-27, primary path).
+    Structured pickers feeding the hidden prompt compiler at
+    `src/lib/ai/visual/compile.ts`. Operators do NOT author detailed
+    visual prompts. Persisted into `Brand.design_settings_json.visual_defaults`
+    (no migration — JSON column already exists). Validated server-side
+    via `brandVisualDefaultsSchema` from `src/lib/ai/visual/validation.ts`,
+    wired through `designSettingsSchema` in `src/lib/validations/brand.ts`.
+    - `visual_style` (Select, required) — photographic / illustrated / 3d /
+      vector / cinematic / minimalist
+    - `visual_emphasis` (Select, required) — reward-forward / winner-forward /
+      game-forward / brand-forward / lifestyle
+    - `main_subject_type` (Select, required) — human / object / game-element /
+      symbol / abstract
+    - `layout_family` (Select, required) — center_focus / left_split /
+      right_split / bottom_heavy
+    - `platform_format_default` (Select, required) — square / portrait /
+      landscape / story
+    - `negative_visual_elements` (TagInput, max 20) — "do-not-include" list,
+      enforced as negative_prompt at generation time
+    - `visual_notes` (textarea, optional, max 200 chars) — short stylistic
+      nudge, NOT a prompt
+    A short framing line at the top of the tab states: "These settings
+    define the default visual style this brand prefers. Event-level visual
+    settings can override them when needed." The form seeds
+    `DEFAULT_BRAND_VISUAL_DEFAULTS` from
+    `src/lib/ai/visual/validation.ts` for new brands or legacy brands
+    without a `visual_defaults` block. `coerceVisualDefaults()` in
+    `src/app/(app)/brands/page.tsx` is tolerant of out-of-enum values
+    on read — falls back to canonical defaults rather than rejecting.
   - Benchmark Assets repeater — upload banner samples / mascots / recurring
     visual cues for AI image reference. Same upload-storage caveat as logos:
     the URL input persists, drag-drop is preview-only in this build.
-  - **Planned Simple Mode Visual Defaults** (spec landed 2026-04-23, UI
-    rollout pending — see `src/lib/ai/visual/`). Replaces the six
-    free-text notes with structured pickers that feed the hidden prompt
-    compiler + layout spec:
-    - `visual_style` — photographic / illustrated / 3d / vector / cinematic / minimalist
-    - `visual_emphasis` — reward-forward / winner-forward / game-forward / brand-forward / lifestyle
-    - `main_subject_type` — human / object / game-element / symbol / abstract
-    - `layout_family` — center_focus / left_split / right_split / bottom_heavy
-    - `platform_format_default` — square / portrait / landscape / story
-    - `negative_visual_elements` — tag input ("do-not-include" list)
-    - `visual_notes` — optional 200-char nudge (NOT a prompt)
-    Operators do NOT author detailed visual prompts. Existing free-text
-    notes remain readable during rollout but are deprecated as an
-    authoritative visual rule source. See
-    `docs/07-ai-boundaries.md` → "Visual input architecture" for the
+  - **Legacy free-text design notes (deprecated)** — collapsed `<details>`
+    section under Visual Defaults. Six free-text fields predating Simple
+    Mode (`design_theme_notes`, `preferred_visual_style`, `headline_style`,
+    `button_style`, `promo_text_style`, `color_usage_notes`) remain
+    readable + editable for backward compatibility but are no longer the
+    authoritative visual rule source. New brands should leave these blank.
+    A clear "deprecated" chip + amber border + helper line communicate the
+    transition. Empty strings are not stored — unset fields are omitted
+    from the JSON. Removal is a follow-up once operators have migrated.
+    See `docs/07-ai-boundaries.md` → "Visual input architecture" for the
     product rule and precedence.
 - **E. Sample Captions** — repeater of `{ title, type, text, notes }`.
   `title` and `text` are now **required**. A per-card Clone button copies an

@@ -139,7 +139,7 @@ Includes:
 
    Scope — land these before wiring an image-rendering provider:
 
-   1. 🟢 **Simplify Brand Management visual defaults** — **Spec + types + Zod done 2026-04-23.** Structured enums (`visual_style`, `visual_emphasis`, `main_subject_type`, `layout_family`, `platform_format_default`, `negative_visual_elements`, optional `visual_notes`) live in [`src/lib/ai/visual/types.ts`](src/lib/ai/visual/types.ts) + [`src/lib/ai/visual/validation.ts`](src/lib/ai/visual/validation.ts). UI rollout on the Brand Management Design tab is the next concrete step.
+   1. ✅ **Simplify Brand Management visual defaults** — **Done 2026-04-27.** Structured enums (`visual_style`, `visual_emphasis`, `main_subject_type`, `layout_family`, `platform_format_default`, `negative_visual_elements`, optional `visual_notes`) live in [`src/lib/ai/visual/types.ts`](src/lib/ai/visual/types.ts) + [`src/lib/ai/visual/validation.ts`](src/lib/ai/visual/validation.ts). Brand Management → Design tab Simple Mode UI persists into `Brand.design_settings_json.visual_defaults`; validated through `designSettingsSchema` in `src/lib/validations/brand.ts`. Legacy free-text design notes kept readable + editable as a collapsed deprecated section (removal is a follow-up once operators have migrated).
    2. 🟢 **Simplify Event visual override inputs** — **Spec + types + Zod done 2026-04-23.** Per-field-optional `EventVisualOverride` with the same controls as Brand (minus `visual_style`, which stays brand-level for cross-event consistency). UI rollout on the Event create/edit page pending.
    3. ⏳ **Replace freeform prompt-heavy inputs with structured controls** across the app — audit pending after Brand + Event UI rollouts land.
    4. ✅ **Hidden prompt compiler** — **Done 2026-04-23.** [`src/lib/ai/visual/compile.ts#compileVisualPrompt()`](src/lib/ai/visual/compile.ts). Merges Brand ← Event per-field, resolves platform format (Event > platform-appropriate > Brand default), derives subject focus from source facts when available, composes positive prompt with safe-zone instructions, composes negative prompt anchored on a hardcoded baseline (no text / letters / typography / logos drawn / watermarks / signage). `render_intent` locked to `"ai_background_then_overlay"`. Operators never see the compiled prompt. Verified via `npm run visual:smoke` (27/27 assertions across 6 cases).
@@ -258,3 +258,62 @@ Always preserve these rules:
 - Big Wins + Hot Games use BigQuery
 - Running Promotions uses separate API
 - Docs + WORKLOG must stay aligned with architecture changes
+
+---
+
+## LONG-TERM ARCHITECTURE PRINCIPLES
+
+These are **compatibility requirements, not current build phases.** Current
+phase priorities (above) are unchanged. The point is to preserve direction
+so today's choices don't foreclose tomorrow's destination.
+
+### Principle 1 — Stay signal-source-agnostic (OMEGA compatibility)
+
+mkt-agent is the **execution layer** for marketing actions, not the
+intelligence layer. Future external systems will emit structured signals —
+competitor activity, sentiment / risk, opportunity flags, recommended
+campaign directions, urgency / target audience / target channel hints. The
+canonical example is **OMEGA**, a separate competitive-intelligence platform
+spec'd outside this repo (Python + SQLite + Claude API + Next.js, deployed
+independently). mkt-agent must be able to ingest those signals and execute
+marketing actions from them, without coupling to OMEGA's specific schema or
+stack.
+
+Compatibility implications:
+- External signals plug in as additional source types via the existing
+  `SourceFacts` / per-source-normalizer / `runGeneration()` seam — not as new
+  code paths around it.
+- Cross-system traffic follows the **Manus pattern**: HTTP/JSON,
+  secret-gated, signed callbacks if bidirectional. No shared DB, no shared
+  deploy, no SDK coupling. mkt-agent stays a modular monolith.
+- "OMEGA" is the canonical example, not a named coupling. The principle
+  covers any future external intelligence source on equal footing.
+
+### Principle 2 — Stay market-adaptable
+
+Current focus is the Philippine market (WildSpinz brand: Tagalog-first,
+GCash, PAGCOR-licensed). Future expansion into Thailand, Vietnam, Japan,
+Korea, and beyond will bring different audience styles, language norms,
+compliance regimes, creative preferences, campaign strategies, and platform
+behaviors. The architecture must absorb that variation without re-plumbing.
+
+Compatibility implications:
+- Market-specific assumptions (Tagalog, GCash, PAGCOR) belong on Brand
+  Management today — that is correct. The rule is **do not promote them to
+  global defaults**, and do not assume them in code paths that will run for
+  a non-PH brand later.
+- Future context layering may grow into:
+  `Market profile → Brand Management → Source facts → Event override → Templates`.
+  A Market profile would carry market-wide language/tone norms, compliance
+  rules, platform behavior, and payment-rail conventions. **Not a near-term
+  build.** Naming the direction here keeps Brand Management from quietly
+  absorbing market-level concerns and becoming painful to untangle later.
+
+### Out of scope
+
+Both principles describe extensibility, not deliverables. No new phase, no
+near-term OMEGA implementation work, no near-term Market-profile build.
+Phase 3 (data sources), Phase 4 (AI generator + visual UI), and Phase 5
+(automate draft creation) priorities above remain unchanged. See
+docs/00-architecture.md "Long-term direction" for the architectural
+elaboration.

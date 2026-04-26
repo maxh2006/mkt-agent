@@ -32,6 +32,116 @@ Current execution priority (per ROADMAP.md):
 
 ## Done Tasks
 
+### 2026-04-27
+- Task: Phase 4 — Brand Management Design-tab Simple Mode UI
+  - Status: Complete (UI shipped, validation wired, docs updated, no migration)
+  - Why: Phase 4 follow-up #1 from 2026-04-23 visual-architecture task. Operators were authoring prompt-heavy freeform design notes; this replaces the freeform experience with structured pickers that feed the hidden visual prompt compiler at `src/lib/ai/visual/compile.ts`. First concrete operator-facing surface for the new visual prompt system.
+  - Files modified:
+    - `src/lib/validations/brand.ts`:
+      - Imported `brandVisualDefaultsSchema` + `DEFAULT_BRAND_VISUAL_DEFAULTS` + visual enum/types from `src/lib/ai/visual/`.
+      - Extended `designSettingsSchema` with optional `visual_defaults: brandVisualDefaultsSchema`. Optional on the wire so brands created before this UI shipped continue to validate.
+      - Extended `DEFAULT_DESIGN_SETTINGS` with `visual_defaults: { ...DEFAULT_BRAND_VISUAL_DEFAULTS }`.
+      - Added operator-facing label dictionaries: `VISUAL_STYLE_LABELS`, `VISUAL_EMPHASIS_LABELS`, `MAIN_SUBJECT_TYPE_LABELS`, `LAYOUT_FAMILY_LABELS`, `PLATFORM_FORMAT_LABELS`. Re-exported the canonical enum arrays for the form.
+    - `src/app/(app)/brands/page.tsx`:
+      - Extended `DesignFormState` with `visual_defaults: BrandVisualDefaultsInput`.
+      - Added `coerceVisualDefaults()` — tolerant per-field reader that falls back to canonical defaults for any out-of-enum value (legacy reads survive).
+      - `coerceDesign()` now reads `visual_defaults` from raw JSON; `designToPayload()` always emits a valid `visual_defaults` block (trims negatives, drops blank `visual_notes`); `emptyForm()` seeds `DEFAULT_BRAND_VISUAL_DEFAULTS`.
+      - Added `setVisualDefault<K>` setter helper alongside the existing `setLogo` / `setBenchmarkAssets`.
+      - Restructured the Design tab UI: framing line → Simple Mode (5 Selects + TagInput for negatives + optional 200-char `visual_notes`) → Benchmark Assets → Legacy free-text design notes inside a `<details>` collapsed section labelled "deprecated" with amber accent + helper text. Reused the existing `TagInput`, `FieldLabel`, `Select`, and `BenchmarkAssets` components — no new components introduced.
+    - `docs/03-ui-pages.md` — Brand Management → D. Design section rewritten: "Planned Simple Mode Visual Defaults" → "Simple Mode Visual Defaults (UI shipped 2026-04-27, primary path)" with control table; legacy fields documented as deprecated collapsed section.
+    - `docs/07-ai-boundaries.md` — added "Brand-level persistence (UI shipped 2026-04-27)" paragraph in the Visual input architecture section. Documents persistence into `design_settings_json.visual_defaults`, validation flow, optional-on-wire shape, and legacy field deprecation.
+    - `docs/02-data-model.md` — `design_settings_json` field documentation extended with the `visual_defaults` shape; legacy free-text fields explicitly tagged `(legacy)`.
+    - `docs/00-architecture.md` — "Image generation — visual input architecture" subsection updated: "No schema has landed for this yet" → "Brand-level visual defaults are now authored on the Brand Management → Design tab Simple Mode form (UI shipped 2026-04-27) and persist into `Brand.design_settings_json.visual_defaults`."
+    - `ROADMAP.md` — Phase 4 sub-bullet 1 flipped from 🟢 (spec done) → ✅ (UI shipped).
+    - `WORKLOG.md` — this entry; Ongoing entry removed.
+  - Simple Mode fields delivered:
+    - `visual_style` (Select, required, no Event override)
+    - `visual_emphasis` (Select, required)
+    - `main_subject_type` (Select, required)
+    - `layout_family` (Select, required)
+    - `platform_format_default` (Select, required)
+    - `negative_visual_elements` (TagInput, max 20)
+    - `visual_notes` (textarea, optional, max 200 chars with live counter)
+  - Persistence:
+    - Stored at `Brand.design_settings_json.visual_defaults` (JSON column already existed; no Prisma migration).
+    - PATCH `/api/brands/[id]` already routes through `updateBrandSchema` → `designSettingsSchema`, so wiring `brandVisualDefaultsSchema` was a single import + one extra field in `designSettingsSchema`.
+    - Empty/blank `visual_notes` is dropped on save so the compiler skips the optional brand-note section cleanly.
+    - Negative tags are trimmed; empties dropped.
+  - Validation wiring:
+    - `designSettingsSchema.visual_defaults = brandVisualDefaultsSchema.optional()` — invalid enum values reject cleanly with Zod's existing 422 path.
+    - `coerceVisualDefaults()` provides defence-in-depth on read: legacy or hand-edited JSON with bad values doesn't blow up the form — it falls back to canonical defaults so operators can re-pick.
+    - Optional on the wire for forward compatibility; required-shape inside the form (always valid because the form seeds defaults).
+  - Legacy free-text design fields:
+    - Six fields (`design_theme_notes`, `preferred_visual_style`, `headline_style`, `button_style`, `promo_text_style`, `color_usage_notes`) are NOT removed — kept readable + editable for backward compatibility.
+    - Moved into a `<details>` collapsed section under Visual Defaults with a "deprecated" amber chip + amber-bordered container + helper text: "These free-text fields predate the structured Visual Defaults above. They are kept readable + editable for now but are no longer the authoritative visual rule source — the AI generator reads Visual Defaults. New brands should leave these blank."
+    - Removal is a follow-up once operators have migrated. Schema still accepts them; `designToPayload()` still strips empty strings to `undefined`.
+  - Out of scope (deliberately):
+    - Event Visual Override UI — separate Phase 4 follow-up #2.
+    - `src/lib/ai/load-brand.ts` not touched — the loader will surface `visual_defaults` to the visual compiler as a separate plumbing task.
+    - No image-rendering provider, no overlay renderer (Phase 4 follow-ups #5/#6).
+    - No object storage / file upload changes.
+    - No edits to other Brand Management tabs (Identity, Integration, Voice & Tone, Sample Captions).
+  - Verification:
+    - `npx tsc --noEmit` clean (EXIT=0).
+    - `npx eslint src/lib/validations/brand.ts 'src/app/(app)/brands/page.tsx'` — 0 errors, 2 pre-existing warnings (`optionalHex` and `DEFAULT_DESIGN_SETTINGS` were already in the import list before this task).
+    - **UI not exercised in a browser** — this session is terminal-only. The shape is verified by the type system + lint, and the structure mirrors the existing tabs (same `Select` / `TagInput` / `FieldLabel` patterns the Voice & Tone tab uses), but a manual smoke in a browser is recommended before relying on it for live operator work.
+  - Backward compatibility surfaces remaining:
+    - Legacy free-text fields persist and round-trip through the API + form.
+    - Brands without a `visual_defaults` block load cleanly (form seeds defaults; save writes them).
+    - `coerceVisualDefaults()` tolerates out-of-enum stored values without rejecting the load.
+  - Per the durable commit-batching rule: ROADMAP + 4 docs + WORKLOG + 2 source files land in the same commit.
+
+### 2026-04-27
+- Task: Long-term architecture direction docs — OMEGA compatibility + market adaptability (docs only)
+  - Status: Complete (docs-only, no code, no schema, no migration)
+  - Why: clarify the long-term destination so today's architectural
+    choices don't foreclose (a) future ingestion of external
+    intelligence signals (OMEGA being the canonical example) or (b)
+    multi-market expansion beyond Philippines. MVP scope and current
+    phase priorities (Phase 3 / 4 / 5) are unchanged.
+  - Files modified:
+    - `ROADMAP.md` — new `## LONG-TERM ARCHITECTURE PRINCIPLES`
+      section appended after `## CORE PRODUCT RULES`. Two principles:
+      (1) stay signal-source-agnostic (OMEGA compatibility); (2) stay
+      market-adaptable. Explicit out-of-scope statement reaffirming
+      Phase 3 / 4 / 5 priorities.
+    - `docs/00-architecture.md` — new `## Long-term direction`
+      section appended after `## Design Principles`. Two subsections:
+      External intelligence signals (extension seam:
+      `SourceFacts` / `source-normalizers/` / `runGeneration()` /
+      `NormalizedGenerationInput`; cross-system pattern: Manus-style
+      HTTP/JSON boundary) + Market profile layer (forward layering
+      `Market → Brand → Source facts → Event override → Templates`).
+    - `docs/07-ai-boundaries.md` — one forward-direction paragraph
+      inserted inside the existing "Context layers (base → override)"
+      subsection (between Adhoc Event brief item and "Example packet
+      shape:" line). Doesn't change the current 2-layer spec; names
+      future Market layer + future external intelligence signals.
+    - `WORKLOG.md` — this entry.
+  - Framing locked:
+    - mkt-agent is the **execution layer**; OMEGA is a separate
+      intelligence layer. Cross-system traffic follows the Manus
+      pattern (HTTP/JSON, secret-gated, signed callbacks if needed).
+      No shared DB / deploy / SDK.
+    - "OMEGA" is the canonical example, not a named coupling — the
+      principle covers any future external intelligence source on
+      equal footing.
+    - Future context layering may grow into Market → Brand → Source
+      facts → Event override → Templates. Not a near-term build.
+    - Tagalog / GCash / PAGCOR are PH-specifics that belong on Brand
+      Management fields, not global defaults.
+  - Verification:
+    - All four docs read end-to-end for internal consistency.
+    - Cross-references between ROADMAP / 00-architecture / 07
+      resolve correctly.
+    - Source-code paths referenced
+      (`src/lib/ai/types.ts`, `src/lib/ai/source-normalizers/`,
+      `src/lib/ai/generate.ts`, `src/lib/ai/resolve-context.ts`)
+      all exist and are accurate.
+    - No code change, no Prisma schema change, no migration.
+  - Per the durable commit-batching rule: ROADMAP + docs + WORKLOG
+    land in the same commit.
+
 ### 2026-04-23
 - Task: Phase 4 — Visual input architecture + hidden prompt compiler (spec + backend)
   - Status: Complete (backend + spec + docs; UI rollout, image model, and overlay renderer remain as follow-ups)

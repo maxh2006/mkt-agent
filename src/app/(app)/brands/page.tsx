@@ -11,13 +11,20 @@ import {
   TONES, TONE_LABELS,
   CTA_STYLES, CTA_STYLE_LABELS,
   EMOJI_LEVELS, EMOJI_LEVEL_LABELS,
+  VISUAL_STYLES, VISUAL_STYLE_LABELS,
+  VISUAL_EMPHASES, VISUAL_EMPHASIS_LABELS,
+  MAIN_SUBJECT_TYPES, MAIN_SUBJECT_TYPE_LABELS,
+  LAYOUT_FAMILIES, LAYOUT_FAMILY_LABELS,
+  PLATFORM_FORMATS, PLATFORM_FORMAT_LABELS,
   type IntegrationSettings,
   type VoiceSettings,
   type DesignSettings,
   type SampleCaption,
   type BenchmarkAsset,
   type BrandLogos,
+  type BrandVisualDefaultsInput,
 } from "@/lib/validations/brand";
+import { DEFAULT_BRAND_VISUAL_DEFAULTS } from "@/lib/ai/visual/validation";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -107,6 +114,44 @@ interface DesignFormState {
   color_usage_notes: string;
   logos: { main: string; square: string; horizontal: string; vertical: string };
   benchmark_assets: BenchmarkAsset[];
+  visual_defaults: BrandVisualDefaultsInput;
+}
+
+// Tolerant per-field reader for the structured visual_defaults block.
+// Falls back to DEFAULT_BRAND_VISUAL_DEFAULTS for any value that is missing
+// or not a member of the canonical enum — guarantees the form always has a
+// valid shape even when reading legacy JSON.
+function coerceVisualDefaults(raw: unknown): BrandVisualDefaultsInput {
+  const r = (raw && typeof raw === "object") ? (raw as Record<string, unknown>) : {};
+  const inEnum = <T extends readonly string[]>(v: unknown, enumVals: T): v is T[number] =>
+    typeof v === "string" && (enumVals as readonly string[]).includes(v);
+
+  const negs = Array.isArray(r.negative_visual_elements)
+    ? (r.negative_visual_elements as unknown[])
+        .filter((s): s is string => typeof s === "string" && s.trim().length > 0)
+        .map((s) => s.trim())
+    : [];
+  const notes = typeof r.visual_notes === "string" ? r.visual_notes.trim() : "";
+
+  return {
+    visual_style: inEnum(r.visual_style, VISUAL_STYLES)
+      ? r.visual_style
+      : DEFAULT_BRAND_VISUAL_DEFAULTS.visual_style,
+    visual_emphasis: inEnum(r.visual_emphasis, VISUAL_EMPHASES)
+      ? r.visual_emphasis
+      : DEFAULT_BRAND_VISUAL_DEFAULTS.visual_emphasis,
+    main_subject_type: inEnum(r.main_subject_type, MAIN_SUBJECT_TYPES)
+      ? r.main_subject_type
+      : DEFAULT_BRAND_VISUAL_DEFAULTS.main_subject_type,
+    layout_family: inEnum(r.layout_family, LAYOUT_FAMILIES)
+      ? r.layout_family
+      : DEFAULT_BRAND_VISUAL_DEFAULTS.layout_family,
+    platform_format_default: inEnum(r.platform_format_default, PLATFORM_FORMATS)
+      ? r.platform_format_default
+      : DEFAULT_BRAND_VISUAL_DEFAULTS.platform_format_default,
+    negative_visual_elements: negs,
+    ...(notes ? { visual_notes: notes } : {}),
+  };
 }
 
 function coerceDesign(raw: unknown, legacyLogoUrl: string | null): DesignFormState {
@@ -141,6 +186,7 @@ function coerceDesign(raw: unknown, legacyLogoUrl: string | null): DesignFormSta
       vertical: String(rawLogos.vertical ?? ""),
     },
     benchmark_assets,
+    visual_defaults: coerceVisualDefaults(r.visual_defaults),
   };
 }
 
@@ -177,6 +223,24 @@ function designToPayload(d: DesignFormState): DesignSettings {
       notes: strOrUndef(a.notes ?? ""),
     }));
 
+  // Always emit visual_defaults — the form seeds DEFAULT_BRAND_VISUAL_DEFAULTS
+  // when the brand has no block yet, so this is always a valid shape. Trim
+  // negative_visual_elements + drop empties; treat blank visual_notes as absent
+  // so the compiler skips the optional brand-note section cleanly.
+  const cleanNegatives = (d.visual_defaults.negative_visual_elements ?? [])
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  const trimmedNotes = (d.visual_defaults.visual_notes ?? "").trim();
+  const visual_defaults: BrandVisualDefaultsInput = {
+    visual_style: d.visual_defaults.visual_style,
+    visual_emphasis: d.visual_defaults.visual_emphasis,
+    main_subject_type: d.visual_defaults.main_subject_type,
+    layout_family: d.visual_defaults.layout_family,
+    platform_format_default: d.visual_defaults.platform_format_default,
+    negative_visual_elements: cleanNegatives,
+    ...(trimmedNotes ? { visual_notes: trimmedNotes } : {}),
+  };
+
   return {
     design_theme_notes: strOrUndef(d.design_theme_notes),
     preferred_visual_style: strOrUndef(d.preferred_visual_style),
@@ -186,6 +250,7 @@ function designToPayload(d: DesignFormState): DesignSettings {
     color_usage_notes: strOrUndef(d.color_usage_notes),
     logos: Object.keys(logos).length > 0 ? logos : undefined,
     benchmark_assets: cleanedAssets.length > 0 ? cleanedAssets : undefined,
+    visual_defaults,
   };
 }
 
@@ -400,6 +465,7 @@ function emptyForm(): FormState {
       color_usage_notes: "",
       logos: { main: "", square: "", horizontal: "", vertical: "" },
       benchmark_assets: [],
+      visual_defaults: { ...DEFAULT_BRAND_VISUAL_DEFAULTS },
     },
     captions: [],
   };
@@ -470,6 +536,19 @@ function BrandFormDialog({
 
   function setBenchmarkAssets(value: BenchmarkAsset[]) {
     setForm((f) => ({ ...f, design: { ...f.design, benchmark_assets: value } }));
+  }
+
+  function setVisualDefault<K extends keyof BrandVisualDefaultsInput>(
+    key: K,
+    value: BrandVisualDefaultsInput[K],
+  ) {
+    setForm((f) => ({
+      ...f,
+      design: {
+        ...f.design,
+        visual_defaults: { ...f.design.visual_defaults, [key]: value },
+      },
+    }));
   }
 
   // Sample captions helpers
@@ -999,66 +1078,190 @@ function BrandFormDialog({
 
               {/* ── D. Design ── */}
               {tab === "design" && (
-                <div className="space-y-5">
-                  {[
-                    {
-                      key: "design_theme_notes" as const,
-                      label: "Design Theme Notes",
-                      rows: 3,
-                      placeholder: "e.g. Bold golds, gradient overlays, casino-night vibe. Avoid pastels.",
-                    },
-                    {
-                      key: "preferred_visual_style" as const,
-                      label: "Preferred Visual Style",
-                      rows: 2,
-                      placeholder: "e.g. Bold gradients, minimal flat design, high-contrast photo backgrounds.",
-                    },
-                    {
-                      key: "headline_style" as const,
-                      label: "Headline Style",
-                      rows: 2,
-                      placeholder: "e.g. All-caps, sentence case, with emoji prefix.",
-                    },
-                    {
-                      key: "button_style" as const,
-                      label: "Button / CTA Style",
-                      rows: 2,
-                      placeholder: "e.g. Rounded pill, bright yellow, uppercase text.",
-                    },
-                    {
-                      key: "promo_text_style" as const,
-                      label: "Promo Text Style",
-                      rows: 2,
-                      placeholder: "e.g. Short punchy lines. Highlight numbers in bold.",
-                    },
-                    {
-                      key: "color_usage_notes" as const,
-                      label: "Color Usage Notes",
-                      rows: 3,
-                      placeholder: "e.g. Primary on backgrounds; accent reserved for CTAs and win numbers.",
-                    },
-                  ].map(({ key, label, rows, placeholder }) => (
-                    <div key={key} className="space-y-1">
-                      <FieldLabel>{label}</FieldLabel>
-                      <textarea
-                        className={textareaCls}
-                        rows={rows}
-                        value={form.design[key]}
-                        onChange={(e) => setDesignText(key, e.target.value)}
-                        placeholder={placeholder}
+                <div className="space-y-6">
+                  {/* Framing — visual rule precedence */}
+                  <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                    These settings define the <span className="font-medium text-foreground">default visual style</span> this brand prefers. Event-level visual settings can override them when needed. The AI image model uses these to compose backgrounds; final text + logos are rendered as a deterministic overlay.
+                  </div>
+
+                  {/* ── Simple Mode — structured visual defaults (primary path) ── */}
+                  <div className="space-y-5">
+                    <div>
+                      <p className="text-sm font-medium">Visual Defaults</p>
+                      <p className="text-xs text-muted-foreground">
+                        Pick from structured options — operators don&apos;t author detailed visual prompts.
+                      </p>
+                    </div>
+
+                    {[
+                      {
+                        key: "visual_style" as const,
+                        label: "Visual Style",
+                        hint: "Overall art language. No Event override — stays brand-level for consistency across the brand's events.",
+                        options: VISUAL_STYLES,
+                        labels: VISUAL_STYLE_LABELS as Record<string, string>,
+                      },
+                      {
+                        key: "visual_emphasis" as const,
+                        label: "Visual Emphasis",
+                        hint: "What the visual should make hero by default.",
+                        options: VISUAL_EMPHASES,
+                        labels: VISUAL_EMPHASIS_LABELS as Record<string, string>,
+                      },
+                      {
+                        key: "main_subject_type" as const,
+                        label: "Main Subject Type",
+                        hint: "Preferred subject family. Source facts (e.g. Big Win) can imply a stronger subject at generation time.",
+                        options: MAIN_SUBJECT_TYPES,
+                        labels: MAIN_SUBJECT_TYPE_LABELS as Record<string, string>,
+                      },
+                      {
+                        key: "layout_family" as const,
+                        label: "Layout Family",
+                        hint: "Where text + logo + subject sit on the canvas. The compiler falls back to a platform-friendly layout if this one doesn't fit the target format.",
+                        options: LAYOUT_FAMILIES,
+                        labels: LAYOUT_FAMILY_LABELS as Record<string, string>,
+                      },
+                      {
+                        key: "platform_format_default" as const,
+                        label: "Default Platform Format",
+                        hint: "Used only when neither Event nor the target platform's natural orientation dictates one.",
+                        options: PLATFORM_FORMATS,
+                        labels: PLATFORM_FORMAT_LABELS as Record<string, string>,
+                      },
+                    ].map(({ key, label, hint, options, labels }) => (
+                      <div key={key} className="space-y-1">
+                        <FieldLabel required hint={hint}>{label}</FieldLabel>
+                        <Select
+                          value={form.design.visual_defaults[key] as string}
+                          onValueChange={(v) =>
+                            setVisualDefault(key, v as BrandVisualDefaultsInput[typeof key])
+                          }
+                          disabled={saving}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {options.map((opt) => (
+                              <SelectItem key={opt} value={opt}>
+                                {labels[opt]}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ))}
+
+                    <div className="space-y-1">
+                      <FieldLabel hint="Things this brand should NEVER show. Enforced as a negative prompt at generation time. Up to 20 entries.">
+                        Negative Visual Elements
+                      </FieldLabel>
+                      <TagInput
+                        value={form.design.visual_defaults.negative_visual_elements ?? []}
+                        onChange={(v) => setVisualDefault("negative_visual_elements", v)}
+                        placeholder="e.g. cartoon characters, alcohol, blurry textures"
                         disabled={saving}
                       />
                     </div>
-                  ))}
 
-                  <div className="pt-2 border-t">
-                    <p className="mb-2 text-sm font-medium">Benchmark Assets</p>
+                    <div className="space-y-1">
+                      <FieldLabel hint="Optional short stylistic nudge — NOT a prompt. Max 200 characters.">
+                        Visual Notes <span className="text-muted-foreground font-normal">(optional)</span>
+                      </FieldLabel>
+                      <textarea
+                        className={textareaCls}
+                        rows={2}
+                        maxLength={200}
+                        value={form.design.visual_defaults.visual_notes ?? ""}
+                        onChange={(e) => setVisualDefault("visual_notes", e.target.value)}
+                        placeholder="e.g. Lean editorial, never neon."
+                        disabled={saving}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        {(form.design.visual_defaults.visual_notes ?? "").length} / 200 characters
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* ── Logos / Benchmark Assets ── */}
+                  <div className="pt-3 border-t space-y-2">
+                    <p className="text-sm font-medium">Benchmark Assets</p>
+                    <p className="text-xs text-muted-foreground">
+                      Upload reference banners, mascots, or recurring visual cues the AI can use as identity guidance.
+                    </p>
                     <BenchmarkAssets
                       value={form.design.benchmark_assets}
                       onChange={setBenchmarkAssets}
                       disabled={saving}
                     />
                   </div>
+
+                  {/* ── Legacy free-text design notes (deprecated) ── */}
+                  <details className="pt-3 border-t group">
+                    <summary className="cursor-pointer list-none text-xs font-medium text-muted-foreground hover:text-foreground select-none flex items-center gap-1.5">
+                      <span className="inline-block transition-transform group-open:rotate-90">▸</span>
+                      Legacy design notes
+                      <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
+                        deprecated
+                      </span>
+                    </summary>
+                    <div className="mt-3 space-y-4 rounded-md border border-dashed border-border/60 bg-muted/10 p-3">
+                      <p className="text-xs text-muted-foreground">
+                        These free-text fields predate the structured Visual Defaults above. They are kept readable + editable for now but are no longer the authoritative visual rule source — the AI generator reads <span className="font-medium text-foreground">Visual Defaults</span>. New brands should leave these blank.
+                      </p>
+                      {[
+                        {
+                          key: "design_theme_notes" as const,
+                          label: "Design Theme Notes",
+                          rows: 3,
+                          placeholder: "e.g. Bold golds, gradient overlays, casino-night vibe. Avoid pastels.",
+                        },
+                        {
+                          key: "preferred_visual_style" as const,
+                          label: "Preferred Visual Style (legacy text)",
+                          rows: 2,
+                          placeholder: "Superseded by the Visual Style picker above.",
+                        },
+                        {
+                          key: "headline_style" as const,
+                          label: "Headline Style",
+                          rows: 2,
+                          placeholder: "e.g. All-caps, sentence case, with emoji prefix.",
+                        },
+                        {
+                          key: "button_style" as const,
+                          label: "Button / CTA Style",
+                          rows: 2,
+                          placeholder: "e.g. Rounded pill, bright yellow, uppercase text.",
+                        },
+                        {
+                          key: "promo_text_style" as const,
+                          label: "Promo Text Style",
+                          rows: 2,
+                          placeholder: "e.g. Short punchy lines. Highlight numbers in bold.",
+                        },
+                        {
+                          key: "color_usage_notes" as const,
+                          label: "Color Usage Notes",
+                          rows: 3,
+                          placeholder: "e.g. Primary on backgrounds; accent reserved for CTAs and win numbers.",
+                        },
+                      ].map(({ key, label, rows, placeholder }) => (
+                        <div key={key} className="space-y-1">
+                          <FieldLabel>{label}</FieldLabel>
+                          <textarea
+                            className={textareaCls}
+                            rows={rows}
+                            value={form.design[key]}
+                            onChange={(e) => setDesignText(key, e.target.value)}
+                            placeholder={placeholder}
+                            disabled={saving}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </details>
                 </div>
               )}
 

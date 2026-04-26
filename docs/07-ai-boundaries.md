@@ -39,6 +39,17 @@ Context layers (base → override):
    `target_audience`, `cta`, `tone`, `platform_scope`, `notes_for_ai`,
    `posting_instance_json`.
 
+**Long-term direction (forward only — not implemented).** Future evolution
+may extend layering in two ways: (a) a **Market profile** layer above Brand
+for multi-market expansion (language / tone norms, compliance rules,
+platform behavior, payment-rail conventions); (b) **source facts** may grow
+to include external intelligence signals (e.g. OMEGA-style competitor /
+sentiment / opportunity / compliance signals) alongside today's `big_win` /
+`promo` / `hot_games` / `event` / `educational` types. The
+`NormalizedGenerationInput` seam is the intended extension point. See
+`docs/00-architecture.md` "Long-term direction" for the full framing. MVP
+scope is unchanged.
+
 Example packet shape:
 - brand context (from Brand Management, base layer)
 - post type
@@ -188,6 +199,22 @@ visual prompts. They pick from structured enum controls defined in
 | `platform_format` | square / portrait / landscape / story |
 | `negative_visual_elements` | pickable/taggable list of forbidden elements |
 | `visual_notes` | optional 200-char nudge (NOT a prompt, advisory only) |
+
+**Brand-level persistence (UI shipped 2026-04-27).** Brand visual defaults
+are authored on the Brand Management → Design tab Simple Mode form and
+persist into `Brand.design_settings_json.visual_defaults` (no migration —
+JSON column already existed). Validated server-side by
+`brandVisualDefaultsSchema` from
+[`src/lib/ai/visual/validation.ts`](../src/lib/ai/visual/validation.ts),
+wired through `designSettingsSchema` in `src/lib/validations/brand.ts`,
+enforced on PATCH `/api/brands/[id]`. The block is OPTIONAL on the wire
+so brands created before the UI shipped continue to validate; the form
+seeds `DEFAULT_BRAND_VISUAL_DEFAULTS` for new brands or legacy reads.
+The legacy free-text design notes (`design_theme_notes`,
+`preferred_visual_style`, etc.) are de-emphasized as a deprecated
+collapsed section in the UI and are no longer the authoritative visual
+rule source — the AI generator reads `visual_defaults`. Event-level
+override UI is a separate follow-up.
 
 **Precedence** (mirrors the text pipeline): Brand Management (base) →
 source facts (context) → Event brief (override) → Templates (supporting

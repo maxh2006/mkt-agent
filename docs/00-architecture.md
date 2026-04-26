@@ -611,12 +611,16 @@ The image pipeline intentionally splits into two halves:
 Visual compiler only reads Brand + Event + source; Templates do not
 elevate to a policy layer.
 
-**Product rule.** No schema has landed for this yet — Brand visual
-defaults live in the existing `design_settings_json`; Event visual
-override will need a new JSON column when the UI lands (tracked as a
-follow-up task). `Post.image_url` + the media-validation layer
+**Product rule.** Brand-level visual defaults are now authored on the
+Brand Management → Design tab Simple Mode form (UI shipped 2026-04-27)
+and persist into `Brand.design_settings_json.visual_defaults` — no
+migration, the JSON column already existed. Validated server-side via
+`brandVisualDefaultsSchema` (re-exported through
+`src/lib/validations/brand.ts#designSettingsSchema`). Event visual
+override will still need a new JSON column when its UI lands (tracked
+as a follow-up task). `Post.image_url` + the media-validation layer
 (shipped 2026-04-23) already support any image-rendering backend once
-the structured-input UI + image model + overlay renderer are in place.
+the image model + overlay renderer are in place.
 
 **Live smoke.** `npm run visual:smoke` runs 27 assertions across 6
 cases exercising Brand-only / Event-override / layout fallback /
@@ -825,3 +829,84 @@ Scheduled jobs for rollups and lightweight background tasks.
 - Prefer explicit workflows
 - Human approval before publish in MVP
 - Brand isolation with shared infrastructure
+
+---
+
+## Long-term direction
+
+The current architecture is sized for MVP scope (content generation + posting
+automation, Philippines-first / WildSpinz). Two long-term compatibility
+requirements are preserved here so today's choices don't foreclose them.
+Principle-level framing lives in ROADMAP.md "Long-Term Architecture
+Principles"; this section adds the architectural elaboration. **MVP scope and
+current phase priorities are unchanged.**
+
+### External intelligence signals
+
+mkt-agent is the **execution layer**, not the intelligence layer. Future AI
+systems — most concretely **OMEGA**, a separate competitive-intelligence
+platform spec'd outside this repo — will emit structured signals: competitor
+activity, sentiment / risk, opportunity flags, recommended campaign
+directions, urgency / target audience / target channel hints. mkt-agent must
+be able to ingest those signals and execute marketing actions from them,
+without coupling its internals to any specific upstream's schema or stack.
+
+Today's source intake — BigQuery for `big_win` + `hot_games`, per-brand REST
+API for `promo`, real Event rows for adhoc campaigns, fixtures for
+`educational` — is **not necessarily final**. The extension seam is:
+
+- `SourceFacts` discriminated union in `src/lib/ai/types.ts`
+- per-source normalizers under `src/lib/ai/source-normalizers/`
+- `runGeneration()` orchestrator in `src/lib/ai/generate.ts`
+- the `NormalizedGenerationInput` boundary that every normalizer produces
+
+Future external signals land as additional `SourceFacts` variants funneled
+through their own normalizer to `NormalizedGenerationInput`, then run through
+the same generation / approval / publishing pipeline. They do not carve new
+code paths around it.
+
+Cross-system traffic mirrors the **Manus pattern** (see "Manus protocol —
+finalized contract" above): HTTP/JSON, secret-gated endpoints, signed
+callbacks if bidirectional. External intelligence systems remain their own
+deploys with their own stacks — no shared DB, no shared deploy, no SDK
+coupling. The boundary IS the contract.
+
+The system should evolve toward a generalized **signal-to-execution model**
+over time. MVP focus stays on content generation and posting automation; the
+generalization is preserved as direction, not as a near-term build.
+
+### Market profile layer (forward direction)
+
+Today's context layering (see `docs/07-ai-boundaries.md` "Input Contract" +
+`resolveEffectiveContext()` in `src/lib/ai/resolve-context.ts`):
+
+```
+Brand Management → Source facts → Event override → Templates (reference)
+```
+
+Forward direction for multi-market expansion:
+
+```
+Market profile → Brand Management → Source facts → Event override → Templates
+```
+
+A Market profile would carry language / tone norms, compliance rules
+(PAGCOR-equivalents), platform behavior, payment-rail conventions, and
+audience norms — anything that spans all brands operating in that market.
+The merge would extend `resolveEffectiveContext()` to take a Market layer as
+its base, with Brand Management overriding Market on conflict (same per-field
+override pattern as Brand→Event today).
+
+This is **not implemented**, and is not a near-term phase. It is named here
+so today's Brand Management does not quietly absorb market-level concerns
+and become painful to untangle later.
+
+Practical guardrails today:
+- Tagalog, GCash, PAGCOR are WildSpinz-PH specifics; they belong on Brand
+  fields (correct), not promoted to global defaults.
+- Code paths that will eventually run for a non-PH brand should not assume
+  PH-specific conventions (e.g. payment-rail names, regulator-specific
+  taxonomy, market-specific date formats).
+
+MVP execution remains Philippines-first. The principle is forward
+compatibility, not present-day work.
