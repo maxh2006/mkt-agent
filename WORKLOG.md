@@ -33,6 +33,24 @@ Current execution priority (per ROADMAP.md):
 ## Done Tasks
 
 ### 2026-04-27
+- Task: UI polish — shared Select dropdown content sizing
+  - Status: Complete (1 file changed; UI styling only, no logic, no schema, no API)
+  - Why: Long option labels (`"Professional — formal and authoritative"`, `"Reward-forward — the prize is the hero"`, etc.) were getting clipped horizontally when dropdowns opened — especially in the Brand Management modal Voice & Tone + Design tabs. Root cause: `SelectContent` was clamped to trigger width via `w-(--anchor-width)` + `overflow-x-hidden`, while `SelectTrigger` uses `w-fit` (sizes to current value, not longest option).
+  - Files modified:
+    - `src/components/ui/select.tsx` — `SelectContent` className tweaks: `w-(--anchor-width)` → `min-w-(--anchor-width)` (popup at least trigger width, free to grow); removed `min-w-36` (superseded); added `max-w-[min(36rem,calc(100vw-2rem))]` (caps growth on desktop + small screens); removed `overflow-x-hidden` (no longer needed once width grows to fit). No prop / API / Base UI option changes.
+    - `WORKLOG.md` — this entry.
+  - Why a shared fix:
+    - 11 caller sites import the Select primitive (calendar, audit-logs, queue, brands, insights, events list/new/detail, channels, automations, event-datetime-picker). None pass a custom className to `SelectContent` (verified via grep). One className change in the shared component fixes every dropdown in the app.
+  - Out of scope:
+    - `dropdown-menu.tsx` (used for filter chips / multiselect, different surface).
+    - `SelectTrigger` `w-fit` behavior (correct as-is — trigger should size to the current value).
+    - Any visual redesign of the popup (border / shadow / padding / animation unchanged).
+  - Verification:
+    - `npx tsc --noEmit` clean (EXIT=0).
+    - **UI not exercised in a browser** this session — terminal-only. Worth a manual smoke after deploy: open Brand Management → Edit → Voice & Tone (Tone / CTA Style / Emoji Level) and Design (5 visual selects) — option text should be fully readable; popup should be at least trigger width but expand when needed.
+  - Contingency: if Base UI's Positioner enforces popup width via inline style (rather than CSS variable only), the className-only fix won't be enough and the popup will still be clamped to trigger width. Fallback would be to set `alignItemWithTrigger={false}` as the SelectContent default (Base UI then positions popup as a regular below-trigger dropdown, no width constraint). Not applied yet — start with the className-only fix and observe.
+
+### 2026-04-27
 - Task: Phase 4 — Brand Management Design-tab Simple Mode UI
   - Status: Complete (UI shipped, validation wired, docs updated, no migration)
   - Why: Phase 4 follow-up #1 from 2026-04-23 visual-architecture task. Operators were authoring prompt-heavy freeform design notes; this replaces the freeform experience with structured pickers that feed the hidden visual prompt compiler at `src/lib/ai/visual/compile.ts`. First concrete operator-facing surface for the new visual prompt system.
