@@ -78,6 +78,27 @@ export async function insertSamplesAsDrafts(args: {
       },
     };
 
+    // Phase 4: persist the compiled visual prompt + layout/safe-zone
+    // spec so the future image-rendering provider + overlay renderer
+    // can consume it without re-deriving anything. The orchestrator
+    // populates `input.visual` via `compileVisualPrompt()`. Off-pipeline
+    // call sites (test paths that build NormalizedGenerationInput by
+    // hand) leave it undefined and we simply skip the block.
+    if (input.visual) {
+      const v = input.visual;
+      generationContext.visual_compiled = {
+        layout_key: v.layout_key,
+        safe_zone_config: v.safe_zone_config,
+        render_intent: v.render_intent,
+        platform_format: v.platform_format,
+        visual_emphasis: v.visual_emphasis,
+        subject_focus: v.subject_focus,
+        effective_inputs: v.effective_inputs,
+        background_image_prompt: v.background_image_prompt,
+        negative_prompt: v.negative_prompt,
+      };
+    }
+
     // Hot Games: mirror the existing refine contract — the refine modal
     // reads generation_context_json.type === "hot_games_snapshot" and
     // surfaces the frozen ranked-games list. Tag the node with `type`
@@ -128,5 +149,5 @@ function promptVersionFromEnv(): string {
   // (We avoid importing PROMPT_VERSION directly here to keep the
   // queue-inserter free of prompt-builder coupling for the mild benefit
   // of independent unit-testability.)
-  return process.env.AI_PROMPT_VERSION ?? "v1-2026-04-21";
+  return process.env.AI_PROMPT_VERSION ?? "v3-2026-04-27";
 }

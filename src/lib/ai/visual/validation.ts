@@ -57,6 +57,49 @@ export const DEFAULT_BRAND_VISUAL_DEFAULTS: BrandVisualDefaultsInput = {
 };
 
 /**
+ * Tolerant reader for `Brand.design_settings_json.visual_defaults` raw
+ * JSON. Used by the server-side `loadBrandContext()` to lift the saved
+ * block into the AI generator's `BrandContext`. Returns a fully-formed
+ * `BrandVisualDefaultsInput` — out-of-enum legacy values fall back per
+ * field to `DEFAULT_BRAND_VISUAL_DEFAULTS`, missing blocks return the
+ * defaults outright. Mirrors the inline `coerceVisualDefaults()` logic
+ * in the brand-management page so behavior stays in sync.
+ */
+export function coerceBrandVisualDefaults(raw: unknown): BrandVisualDefaultsInput {
+  if (!raw || typeof raw !== "object") return { ...DEFAULT_BRAND_VISUAL_DEFAULTS };
+  const r = raw as Record<string, unknown>;
+  const inEnum = <T extends readonly string[]>(v: unknown, vals: T): v is T[number] =>
+    typeof v === "string" && (vals as readonly string[]).includes(v);
+
+  const negs = Array.isArray(r.negative_visual_elements)
+    ? (r.negative_visual_elements as unknown[])
+        .filter((s): s is string => typeof s === "string" && s.trim().length > 0)
+        .map((s) => s.trim())
+    : [];
+  const notes = typeof r.visual_notes === "string" ? r.visual_notes.trim() : "";
+
+  return {
+    visual_style: inEnum(r.visual_style, VISUAL_STYLES)
+      ? r.visual_style
+      : DEFAULT_BRAND_VISUAL_DEFAULTS.visual_style,
+    visual_emphasis: inEnum(r.visual_emphasis, VISUAL_EMPHASES)
+      ? r.visual_emphasis
+      : DEFAULT_BRAND_VISUAL_DEFAULTS.visual_emphasis,
+    main_subject_type: inEnum(r.main_subject_type, MAIN_SUBJECT_TYPES)
+      ? r.main_subject_type
+      : DEFAULT_BRAND_VISUAL_DEFAULTS.main_subject_type,
+    layout_family: inEnum(r.layout_family, LAYOUT_FAMILIES)
+      ? r.layout_family
+      : DEFAULT_BRAND_VISUAL_DEFAULTS.layout_family,
+    platform_format_default: inEnum(r.platform_format_default, PLATFORM_FORMATS)
+      ? r.platform_format_default
+      : DEFAULT_BRAND_VISUAL_DEFAULTS.platform_format_default,
+    negative_visual_elements: negs,
+    ...(notes ? { visual_notes: notes } : {}),
+  };
+}
+
+/**
  * Tolerant reader for `Event.visual_settings_json` raw JSON. Used by the
  * Event create / edit forms to seed local form state from the persisted
  * payload. Returns ONLY validated, present fields — out-of-enum values

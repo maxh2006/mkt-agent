@@ -4,6 +4,7 @@ import { buildPrompt } from "./prompt-builder";
 import { insertSamplesAsDrafts } from "./queue-inserter";
 import { loadBrandContext, brandOr404 } from "./load-brand";
 import { loadBrandTemplates, countTemplates } from "./load-templates";
+import { compileVisualPrompt } from "./visual/compile";
 import type { NormalizedGenerationInput } from "./types";
 
 /**
@@ -35,17 +36,34 @@ export async function runGeneration(args: {
   // One retrieval per run — all sibling samples share the same library.
   // Empty buckets are valid; generation proceeds normally.
   const templates = await loadBrandTemplates(args.input.brand.id);
-  const inputWithTemplates: NormalizedGenerationInput = {
+
+  // Compile the visual prompt + layout/safe-zone spec from the saved
+  // Brand defaults (always present — loader fills with canonical
+  // defaults) and the optional Event override. Pure function; runs
+  // synchronously. The prompt builder reads it to surface a Visual
+  // Direction section so the AI's narrative `image_prompt` aligns;
+  // the queue inserter persists it under
+  // `generation_context_json.visual_compiled` for the future image-
+  // rendering provider + overlay renderer.
+  const visual = compileVisualPrompt({
+    brand: args.input.brand.visual_defaults,
+    event: args.input.event?.visual_settings ?? null,
+    platform: args.input.platform,
+    source_facts: args.input.source_facts,
+  });
+
+  const inputWithVisual: NormalizedGenerationInput = {
     ...args.input,
     templates,
+    visual,
   };
   const templatesInjected = countTemplates(templates);
 
-  const prompt = buildPrompt(inputWithTemplates);
-  const result = await generateSamples({ input: inputWithTemplates, prompt });
+  const prompt = buildPrompt(inputWithVisual);
+  const result = await generateSamples({ input: inputWithVisual, prompt });
 
   const inserted = await insertSamplesAsDrafts({
-    input: inputWithTemplates,
+    input: inputWithVisual,
     samples: result.samples,
     provider: result.provider,
     dry_run: result.dry_run,
@@ -54,7 +72,7 @@ export async function runGeneration(args: {
   });
 
   console.log(
-    `[ai-generator] run complete source=${inputWithTemplates.source_type} brand=${inputWithTemplates.brand.id} platform=${inputWithTemplates.platform} samples=${result.samples.length} provider=${result.provider} dry_run=${result.dry_run} group=${inputWithTemplates.sample_group_id} templates=copy:${templatesInjected.copy},cta:${templatesInjected.cta},banner:${templatesInjected.banner},prompt:${templatesInjected.prompt},asset:${templatesInjected.asset}`,
+    `[ai-generator] run complete source=${inputWithVisual.source_type} brand=${inputWithVisual.brand.id} platform=${inputWithVisual.platform} samples=${result.samples.length} provider=${result.provider} dry_run=${result.dry_run} group=${inputWithVisual.sample_group_id} layout=${visual.layout_key} emphasis=${visual.visual_emphasis} format=${visual.platform_format} overrides=[${visual.effective_inputs.overridden_by_event.join(",")}] templates=copy:${templatesInjected.copy},cta:${templatesInjected.cta},banner:${templatesInjected.banner},prompt:${templatesInjected.prompt},asset:${templatesInjected.asset}`,
   );
 
   return {

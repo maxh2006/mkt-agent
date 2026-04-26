@@ -624,9 +624,36 @@ nullable `Event.visual_settings_json` JSONB column). Validated via
 `createEventSchema` / `updateEventSchema`). Event override is a
 **partial** override — only fields explicitly set are present;
 unspecified fields fall through to Brand defaults at compile time.
-`Post.image_url` + the media-validation layer (shipped 2026-04-23)
-already support any image-rendering backend once the image model +
-overlay renderer are in place.
+
+**Compiler activated in the live AI generation pipeline (2026-04-27).**
+`runGeneration()` in `src/lib/ai/generate.ts` now calls
+`compileVisualPrompt()` after templates load, threading
+`Brand.design_settings_json.visual_defaults` (via `loadBrandContext()`)
+and `Event.visual_settings_json` (via the events generate-drafts
+route) into the compiler. The compiled `CompiledVisualPrompt` is
+attached to `NormalizedGenerationInput.visual` and consumed by:
+
+- The prompt builder, which surfaces a new "Visual Direction" section
+  (subject focus, visual emphasis, layout family, platform format,
+  override audit, top negatives) so the AI's narrative `image_prompt`
+  field aligns with the structured cues. `PROMPT_VERSION` bumped
+  `v2-2026-04-22` → `v3-2026-04-27`.
+- The queue inserter, which writes a `visual_compiled` block per
+  draft into `generation_context_json` carrying `layout_key`,
+  `safe_zone_config` (for the renderer), `render_intent`,
+  `platform_format`, `visual_emphasis`, `subject_focus`,
+  `effective_inputs.overridden_by_event` (for audit), the compiled
+  `background_image_prompt` (for the future image model), and the
+  compiled `negative_prompt`.
+
+The narrative `image_prompt` field on `Post` is still AI-emitted —
+operators continue to see + edit a human-readable visual description.
+The image-rendering provider + overlay renderer remain deferred; their
+inputs are now ready (compiled positive + negative prompts + safe-zone
+config persisted on every generated draft). `Post.image_url` + the
+media-validation layer (shipped 2026-04-23) already support any
+image-rendering backend once the image model + overlay renderer are
+in place.
 
 **Live smoke.** `npm run visual:smoke` runs 27 assertions across 6
 cases exercising Brand-only / Event-override / layout fallback /

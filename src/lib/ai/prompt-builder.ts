@@ -10,8 +10,18 @@ import type {
  * Bumped whenever we make a semantic change to the prompt shape so
  * historical drafts can be replayed or compared. Stored into
  * `generation_context_json.prompt_version` on every inserted draft.
+ *
+ * v3 (2026-04-27): visual prompt compiler wired into the orchestrator.
+ *   New Visual Direction section between the platform + source-facts
+ *   sections; `image_prompt` field description updated to ask the
+ *   model's narrative to align with the structured visual cues.
+ *   Compiled outputs (background_image_prompt, negative_prompt,
+ *   layout_key, safe_zone_config, render_intent) are persisted
+ *   alongside in `generation_context_json.visual_compiled`.
+ * v2 (2026-04-22): Templates & Assets reference sections.
+ * v1 (2026-04-21): initial prompt shape.
  */
-export const PROMPT_VERSION = "v2-2026-04-22";
+export const PROMPT_VERSION = "v3-2026-04-27";
 
 /**
  * Structured prompt passed to the provider boundary. We intentionally
@@ -62,6 +72,7 @@ export function buildPrompt(input: NormalizedGenerationInput): StructuredPrompt 
     defaultHashtagsSection(input),
     sampleCaptionsSection(input),
     platformSection(input),
+    visualDirectionSection(input), // no-op when input.visual is absent
     sourceFactsSection(input),
     eventOverrideSection(input), // no-op when not event-derived
     ...referenceLibrarySections(input.templates), // all no-ops when empty
@@ -113,7 +124,7 @@ function outputSchema(): OutputSchema {
       banner_text:
         "Optional short overlay text for the image; null if the post shouldn't have overlay text.",
       image_prompt:
-        "One-paragraph visual direction for a future image-generation step. Describes scene, mood, and brand cues. No negative prompts, no model-specific syntax.",
+        "One-paragraph narrative visual direction that ALIGNS with the Visual Direction section above. Operator-readable preview only — the compiled prompt that actually drives the image model is composed separately and stored in generation metadata. Describe scene, mood, and brand cues consistent with the resolved subject_focus, visual emphasis, and layout. Do not contradict the structured visual cues or mention forbidden elements. No negative prompts, no model-specific syntax.",
     },
   };
 }
@@ -194,6 +205,50 @@ function sampleCaptionsSection(input: NormalizedGenerationInput): PromptSection 
   return {
     heading: "Sample Captions (imitate tone + structure, not content)",
     body,
+  };
+}
+
+/**
+ * Visual Direction — surfaces the resolved structured visual cues from
+ * the hidden compiler so the AI's narrative `image_prompt` field can
+ * align. The compiled positive/negative prompts that actually drive
+ * the image model live in `generation_context_json.visual_compiled`;
+ * this section is purely about steering the AI's narrative description.
+ *
+ * No-op when `input.visual` is absent (e.g. test paths that bypass the
+ * orchestrator).
+ */
+function visualDirectionSection(input: NormalizedGenerationInput): PromptSection {
+  if (!input.visual) return { heading: "", body: "" };
+  const v = input.visual;
+  const lines: string[] = [];
+  lines.push(`Subject focus: ${v.subject_focus}`);
+  lines.push(`Visual emphasis: ${v.visual_emphasis}`);
+  lines.push(`Layout family: ${v.layout_key}`);
+  lines.push(`Platform format: ${v.platform_format}`);
+  if (v.effective_inputs.overridden_by_event.length > 0) {
+    lines.push(
+      `Event overrides on visual: ${v.effective_inputs.overridden_by_event.join(", ")}`,
+    );
+  }
+  // Surface the top of the negative-prompt anchors so the narrative
+  // image_prompt doesn't accidentally invoke forbidden elements.
+  // Keep it short — full negative prompt drives the image model later,
+  // not the AI text generator.
+  const topNegatives = v.negative_prompt
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 6);
+  if (topNegatives.length > 0) {
+    lines.push(
+      `Must NOT describe in image_prompt: ${topNegatives.join(", ")} (and no on-image text/typography of any kind).`,
+    );
+  }
+  return {
+    heading:
+      "Visual Direction (operator-resolved structured cues — narrative image_prompt must align)",
+    body: lines.join("\n"),
   };
 }
 

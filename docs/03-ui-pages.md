@@ -196,7 +196,12 @@ Create form includes:
   empty). `coerceEventVisualOverride()` from
   `src/lib/ai/visual/validation.ts` is the tolerant reader; out-of-enum
   legacy values are silently dropped on load so operators can re-pick
-  rather than seeing the form crash.
+  rather than seeing the form crash. **Active in generation
+  (2026-04-27)**: saved overrides now flow into the live AI generation
+  pipeline via `compileVisualPrompt()` — only fields the operator
+  explicitly sets override the brand defaults; everything else falls
+  through. The audited override list (`overridden_by_event`) is
+  persisted on every event-derived draft.
 
 Right-side panel on the Create page: **Sample Event Brief** — reference-only guidance.
 Shows 8 rows (Theme, Objective, Rules, Reward, Target Audience, CTA, Tone, Notes for AI)
@@ -374,6 +379,11 @@ error.
     without a `visual_defaults` block. `coerceVisualDefaults()` in
     `src/app/(app)/brands/page.tsx` is tolerant of out-of-enum values
     on read — falls back to canonical defaults rather than rejecting.
+    **Active in generation (2026-04-27)**: saved values now feed the
+    live AI generation pipeline via `compileVisualPrompt()` — the AI's
+    narrative `image_prompt` is steered to align with these cues, and
+    the compiled visual artifacts are persisted on every generated
+    draft for the future image-rendering provider + overlay renderer.
   - Benchmark Assets repeater — upload banner samples / mascots / recurring
     visual cues for AI image reference. Same upload-storage caveat as logos:
     the URL input persists, drag-drop is preview-only in this build.

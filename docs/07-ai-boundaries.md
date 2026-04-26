@@ -236,6 +236,39 @@ never crashes on hand-edited JSON. Empty override blocks round-trip as
 `null` to keep payloads clean — events without `visual_settings_json`
 behave identically to events with `{}` (both = "no override").
 
+**Compiler wired into live generation (2026-04-27).** `runGeneration()`
+in `src/lib/ai/generate.ts` now calls `compileVisualPrompt()` for
+every generation. `BrandContext` carries `visual_defaults` (lifted
+from `design_settings_json.visual_defaults` via
+`coerceBrandVisualDefaults()` server-side; falls back to
+`DEFAULT_BRAND_VISUAL_DEFAULTS` for legacy brands). `EventOverride`
+carries `visual_settings` (the partial override block, null when
+absent). The compiled output is attached to
+`NormalizedGenerationInput.visual` and consumed by:
+
+- The prompt builder — new "Visual Direction" section between Platform
+  and Source Facts. Surfaces resolved `subject_focus`,
+  `visual_emphasis`, `layout_key`, `platform_format`, override audit,
+  and top compiled negatives. The `image_prompt` field description in
+  the output schema instructs the model to produce a narrative that
+  aligns with these cues — the narrative is operator-readable preview;
+  the compiled prompt that drives the image model lives separately in
+  generation metadata. `PROMPT_VERSION` is now `v3-2026-04-27`.
+- The queue inserter — writes a `visual_compiled` block per draft in
+  `generation_context_json`: `layout_key`, `safe_zone_config`,
+  `render_intent`, `platform_format`, `visual_emphasis`,
+  `subject_focus`, `effective_inputs.overridden_by_event`,
+  `background_image_prompt`, `negative_prompt`. This is the contract
+  the future image-rendering provider + overlay renderer consume.
+
+Backward safety: brands without a `visual_defaults` block load cleanly
+(canonical defaults); events without `visual_settings_json` produce
+zero-override compiles; non-event source types (`big_win`, `promo`,
+`hot_games`, `educational`) pass `event: null` to the compiler. The
+stub provider continues to work — `image_prompt` field still gets
+emitted, just now aligned with the structured direction. Real
+image-model + overlay rendering remain deferred.
+
 **Precedence** (mirrors the text pipeline): Brand Management (base) →
 source facts (context) → Event brief (override) → Templates (supporting
 library, never authoritative). Event override is per-field —

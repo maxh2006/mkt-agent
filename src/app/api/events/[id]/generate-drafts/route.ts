@@ -10,6 +10,7 @@ import {
   formatPostingInstance,
 } from "@/lib/posting-instance";
 import { runGeneration, brandOr404, normalizers } from "@/lib/ai/generate";
+import { coerceEventVisualOverride } from "@/lib/ai/visual/validation";
 import type { Platform } from "@/generated/prisma/enums";
 import type { EventOverride } from "@/lib/ai/types";
 
@@ -87,6 +88,15 @@ export async function POST(
 
   const postingSummary = piConfig ? formatPostingInstance(piConfig) : null;
 
+  // Lift the event-level visual override block once per generation run
+  // (it's the same for every slot). Empty / missing JSON resolves to
+  // an empty object — null is what the visual compiler treats as "no
+  // override; fall through to brand defaults".
+  const eventVisualSettings = (() => {
+    const v = coerceEventVisualOverride(event.visual_settings_json);
+    return Object.keys(v).length > 0 ? v : null;
+  })();
+
   let slotsProcessed = 0;
   let draftsCreated = 0;
   const errors: Array<{ occurrence: string; platform: string; error: string }> = [];
@@ -115,6 +125,7 @@ export async function POST(
         occurrence_iso: instanceKey,
         start_at: event.start_at ? event.start_at.toISOString() : null,
         end_at: event.end_at ? event.end_at.toISOString() : null,
+        visual_settings: eventVisualSettings,
       };
 
       const input = normalizers.normalizeEvent({

@@ -33,6 +33,55 @@ Current execution priority (per ROADMAP.md):
 ## Done Tasks
 
 ### 2026-04-27
+- Task: Phase 4 — Wire compileVisualPrompt() into runGeneration() (activation)
+  - Status: Complete (compiler now active in live AI generation pipeline; no Prisma migration; backward-compatible additive change)
+  - Why: Phase 4 visual input system shipped end-to-end on the operator side earlier today (Brand Simple Mode UI + Event Visual Override UI), but `runGeneration()` was never calling the compiler. Saved Brand + Event visual settings sat in JSON columns unread; the AI's narrative `image_prompt` field was drafted with no awareness of the operator's structured choices. This task is the activation step.
+  - Files modified:
+    - `src/lib/ai/visual/validation.ts` — added `coerceBrandVisualDefaults()` tolerant reader (mirrors the existing `coerceEventVisualOverride()` shape; falls back per-field to `DEFAULT_BRAND_VISUAL_DEFAULTS` for legacy brands).
+    - `src/lib/ai/types.ts` — extended `BrandContext` with required `visual_defaults: BrandVisualDefaultsInput` (loader always fills it). Extended `EventOverride` with `visual_settings: EventVisualOverrideInput | null` (null when event has no override block). Extended `NormalizedGenerationInput` with optional `visual?: CompiledVisualPrompt` (orchestrator populates before `buildPrompt`; off-pipeline call sites leave it undefined and the inserter skips the persistence block).
+    - `src/lib/ai/load-brand.ts` — uses `coerceBrandVisualDefaults(extractVisualDefaultsRaw(b.design_settings_json))` to lift the saved block into `BrandContext.visual_defaults`. Tiny `extractVisualDefaultsRaw()` helper isolates the JSON-shape extraction.
+    - `src/app/api/events/[id]/generate-drafts/route.ts` — calls `coerceEventVisualOverride(event.visual_settings_json)` once per run; sets `EventOverride.visual_settings` to the resulting block or `null` (when empty).
+    - `src/lib/ai/generate.ts` — orchestrator now calls `compileVisualPrompt({brand: input.brand.visual_defaults, event: input.event?.visual_settings ?? null, platform, source_facts})` after templates load and before `buildPrompt`. Result is attached as `inputWithVisual.visual` and threaded through prompt build, provider call, and queue insert. Log line gains `layout=… emphasis=… format=… overrides=[…]` for observability.
+    - `src/lib/ai/prompt-builder.ts` — new `visualDirectionSection()` between `platformSection()` and `sourceFactsSection()`. Surfaces `subject_focus`, `visual_emphasis`, `layout_key`, `platform_format`, `overridden_by_event` audit, and the top ~6 compiled negatives. The `image_prompt` field description in `outputSchema()` updated to instruct alignment with the structured cues. `PROMPT_VERSION` bumped `v2-2026-04-22` → `v3-2026-04-27` with a doc-comment changelog.
+    - `src/lib/ai/queue-inserter.ts` — writes `generation_context_json.visual_compiled` block per draft when `input.visual` is present: `layout_key`, `safe_zone_config`, `render_intent`, `platform_format`, `visual_emphasis`, `subject_focus`, `effective_inputs` (incl. `overridden_by_event`), `background_image_prompt`, `negative_prompt`. `promptVersionFromEnv()` fallback bumped to `v3-2026-04-27` to match the prompt builder.
+    - Docs: `docs/00-architecture.md` (Visual input architecture Product rule extended with the activation paragraph), `docs/07-ai-boundaries.md` (new "Compiler wired into live generation" paragraph alongside the Brand/Event persistence notes), `docs/03-ui-pages.md` (Brand Design tab + Event Visual Override section gain "Active in generation" notes), `ROADMAP.md` (Phase 4 sub-bullet 4 status note: compiler now wired into `runGeneration()`).
+    - `WORKLOG.md` — this entry; Ongoing entry removed.
+  - Compiler input wiring:
+    - Brand: `Brand.design_settings_json.visual_defaults` → `BrandContext.visual_defaults` (filled with canonical defaults if missing).
+    - Event: `Event.visual_settings_json` → `EventOverride.visual_settings` (null when event has no overrides; partial when some are set).
+    - Platform + source facts: already in `NormalizedGenerationInput` from each per-source normalizer.
+  - Compiler outputs now used downstream:
+    - **Prompt builder** consumes `subject_focus`, `visual_emphasis`, `layout_key`, `platform_format`, top of `negative_prompt`, and `effective_inputs.overridden_by_event` — keeps the AI's narrative `image_prompt` aligned with the structured direction.
+    - **Queue inserter** persists the full compiled artifact set under `generation_context_json.visual_compiled` for the future image-rendering provider + overlay renderer.
+  - Generation metadata added per draft:
+    - `visual_compiled.layout_key` — which canonical layout the renderer will use
+    - `visual_compiled.safe_zone_config` — `{ zones, gradient_overlay? }` for the overlay renderer
+    - `visual_compiled.render_intent` — locked `"ai_background_then_overlay"` (forward compat for future render intents)
+    - `visual_compiled.platform_format` — resolved square / portrait / landscape / story
+    - `visual_compiled.visual_emphasis` + `visual_compiled.subject_focus` — operator-resolved focal direction
+    - `visual_compiled.effective_inputs` — `{visual_style, visual_emphasis, main_subject_type, layout_family, overridden_by_event[]}` — audit trail
+    - `visual_compiled.background_image_prompt` + `visual_compiled.negative_prompt` — ready for the image model
+  - Backward compatibility:
+    - Legacy brands without `design_settings_json.visual_defaults` → `coerceBrandVisualDefaults()` returns canonical defaults; pipeline runs identically to before on the surface.
+    - Events without `visual_settings_json` → `EventOverride.visual_settings = null` → compiler treats as "no override" → uses pure brand visuals.
+    - Non-event source types (`big_win`, `promo`, `hot_games`, `educational`) → `input.event = null` → compiler uses pure brand visuals.
+    - Stub provider unchanged; Anthropic provider unchanged in shape (just sees one extra prompt section + an updated `image_prompt` field description).
+    - Refine modal unchanged (doesn't read `visual_compiled` today; can adopt later as a small follow-up).
+    - The narrative `image_prompt` text field on `Post` is still AI-emitted and operator-readable as before.
+  - Out of scope (deliberately):
+    - No image-rendering provider wiring (compiled `background_image_prompt` + `negative_prompt` are persisted ready, but no model is called).
+    - No deterministic overlay renderer (Satori/sharp/etc.).
+    - No changes to `Post.image_url` (operator-driven; pre-dispatch validation already in place).
+    - No changes to Brand Management UI, Event Visual Override UI, or Refine modal.
+    - No removal of the legacy free-text design notes (deprecated UI section already in place; prompt builder never read them anyway).
+    - No new env vars, no Prisma migration, no API surface change.
+  - Verification:
+    - `npx tsc --noEmit` clean (EXIT=0).
+    - `npm run visual:smoke` clean (27/27 assertions across 6 cases) — confirms the compiler itself is unchanged.
+    - **End-to-end NOT exercised in a browser this session** — terminal-only. After deploy, recommended smoke: (1) trigger a generation from `POST /api/ai/generate-from-fixture` (or from a real Event "Generate Drafts" click), (2) inspect the resulting `Post.generation_context_json.visual_compiled` — confirm all expected keys present + `effective_inputs.overridden_by_event` matches the operator's saved overrides.
+  - Per the durable commit-batching rule: ROADMAP + 3 docs + WORKLOG + 6 source files land in the same commit.
+
+### 2026-04-27
 - Task: Phase 4 — Event Visual Override UI + persistence
   - Status: Complete (UI shipped, validation wired, migration applied via deploy)
   - Why: Phase 4 follow-up #2 from 2026-04-23. Brand visual defaults shipped earlier today; this is the matching event-level override layer. Operators can now define ONLY what is special for a specific event while everything unspecified falls through to the brand defaults via `compileVisualPrompt()`.

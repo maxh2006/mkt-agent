@@ -17,6 +17,11 @@ import type {
   SampleCaption,
 } from "@/lib/validations/brand";
 import type { AssetType } from "@/lib/validations/template";
+import type {
+  BrandVisualDefaultsInput,
+  EventVisualOverrideInput,
+} from "@/lib/ai/visual/validation";
+import type { CompiledVisualPrompt } from "@/lib/ai/visual/types";
 
 // ─── Brand + Event context ───────────────────────────────────────────────────
 
@@ -30,6 +35,12 @@ export interface BrandContext {
   voice: VoiceSettings;
   design: DesignSettings | Record<string, unknown>;
   sample_captions: SampleCaption[];
+  /**
+   * Brand-level structured visual defaults (Phase 4). Always present —
+   * the loader fills missing blocks with `DEFAULT_BRAND_VISUAL_DEFAULTS`
+   * so the visual compiler always has a valid base layer.
+   */
+  visual_defaults: BrandVisualDefaultsInput;
 }
 
 /**
@@ -52,6 +63,12 @@ export interface EventOverride {
   occurrence_iso: string | null; // the specific occurrence datetime for this generation
   start_at: string | null;
   end_at: string | null;
+  /**
+   * Event-level structured visual override (Phase 4). Null when the
+   * event has no override block — the visual compiler falls through to
+   * the brand's `visual_defaults` field-by-field.
+   */
+  visual_settings: EventVisualOverrideInput | null;
 }
 
 /**
@@ -235,6 +252,19 @@ export interface NormalizedGenerationInput {
    * proceeds normally.
    */
   templates?: BrandTemplates;
+
+  /**
+   * Compiled visual prompt + layout/safe-zone config (Phase 4). Filled
+   * by the orchestrator via `compileVisualPrompt()` after templates
+   * load and before `buildPrompt()` runs. The prompt builder reads it
+   * to surface a Visual Direction section so the AI's narrative
+   * `image_prompt` aligns with the structured visual cues. The queue
+   * inserter persists it under `generation_context_json.visual_compiled`
+   * for the future image-rendering provider + overlay renderer.
+   * Optional so off-pipeline call sites (tests, fixtures invoked
+   * directly) keep typechecking.
+   */
+  visual?: CompiledVisualPrompt;
 }
 
 // ─── AI output shape ─────────────────────────────────────────────────────────

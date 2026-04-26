@@ -6,6 +6,7 @@ import {
   type SampleCaption,
   type VoiceSettings,
 } from "@/lib/validations/brand";
+import { coerceBrandVisualDefaults } from "@/lib/ai/visual/validation";
 import type { BrandContext } from "./types";
 
 /**
@@ -46,7 +47,22 @@ export async function loadBrandContext(
     voice: coerceVoice(b.voice_settings_json),
     design: coerceDesign(b.design_settings_json),
     sample_captions: coerceCaptions(b.sample_captions_json),
+    visual_defaults: coerceBrandVisualDefaults(extractVisualDefaultsRaw(b.design_settings_json)),
   };
+}
+
+/**
+ * Pulls the `visual_defaults` sub-object out of a raw `design_settings_json`
+ * blob. Returns `null` (which `coerceBrandVisualDefaults` treats as
+ * "use defaults") when the design block is missing, malformed, or has
+ * no `visual_defaults` key. Brands created before the Simple Mode UI
+ * shipped (2026-04-27) have no such key — they cleanly degrade to the
+ * canonical defaults instead of crashing the pipeline.
+ */
+function extractVisualDefaultsRaw(designRaw: unknown): unknown {
+  if (!designRaw || typeof designRaw !== "object") return null;
+  const r = designRaw as Record<string, unknown>;
+  return r.visual_defaults ?? null;
 }
 
 export async function brandOr404(brandId: string): Promise<BrandContext> {
