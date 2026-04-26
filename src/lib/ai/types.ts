@@ -23,6 +23,7 @@ import type {
 } from "@/lib/ai/visual/validation";
 import type { CompiledVisualPrompt } from "@/lib/ai/visual/types";
 import type { BackgroundImageResult } from "@/lib/ai/image/types";
+import type { CompositedImageResult } from "@/lib/ai/render/types";
 
 // ─── Brand + Event context ───────────────────────────────────────────────────
 
@@ -273,10 +274,23 @@ export interface NormalizedGenerationInput {
    * call completes — one shared result per run, replicated to every
    * sibling draft via `generation_context_json.image_generation`. NOT
    * the final publishable image — the deterministic overlay renderer
-   * (still deferred) is what produces that. Optional so off-pipeline
-   * call sites and pre-image-provider regressions keep typechecking.
+   * produces that downstream. Optional so off-pipeline call sites and
+   * pre-image-provider regressions keep typechecking.
    */
   image_result?: BackgroundImageResult;
+
+  /**
+   * Final composited image result (Phase 4 overlay renderer,
+   * 2026-04-27). Populated by the orchestrator after the image
+   * provider call — composites text + brand logos onto the AI
+   * background. One shared result per run; queue inserter replicates
+   * onto every sibling draft via `generation_context_json.composited_image`.
+   * In MVP the artifact lives only as a `data:` URI in metadata —
+   * Post.image_url stays untouched until the GCS storage migration
+   * promotes data URIs to hosted https URLs. Optional so off-
+   * pipeline call sites keep typechecking.
+   */
+  composited?: CompositedImageResult;
 }
 
 // ─── AI output shape ─────────────────────────────────────────────────────────

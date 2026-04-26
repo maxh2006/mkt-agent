@@ -320,15 +320,37 @@ background-only artifacts are never auto-shipped to Manus as the
 final creative.
 
 What's deferred:
-- The deterministic overlay renderer that composites text + logos
-  onto the AI background using `safe_zone_config` and produces the
-  FINAL publishable image. This is the next missing piece before
-  `Post.image_url` can be auto-populated by AI generation.
 - GCS-backed `artifact_url` (currently `data:` URI in MVP — works
-  end-to-end, just bloats `generation_context_json` at scale).
-- Additional real adapters (Imagen / Stability / etc. — Gemini
-  shipped today).
-- Image inspector UI in Content Queue.
+  end-to-end, just bloats `generation_context_json` at scale). This
+  is also the gate that finally unblocks auto-population of
+  `Post.image_url` from the composite, since Manus dispatch requires
+  http(s) URLs.
+- Additional real image-model adapters (Imagen / Stability / etc. —
+  Gemini shipped today).
+- Image inspector UI in Content Queue showing the composite preview
+  + visual_compiled resolved direction.
+
+**Deterministic overlay renderer (2026-04-27 — shipped).** Module
+`src/lib/ai/render/` composites Post text + brand logo onto the AI
+background using the layout spec's text zones / safe zones / logo
+slot. Satori (JSX → SVG) + @resvg/resvg-js (SVG → PNG). Inputs:
+`image_generation.artifact_url` (or brand-color fallback when null),
+`visual_compiled`, first sample's `headline / caption / cta /
+banner_text`, brand logos with SSRF-safe fetch. Output:
+`Post.generation_context_json.composited_image` per draft —
+`{status, artifact_url (data URI), width, height, layout_key,
+platform_format, visual_emphasis, background_fallback, logo_drawn,
+error_code, error_message, generated_at, duration_ms,
+render_version}`. Error taxonomy: `MISSING_INPUTS` /
+`BACKGROUND_DECODE_FAILED` / `FONT_LOAD_FAILED` / `SATORI_FAILED` /
+`RESVG_FAILED` / `UNKNOWN`. One composite per run, mirrored across
+siblings (text deltas between siblings are minor; per-sibling
+re-renders aren't worth the cost in MVP). The orchestrator wraps
+the call in try/catch — text drafts always ship even if the renderer
+throws. **`Post.image_url` is STILL not touched** — gated on the
+GCS storage migration that converts the data URI to a Manus-
+dispatchable https URL. `npm run render:smoke` produces a sample
+composite from a synthetic request without touching DB / network.
 
 **Precedence** (mirrors the text pipeline): Brand Management (base) →
 source facts (context) → Event brief (override) → Templates (supporting

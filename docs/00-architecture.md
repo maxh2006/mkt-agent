@@ -664,9 +664,51 @@ we encode them as `data:image/png;base64,…` URIs and store directly
 in `image_generation.artifact_url`. DB cost: ~100KB-1MB per draft per
 generation run; acceptable while volume is low. Migrating to a
 GCS-backed `https://…` URL is a follow-up (the field is stable; only
-the URL scheme changes). The future overlay renderer reads the data
+the URL scheme changes). The overlay renderer (below) reads the data
 URI directly via `Buffer.from(base64, "base64")` without hitting any
 external storage.
+
+**Deterministic overlay renderer (2026-04-27).** New module
+`src/lib/ai/render/` composites Post text + brand logo onto the AI
+background using the layout's text zones / safe zones / logo slot
+from `visual_compiled.safe_zone_config` + the layout spec at
+`src/lib/ai/visual/layouts.ts`. Toolchain: `satori` (JSX → SVG) +
+`@resvg/resvg-js` (SVG → PNG). No headless browser, no Cairo dep,
+no canvaskit. Bundled fonts: Open Sans Regular + Bold (OFL-licensed,
+TTFs committed under `public/fonts/`). The orchestrator runs
+`renderFinalImage()` AFTER background-image generation with try/catch
+isolation — text drafts always ship even if the renderer errors.
+
+Inputs:
+- `image_generation.artifact_url` (data URI when present; null →
+  brand-color solid fallback)
+- `visual_compiled` (layout, safe zones, gradient overlay, format)
+- First sample's `headline / caption / cta / banner_text`
+- `Brand.design_settings_json.logos[layout.logo_slot.variant]` (with
+  SSRF-safe fetch via `isPrivateHost` from media-validation; failures
+  silently skip the logo)
+
+Output: `Post.generation_context_json.composited_image` per draft
+(replicated from one render per run across all sibling drafts).
+Fields: `status`, `artifact_url` (data URI), `width`, `height`,
+`layout_key`, `platform_format`, `visual_emphasis`,
+`background_fallback`, `logo_drawn`, `error_code`, `error_message`,
+`generated_at`, `duration_ms`, `render_version` (`v1-2026-04-27`).
+Error taxonomy: `MISSING_INPUTS` / `BACKGROUND_DECODE_FAILED` /
+`FONT_LOAD_FAILED` / `SATORI_FAILED` / `RESVG_FAILED` / `UNKNOWN`.
+
+**`Post.image_url` is STILL not touched.** Manus media-validation
+requires http(s) URLs; data URIs would block dispatch. The GCS
+storage migration follow-up promotes both `image_generation.artifact_url`
+and `composited_image.artifact_url` to hosted URLs and at THAT point
+auto-populates `Post.image_url` from the composite. Until then,
+operators continue to paste a hosted image URL manually for posts
+they want to publish.
+
+Smoke: `npm run render:smoke` builds a synthetic request and writes
+a sample PNG to `/tmp/render-smoke.png` (~140KB at 1080x1080, ~1.1s
+on the dev box). Confirms the Satori + Resvg pipeline is working
+without depending on the AI providers.
 
 **Compiler activated in the live AI generation pipeline (2026-04-27).**
 `runGeneration()` in `src/lib/ai/generate.ts` now calls

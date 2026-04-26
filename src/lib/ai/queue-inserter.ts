@@ -130,6 +130,36 @@ export async function insertSamplesAsDrafts(args: {
       };
     }
 
+    // Phase 4 (2026-04-27): persist the deterministic overlay
+    // renderer's composited image. Shared across siblings in this
+    // run — orchestrator renders ONCE per run and the inserter
+    // replicates here. `artifact_url` is a `data:image/png;base64,…`
+    // URI in MVP; the GCS storage migration follow-up will swap it
+    // for a hosted https URL (same field name; only the URL scheme
+    // changes). NOTE: `Post.image_url` is STILL NOT touched — that
+    // field stays gated on hosted URLs the Manus media-validation
+    // path can dispatch. Operators see the composite as a preview in
+    // the queue (image inspector UI is a separate follow-up).
+    if (input.composited) {
+      const c = input.composited;
+      generationContext.composited_image = {
+        status: c.status,
+        artifact_url: c.artifact_url,
+        width: c.width,
+        height: c.height,
+        layout_key: c.layout_key,
+        platform_format: c.platform_format,
+        visual_emphasis: c.visual_emphasis,
+        background_fallback: c.background_fallback,
+        logo_drawn: c.logo_drawn,
+        error_code: c.error_code,
+        error_message: c.error_message,
+        generated_at: c.generated_at,
+        duration_ms: c.duration_ms,
+        render_version: c.render_version,
+      };
+    }
+
     // Hot Games: mirror the existing refine contract — the refine modal
     // reads generation_context_json.type === "hot_games_snapshot" and
     // surfaces the frozen ranked-games list. Tag the node with `type`

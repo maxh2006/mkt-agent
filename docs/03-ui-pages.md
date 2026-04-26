@@ -209,9 +209,16 @@ Create form includes:
   per `docs/08-deployment.md`; until then the safe-prod default
   remains the stub. When the real provider runs, `artifact_url` is a
   `data:image/png;base64,…` URI containing the AI-generated background.
-  Final composited image rendering (text + logos overlay) is still
-  deferred — the operator-facing `Post.image_url` field is not
-  populated by AI and remains a manual / future-renderer concern.
+  **Overlay renderer active (2026-04-27)**: every generated draft
+  ALSO carries `generation_context_json.composited_image` — Post text
+  + brand logo composited onto the AI background (or onto a brand-
+  color fallback when no AI artifact is available). Layout / safe
+  zones / logo slot all sourced from the layout spec. The composite
+  is also a `data:image/png;base64,…` URI in MVP. **`Post.image_url`
+  remains intentionally untouched** — Manus dispatch only accepts
+  http(s) URLs, so auto-population of that field is gated on the GCS
+  storage migration follow-up. Operators continue to paste a hosted
+  image URL manually for posts they want to publish today.
 
 Right-side panel on the Create page: **Sample Event Brief** — reference-only guidance.
 Shows 8 rows (Theme, Objective, Rules, Reward, Target Audience, CTA, Tone, Notes for AI)

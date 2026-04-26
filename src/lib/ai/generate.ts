@@ -7,6 +7,8 @@ import { loadBrandTemplates, countTemplates } from "./load-templates";
 import { compileVisualPrompt } from "./visual/compile";
 import { generateBackgroundImage } from "./image/client";
 import { buildImageErrorResult, type BackgroundImageRequest, type BackgroundImageResult, type ImageProviderErrorCode } from "./image/types";
+import { renderFinalImage } from "./render";
+import { buildRenderErrorResult, type CompositedImageResult, type RenderRequest } from "./render/types";
 import type { NormalizedGenerationInput } from "./types";
 
 /**
@@ -120,8 +122,66 @@ export async function runGeneration(args: {
     image_result: imageResult,
   };
 
+  // Deterministic overlay renderer — composites Post text + brand
+  // logo onto the AI background using the layout's safe zones / text
+  // zones / logo slot. One composite per run; siblings share it (text
+  // deltas are minor and per-sibling renders aren't worth the cost in
+  // MVP). The first sample's text drives the composite. Failure path
+  // mirrors image generation: the renderer returns a structured
+  // error result rather than throwing, but we still wrap in try/catch
+  // as belt-and-braces for unexpected throws (e.g. native binding
+  // crashes from Resvg).
+  const firstSample = result.samples[0];
+  const renderRequest: RenderRequest = {
+    background_artifact_url: imageResult.artifact_url,
+    visual,
+    text: {
+      headline: firstSample?.headline ?? null,
+      caption: firstSample?.caption ?? null,
+      cta: firstSample?.cta ?? null,
+      banner: firstSample?.banner_text ?? null,
+    },
+    brand: {
+      name: args.input.brand.name,
+      primary_color: args.input.brand.primary_color,
+      secondary_color: args.input.brand.secondary_color,
+      accent_color: args.input.brand.accent_color,
+      logos: extractBrandLogos(args.input.brand.design),
+    },
+    trace: {
+      brand_id: args.input.brand.id,
+      sample_group_id: args.input.sample_group_id,
+      source_type: args.input.source_type,
+      platform: args.input.platform,
+    },
+  };
+
+  const renderStartedAt = Date.now();
+  const renderGeneratedAt = new Date(renderStartedAt).toISOString();
+  let composited: CompositedImageResult;
+  try {
+    composited = await renderFinalImage(renderRequest);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown render failure";
+    console.warn(
+      `[ai-render] FAILED source=${args.input.source_type} brand=${args.input.brand.id} group=${args.input.sample_group_id} err=${message}`,
+    );
+    composited = buildRenderErrorResult({
+      request: renderRequest,
+      error_code: "UNKNOWN",
+      error_message: message,
+      generated_at: renderGeneratedAt,
+      duration_ms: Date.now() - renderStartedAt,
+    });
+  }
+
+  const inputWithComposite: NormalizedGenerationInput = {
+    ...inputWithImage,
+    composited,
+  };
+
   const inserted = await insertSamplesAsDrafts({
-    input: inputWithImage,
+    input: inputWithComposite,
     samples: result.samples,
     provider: result.provider,
     dry_run: result.dry_run,
@@ -130,7 +190,7 @@ export async function runGeneration(args: {
   });
 
   console.log(
-    `[ai-generator] run complete source=${inputWithImage.source_type} brand=${inputWithImage.brand.id} platform=${inputWithImage.platform} samples=${result.samples.length} provider=${result.provider} dry_run=${result.dry_run} group=${inputWithImage.sample_group_id} layout=${visual.layout_key} emphasis=${visual.visual_emphasis} format=${visual.platform_format} overrides=[${visual.effective_inputs.overridden_by_event.join(",")}] image=${imageResult.provider}:${imageResult.status} templates=copy:${templatesInjected.copy},cta:${templatesInjected.cta},banner:${templatesInjected.banner},prompt:${templatesInjected.prompt},asset:${templatesInjected.asset}`,
+    `[ai-generator] run complete source=${inputWithComposite.source_type} brand=${inputWithComposite.brand.id} platform=${inputWithComposite.platform} samples=${result.samples.length} provider=${result.provider} dry_run=${result.dry_run} group=${inputWithComposite.sample_group_id} layout=${visual.layout_key} emphasis=${visual.visual_emphasis} format=${visual.platform_format} overrides=[${visual.effective_inputs.overridden_by_event.join(",")}] image=${imageResult.provider}:${imageResult.status} composite=${composited.status}${composited.background_fallback ? "/fallback" : ""} templates=copy:${templatesInjected.copy},cta:${templatesInjected.cta},banner:${templatesInjected.banner},prompt:${templatesInjected.prompt},asset:${templatesInjected.asset}`,
   );
 
   return {
@@ -164,3 +224,31 @@ export type {
 // modules import {db} transitively. (Intentionally referenced so the
 // import is retained in build output.)
 void db;
+
+/**
+ * Pulls the four brand-logo URLs out of `BrandContext.design` for the
+ * renderer. The shape lives in `Brand.design_settings_json.logos`;
+ * `loadBrandContext()` keeps the design block as a tolerant
+ * `Record<string, unknown>` so we re-extract here. Missing / invalid
+ * entries are returned as null — the renderer treats null as "skip
+ * this logo variant" without erroring.
+ */
+function extractBrandLogos(
+  design: NormalizedGenerationInput["brand"]["design"],
+): RenderRequest["brand"]["logos"] {
+  const logos = (design as Record<string, unknown>)?.logos;
+  if (!logos || typeof logos !== "object") {
+    return { main: null, square: null, horizontal: null, vertical: null };
+  }
+  const r = logos as Record<string, unknown>;
+  const pick = (k: string): string | null => {
+    const v = r[k];
+    return typeof v === "string" && v.trim().length > 0 ? v.trim() : null;
+  };
+  return {
+    main: pick("main"),
+    square: pick("square"),
+    horizontal: pick("horizontal"),
+    vertical: pick("vertical"),
+  };
+}

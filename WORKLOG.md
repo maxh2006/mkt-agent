@@ -34,6 +34,61 @@ Current execution priority (per ROADMAP.md):
 ## Done Tasks
 
 ### 2026-04-27
+- Task: Phase 4 — Deterministic overlay renderer (Satori + Resvg)
+  - Status: Complete (renderer wired, persisted, smoke-tested; closes Phase 4 sub-bullet 6)
+  - Why: Phase 4 visual chain was input-side complete and provider-side complete (Nano Banana 2 wired earlier today), but no step was actually composing the final image. Operators couldn't see what the post would look like once published. This task is the composite step: Post text + brand logo overlaid on the AI background using the layout spec's text zones / safe zones / logo slot.
+  - Files added (new `src/lib/ai/render/` module):
+    - `types.ts` — `RenderRequest`, `CompositedImageResult`, `RenderErrorCode` taxonomy (`MISSING_INPUTS` / `BACKGROUND_DECODE_FAILED` / `FONT_LOAD_FAILED` / `SATORI_FAILED` / `RESVG_FAILED` / `UNKNOWN`), `RENDER_VERSION` (`v1-2026-04-27`), `buildRenderErrorResult()` helper.
+    - `fonts.ts` — module-level cached loader for the bundled Open Sans Regular + Bold TTFs from `public/fonts/`. Lazy promise, single read per process. Throws on missing files (caller classifies as `FONT_LOAD_FAILED`).
+    - `decode-bg.ts` — `decodeBackground()` parses `data:` URI → `{mime, bytes, data_uri}`. Returns null for empty / non-data inputs (renderer falls back to brand-color background). Throws on malformed data URIs.
+    - `fetch-logo.ts` — `fetchLogoBytes()` for brand logos. Reuses the existing `isPrivateHost()` guard from `src/lib/manus/media-validation.ts` to block SSRF on operator-set logo URLs. 5s timeout, 2MB cap, image-only Content-Type check. Returns null on any failure (logo silently skipped — never fatal).
+    - `compose.tsx` — pure JSX template Satori consumes. Reads layout text_zones (percentage rectangles → pixel coordinates per platform-format canvas), places `headline / caption / cta / banner` per slot with emphasis-driven font sizes (5.5% / 3.2% / 2.2% of canvas's smaller dimension for prominent / supporting / subtle), gradient overlay div for legibility behind text (top/bottom/left/right direction + extent + intensity), brand logo at `logo_slot` rect when bytes are available, white text with soft shadow for cross-background readability.
+    - `index.ts` — `renderFinalImage()` entry. Orchestrates: resolve layout → decode background (or fall back to brand color) → fetch logo (silent skip on failure) → load fonts → Satori → Resvg → data URI. Always returns a result; structured errors flow through `status: "error"` with `error_code` populated.
+    - `scripts/render-smoke.ts` — synthetic render test; writes `/tmp/render-smoke.png` and exits 0. New `npm run render:smoke` script. Confirms the pipeline works without depending on DB / AI providers.
+    - `public/fonts/OpenSans-Regular.ttf` + `OpenSans-Bold.ttf` — committed TTF files (~150KB each, OFL-licensed).
+  - Files modified:
+    - `package.json` — added `satori ^0.26.0` + `@resvg/resvg-js ^2.6.2` deps. Added `render:smoke` npm script.
+    - `src/lib/ai/types.ts` — extended `NormalizedGenerationInput` with optional `composited?: CompositedImageResult` (orchestrator → inserter handoff).
+    - `src/lib/ai/generate.ts` — orchestrator now constructs a `RenderRequest` from `args.input.brand` (with `extractBrandLogos()` helper that reads `design_settings_json.logos`), the compiled visual prompt, the image_result's artifact_url, and the FIRST sample's text fields. Calls `renderFinalImage()` AFTER background-image generation with a try/catch wrapper (renderer also handles errors internally; the wrapper is belt-and-braces for unexpected throws like Resvg native binding crashes). Result is attached as `inputWithComposite.composited` and threaded into queue insertion. Run-complete log line now ends with `composite=<status>[/fallback]`.
+    - `src/lib/ai/queue-inserter.ts` — writes `generation_context_json.composited_image` per draft when `input.composited` is present. Block fields: `status`, `artifact_url` (data URI), `width`, `height`, `layout_key`, `platform_format`, `visual_emphasis`, `background_fallback`, `logo_drawn`, `error_code`, `error_message`, `generated_at`, `duration_ms`, `render_version`. **`Post.image_url` deliberately not touched** — same MVP discipline as the image provider task.
+    - Docs: `docs/00-architecture.md` (new "Deterministic overlay renderer" subsection with full inputs / outputs / error taxonomy / smoke pointer), `docs/07-ai-boundaries.md` (renderer-shipped paragraph; updated deferred list to lift "overlay renderer is the next missing piece" → call out GCS storage as the next gate), `docs/03-ui-pages.md` (Brand Design + Event Visual Override "Active in generation" notes mention the composite is now persisted alongside the AI background).
+    - `ROADMAP.md` — Phase 4 sub-bullet 6 flipped ⏳ → ✅. Cross-references the GCS storage follow-up as the gate that finally auto-populates `Post.image_url`.
+    - `WORKLOG.md` — this entry; Ongoing entry removed.
+  - Toolchain choice (locked):
+    - **Satori + @resvg/resvg-js** — pure JS for Satori, native binding for Resvg. No headless browser (no Puppeteer / Playwright), no Cairo dep (not node-canvas), no canvaskit-wasm. Both packages install cleanly on the VM via npm.
+    - Bundled fonts: Open Sans Regular + Bold (OFL-licensed, fetched once from googlefonts/opensans GitHub repo, committed under `public/fonts/`). Multi-script support (Tagalog / Vietnamese / Japanese / Korean — for the OMEGA SEA expansion future) lands when those markets do; the `fonts.ts` array structure makes adding Noto family TTFs trivial. (Note: didn't bundle Inter because the upstream repo only ships woff2; Open Sans is functionally equivalent for our Latin-script needs and matches the same MVP profile.)
+  - Locked product calls (per the approved plan):
+    1. One composite per run, replicated across siblings (text deltas between siblings are minor; per-sibling renders aren't worth the cost in MVP).
+    2. AI background can be missing → solid brand-color fallback using `secondary_color → primary_color → accent_color → #1f2937`. Operators get a usable preview marked `background_fallback: true`.
+    3. Brand logo can be missing → silently skipped. Not an error.
+    4. **`Post.image_url` STILL intentionally untouched.** Manus dispatch only accepts http(s) URLs; data URIs would block all dispatches. The GCS storage migration follow-up is what unlocks auto-population.
+    5. No new env vars; renderer is pure code, always on.
+    6. Stub-mode AI generation continues to produce composites — they just sit on a brand-color fallback (no real AI artwork).
+  - Where artifact output is stored:
+    - `Post.generation_context_json.composited_image.artifact_url` — `data:image/png;base64,…` URI of the composited PNG. Same MVP storage pattern as the Gemini adapter; same GCS migration unblocks both. `Post.image_url` is NOT touched.
+  - Failure handling:
+    - Renderer never throws on operational errors — always returns `CompositedImageResult` with `status: "error"` + structured `error_code` + `error_message`.
+    - Orchestrator wraps the call in try/catch as belt-and-braces against unexpected throws (Resvg native binding crashes, OOM, etc.). Worst case → `error_code: "UNKNOWN"` persisted into composited_image.
+    - Background decode error → renderer fails (vs falling back); operator can re-trigger generation. Could be relaxed to fall-back-to-brand-color in a future iteration.
+    - Logo fetch failure (network, SSRF guard, oversize) → silent skip; composite renders without a logo.
+    - Font load failure → `FONT_LOAD_FAILED` (deploy-config error; should never happen in prod since fonts are committed).
+    - Text drafts ALWAYS ship — image failure never blocks the run.
+  - Verification:
+    - `npx tsc --noEmit` clean (EXIT=0).
+    - `npm run visual:smoke` clean (27/27 — compiler unchanged).
+    - `npm run render:smoke` produced a 140KB 1080x1080 PNG at `/tmp/render-smoke.png` in ~1.1s (brand-color fallback path; no AI background; no logo). Pipeline confirmed working.
+    - **Not yet exercised against a real Gemini-produced background or a real brand logo** — terminal-only session. Recommended manual smoke after deploy: trigger any generation through `POST /api/ai/generate-from-fixture` (with `ALLOW_AI_FIXTURES=true`) and inspect the resulting `Post.generation_context_json.composited_image` block.
+  - What remains deferred:
+    - **GCS-backed `artifact_url` migration** — the next missing piece. Replaces both `image_generation.artifact_url` and `composited_image.artifact_url` data URIs with hosted https URLs. AT THAT POINT auto-population of `Post.image_url` from the composite becomes possible (Manus dispatch will accept the URL).
+    - Image inspector UI in Content Queue showing the composite preview + visual_compiled resolved direction.
+    - Per-sibling composites (currently one render per run; siblings share). If operator feedback wants sample-specific composites, that's a small change.
+    - Multi-script font support beyond Latin (Noto Sans family for Tagalog / Vietnamese / Japanese / Korean — when SEA expansion lands per the OMEGA roadmap).
+    - Dynamic font sizing / autofit (currently fixed sizes per emphasis level scaled to canvas dimensions).
+    - Drop shadows / blur / vignette effects beyond solid + gradient overlay.
+    - Refine modal showing the composite + per-sample re-render UX.
+  - Per the durable commit-batching rule: ROADMAP + 3 docs + WORKLOG + package.json + 6 source files (5 new + 1 modified) + 2 font files + 1 smoke script land in the same commit.
+
+### 2026-04-27
 - Task: Phase 4 — Nano Banana 2 / Gemini real image-provider adapter
   - Status: Complete (first real background-image provider shipped behind the existing boundary; stub stays default; prod flip procedure + auth path fully documented BEFORE any prod activation)
   - Why: visual compiler emits a complete `background_image_prompt` + `negative_prompt` per generation but the stub-only image boundary couldn't actually produce an image. This task ships the first real provider so we can move toward real backgrounds, while keeping the safe stub default + same failure isolation.
