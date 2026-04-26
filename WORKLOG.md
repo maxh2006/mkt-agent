@@ -16,8 +16,8 @@ Current execution priority (per ROADMAP.md):
 
 ## Ongoing Tasks
 
-- **⏳ REMINDER — Top up Anthropic credits** (console.anthropic.com → Billing)
-- **⏳ REMINDER — Provision Gemini API key + enable billing on linked GCP project** before flipping `AI_IMAGE_PROVIDER=gemini` in prod. See `docs/08-deployment.md` "Image generation provider — Gemini / Nano Banana 2" for the full flip + verification procedure.
+- **⏳ REMINDER — Top up Anthropic credits** (console.anthropic.com → Billing). Required to flip `AI_PROVIDER=anthropic` in prod for real text generation.
+- **⏳ REMINDER — Upgrade Gemini API key to paid tier** (https://aistudio.google.com/api-keys → key settings → "Set up billing" / paid tier). Verified blocker on 2026-04-27: key + project + Generative Language API are all set up correctly, but the API key itself is on free tier and `gemini-3.1-flash-image-preview` (Nano Banana 2) has free-tier limit = 0. Local `npm run gemini:smoke` returns `429 RATE_LIMITED` with body `Quota exceeded for metric: ...generate_content_free_tier_requests`. Image-generation models are paid-tier-only; project-level billing isn't sufficient — the key itself must be opted in. Until upgraded, prod stays on `AI_IMAGE_PROVIDER=stub` (current safe-prod default; stub generates placeholder result with `artifact_url: null` — overlay renderer falls back to brand-color background, text drafts ship cleanly). When upgraded: re-run `npm run gemini:smoke` locally → if `OK`, follow the prod flip procedure in `docs/08-deployment.md` "Image generation provider — Gemini / Nano Banana 2".
   - Blocks: real AI generation in prod (Anthropic returns `403 Request not allowed` until credits exist)
   - Current account plan: Evaluation access (free, zero credits)
   - Ballpark: $5 minimum top-up ≈ 150+ full Event generate-drafts runs at sonnet-4.6 rates
