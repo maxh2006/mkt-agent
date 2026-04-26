@@ -235,6 +235,11 @@ model Event {
   platform_scope        Json?
   notes_for_ai          String?
   posting_instance_json Json?
+  /// Event-level visual override block (added 2026-04-27). Partial override
+  /// shape — see `src/lib/ai/visual/validation.ts#eventVisualOverrideSchema`.
+  /// Null / absent = no override; the visual compiler falls through to the
+  /// Brand's `design_settings_json.visual_defaults` field-by-field.
+  visual_settings_json  Json?
   auto_generate_posts   Boolean @default(false)
   created_at DateTime    @default(now())
   updated_at DateTime    @updatedAt

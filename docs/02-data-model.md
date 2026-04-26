@@ -116,6 +116,7 @@ so renames can be absorbed in one place.
 - platform_scope (JSON array of platform strings)
 - notes_for_ai
 - posting_instance_json (JSON: { frequency, time, weekdays?, month_days? })
+- visual_settings_json (JSON, nullable — added 2026-04-27 with the Event Visual Override UI). Partial event-level visual override block consumed by `compileVisualPrompt()` in `src/lib/ai/visual/compile.ts`. Shape: `{ visual_emphasis?, main_subject_type?, layout_family?, platform_format?, negative_visual_elements?, visual_notes? }` — all per-field optional. Null / absent / empty `{}` means "no override" — the compiler falls through to the Brand's `design_settings_json.visual_defaults` field-by-field. `visual_style` intentionally omitted from the override layer (stays brand-level for cross-event consistency). Migration: `20260427150000_event_visual_settings_json`. Validated by `eventVisualOverrideSchema` from `src/lib/ai/visual/validation.ts` via `createEventSchema` / `updateEventSchema`.
 - auto_generate_posts (boolean, default false)
 - created_at
 - updated_at

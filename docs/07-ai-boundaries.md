@@ -213,8 +213,28 @@ seeds `DEFAULT_BRAND_VISUAL_DEFAULTS` for new brands or legacy reads.
 The legacy free-text design notes (`design_theme_notes`,
 `preferred_visual_style`, etc.) are de-emphasized as a deprecated
 collapsed section in the UI and are no longer the authoritative visual
-rule source — the AI generator reads `visual_defaults`. Event-level
-override UI is a separate follow-up.
+rule source — the AI generator reads `visual_defaults`.
+
+**Event-level override persistence (UI shipped 2026-04-27).** Event-level
+visual overrides are authored on the Events → Create / detail pages
+(Visual Override section, Simple Mode) and persist into a new
+`Event.visual_settings_json` JSONB column (migration
+`20260427150000_event_visual_settings_json`). Validated server-side by
+`eventVisualOverrideSchema` from
+[`src/lib/ai/visual/validation.ts`](../src/lib/ai/visual/validation.ts),
+wired through `createEventSchema` / `updateEventSchema` in
+`src/lib/validations/event.ts`, enforced on POST `/api/events` and PATCH
+`/api/events/[id]`. The block is OPTIONAL on the wire and treated as a
+**partial override** — only fields the operator explicitly sets are
+present; everything unspecified falls through to the Brand defaults
+field-by-field via `compileVisualPrompt()` in
+`src/lib/ai/visual/compile.ts`. `visual_style` intentionally has no
+Event override (stays brand-level for cross-event consistency). The
+tolerant reader `coerceEventVisualOverride()` (in the same file as the
+schema) drops out-of-enum legacy values silently on load so the form
+never crashes on hand-edited JSON. Empty override blocks round-trip as
+`null` to keep payloads clean — events without `visual_settings_json`
+behave identically to events with `{}` (both = "no override").
 
 **Precedence** (mirrors the text pipeline): Brand Management (base) →
 source facts (context) → Event brief (override) → Templates (supporting

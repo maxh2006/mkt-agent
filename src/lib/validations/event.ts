@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { eventVisualOverrideSchema } from "@/lib/ai/visual/validation";
 
 // event_type is a free string in the DB — define the standard options here.
 // Using string rather than an enum so operators can extend later without a migration.
@@ -58,6 +59,7 @@ export const createEventSchema = z
     platform_scope: z.array(z.enum(platformValues)).optional(),
     notes_for_ai: z.string().max(2000).optional(),
     posting_instance_json: postingInstanceSchema.nullable().optional(),
+    visual_settings_json: eventVisualOverrideSchema.nullable().optional(),
     auto_generate_posts: z.boolean().optional(),
   })
   .refine(
@@ -82,6 +84,7 @@ export const updateEventSchema = z
     platform_scope: z.array(z.enum(platformValues)).optional(),
     notes_for_ai: z.string().max(2000).optional(),
     posting_instance_json: postingInstanceSchema.nullable().optional(),
+    visual_settings_json: eventVisualOverrideSchema.nullable().optional(),
     auto_generate_posts: z.boolean().optional(),
   })
   .refine(

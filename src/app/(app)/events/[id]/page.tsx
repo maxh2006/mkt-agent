@@ -7,6 +7,14 @@ import { useSession } from "next-auth/react";
 import { eventsApi, type Event } from "@/lib/events-api";
 import { EVENT_TYPES, EVENT_TYPE_LABELS, EVENT_STATUSES } from "@/lib/validations/event";
 import { parsePostingInstance, formatPostingInstanceWithEnd, type PostingInstanceConfig } from "@/lib/posting-instance";
+import {
+  VISUAL_EMPHASES, VISUAL_EMPHASIS_LABELS,
+  MAIN_SUBJECT_TYPES, MAIN_SUBJECT_TYPE_LABELS,
+  LAYOUT_FAMILIES, LAYOUT_FAMILY_LABELS,
+  PLATFORM_FORMATS, PLATFORM_FORMAT_LABELS,
+} from "@/lib/validations/brand";
+import { coerceEventVisualOverride } from "@/lib/ai/visual/validation";
+import { TagInput } from "@/components/ui/tag-input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -101,12 +109,22 @@ interface EditData {
   posting_frequency: string; posting_time: string;
   posting_weekdays: number[]; posting_month_days: number[];
   auto_generate_posts: boolean;
+  // Visual Override — empty string = "use brand default" for that field.
+  v_visual_emphasis: string;
+  v_main_subject_type: string;
+  v_layout_family: string;
+  v_platform_format: string;
+  v_negative_visual_elements: string[];
+  v_visual_notes: string;
 }
+
+const USE_BRAND_DEFAULT = "_brand_default";
 
 function initEditData(event: Event): EditData {
   const pi = event.posting_instance_json ? parsePostingInstance(event.posting_instance_json) : null;
   const startParts = splitDatetime(toDatetimeLocal(event.start_at));
   const endParts = splitDatetime(toDatetimeLocal(event.end_at));
+  const v = coerceEventVisualOverride(event.visual_settings_json);
   return {
     title: event.title, event_type: event.event_type, status: event.status,
     objective: event.objective ?? "", rules: event.rules ?? "", reward: event.reward ?? "",
@@ -118,7 +136,26 @@ function initEditData(event: Event): EditData {
     posting_frequency: pi?.frequency ?? "generate_now", posting_time: pi?.time ?? "15:00",
     posting_weekdays: pi?.weekdays ?? [], posting_month_days: pi?.month_days ?? [],
     auto_generate_posts: event.auto_generate_posts,
+    v_visual_emphasis: v.visual_emphasis ?? "",
+    v_main_subject_type: v.main_subject_type ?? "",
+    v_layout_family: v.layout_family ?? "",
+    v_platform_format: v.platform_format ?? "",
+    v_negative_visual_elements: v.negative_visual_elements ?? [],
+    v_visual_notes: v.visual_notes ?? "",
   };
+}
+
+function buildVisualOverridePayload(d: EditData): Record<string, unknown> | null {
+  const out: Record<string, unknown> = {};
+  if (d.v_visual_emphasis) out.visual_emphasis = d.v_visual_emphasis;
+  if (d.v_main_subject_type) out.main_subject_type = d.v_main_subject_type;
+  if (d.v_layout_family) out.layout_family = d.v_layout_family;
+  if (d.v_platform_format) out.platform_format = d.v_platform_format;
+  const negs = d.v_negative_visual_elements.map((s) => s.trim()).filter(Boolean);
+  if (negs.length > 0) out.negative_visual_elements = negs;
+  const notes = d.v_visual_notes.trim();
+  if (notes) out.visual_notes = notes;
+  return Object.keys(out).length > 0 ? out : null;
 }
 
 export default function EventDetailPage() {
@@ -175,6 +212,7 @@ export default function EventDetailPage() {
       if (startDt) payload.start_at = new Date(startDt).toISOString();
       if (endDt) payload.end_at = new Date(endDt).toISOString();
       payload.posting_instance_json = editPostingConfig;
+      payload.visual_settings_json = buildVisualOverridePayload(editData);
       await eventsApi.update(id, payload);
       queryClient.invalidateQueries({ queryKey: ["event", id] });
       queryClient.invalidateQueries({ queryKey: ["events"] });
@@ -331,6 +369,96 @@ export default function EventDetailPage() {
                 </div>
                 <Field label="Platform Scope" value={event.platform_scope?.join(", ") ?? null} />
                 <Field label="Notes for AI" value={event.notes_for_ai} />
+              </>
+            )}
+          </div>
+
+          {/* Visual Override */}
+          <div className="rounded-lg border border-border p-5 space-y-5">
+            <div className="space-y-1">
+              <h2 className="text-sm font-semibold">Visual Override</h2>
+              <p className="text-xs text-muted-foreground">
+                Use these only when this event needs a visual direction different from the brand defaults. Anything left as &ldquo;Use brand default&rdquo; falls through to the brand. <span className="font-medium text-foreground">Visual style</span> stays brand-level for cross-event consistency.
+              </p>
+            </div>
+            {editing && editData ? (
+              <>
+                {[
+                  { key: "v_visual_emphasis" as const, label: "Visual Emphasis",
+                    options: VISUAL_EMPHASES, labels: VISUAL_EMPHASIS_LABELS as Record<string, string> },
+                  { key: "v_main_subject_type" as const, label: "Main Subject Type",
+                    options: MAIN_SUBJECT_TYPES, labels: MAIN_SUBJECT_TYPE_LABELS as Record<string, string> },
+                  { key: "v_layout_family" as const, label: "Layout Family",
+                    options: LAYOUT_FAMILIES, labels: LAYOUT_FAMILY_LABELS as Record<string, string> },
+                  { key: "v_platform_format" as const, label: "Platform Format",
+                    options: PLATFORM_FORMATS, labels: PLATFORM_FORMAT_LABELS as Record<string, string> },
+                ].map(({ key, label, options, labels }) => (
+                  <div key={key} className="space-y-1.5">
+                    <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</label>
+                    <Select
+                      value={editData[key] || USE_BRAND_DEFAULT}
+                      onValueChange={(v) => setField(key, v === USE_BRAND_DEFAULT ? "" : (v ?? ""))}
+                    >
+                      <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={USE_BRAND_DEFAULT}>Use brand default</SelectItem>
+                        {options.map((opt) => (
+                          <SelectItem key={opt} value={opt}>{labels[opt]}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ))}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Negative Visual Elements</label>
+                  <p className="text-xs text-muted-foreground">Things this specific event should NEVER show, layered on top of the brand-level negatives. Up to 20 entries.</p>
+                  <TagInput
+                    value={editData.v_negative_visual_elements}
+                    onChange={(v) => setField("v_negative_visual_elements", v)}
+                    placeholder="e.g. fireworks, alcohol bottles"
+                    maxItems={20}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label htmlFor="v_visual_notes" className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Visual Notes (optional)</label>
+                  <textarea
+                    id="v_visual_notes"
+                    value={editData.v_visual_notes}
+                    onChange={(e) => setField("v_visual_notes", e.target.value)}
+                    maxLength={200}
+                    rows={2}
+                    placeholder="Short stylistic nudge for this event only — NOT a prompt."
+                    className={textareaClass}
+                  />
+                  <p className="text-right text-xs text-muted-foreground">{editData.v_visual_notes.length}/200</p>
+                </div>
+              </>
+            ) : (
+              <>
+                {(() => {
+                  const v = coerceEventVisualOverride(event.visual_settings_json);
+                  const labelOf = <T extends string>(val: T | undefined, dict: Record<string, string>): string | null =>
+                    val ? (dict[val] ?? val) : null;
+                  const rows: Array<[string, string | null]> = [
+                    ["Visual Emphasis", labelOf(v.visual_emphasis, VISUAL_EMPHASIS_LABELS as Record<string, string>)],
+                    ["Main Subject Type", labelOf(v.main_subject_type, MAIN_SUBJECT_TYPE_LABELS as Record<string, string>)],
+                    ["Layout Family", labelOf(v.layout_family, LAYOUT_FAMILY_LABELS as Record<string, string>)],
+                    ["Platform Format", labelOf(v.platform_format, PLATFORM_FORMAT_LABELS as Record<string, string>)],
+                    ["Negative Visual Elements", v.negative_visual_elements?.length ? v.negative_visual_elements.join(", ") : null],
+                    ["Visual Notes", v.visual_notes ?? null],
+                  ];
+                  const overrides = rows.filter(([, val]) => val !== null);
+                  if (overrides.length === 0) {
+                    return <p className="text-sm italic text-muted-foreground">Using brand defaults — no event-level overrides.</p>;
+                  }
+                  return (
+                    <div className="space-y-3">
+                      {overrides.map(([label, val]) => (
+                        <Field key={label} label={label} value={val} />
+                      ))}
+                    </div>
+                  );
+                })()}
               </>
             )}
           </div>

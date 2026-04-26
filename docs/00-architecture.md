@@ -616,11 +616,17 @@ Brand Management → Design tab Simple Mode form (UI shipped 2026-04-27)
 and persist into `Brand.design_settings_json.visual_defaults` — no
 migration, the JSON column already existed. Validated server-side via
 `brandVisualDefaultsSchema` (re-exported through
-`src/lib/validations/brand.ts#designSettingsSchema`). Event visual
-override will still need a new JSON column when its UI lands (tracked
-as a follow-up task). `Post.image_url` + the media-validation layer
-(shipped 2026-04-23) already support any image-rendering backend once
-the image model + overlay renderer are in place.
+`src/lib/validations/brand.ts#designSettingsSchema`). Event-level
+visual overrides ship later the same day (UI shipped 2026-04-27,
+migration `20260427150000_event_visual_settings_json` adds the new
+nullable `Event.visual_settings_json` JSONB column). Validated via
+`eventVisualOverrideSchema` (re-exported through
+`createEventSchema` / `updateEventSchema`). Event override is a
+**partial** override — only fields explicitly set are present;
+unspecified fields fall through to Brand defaults at compile time.
+`Post.image_url` + the media-validation layer (shipped 2026-04-23)
+already support any image-rendering backend once the image model +
+overlay renderer are in place.
 
 **Live smoke.** `npm run visual:smoke` runs 27 assertions across 6
 cases exercising Brand-only / Event-override / layout fallback /

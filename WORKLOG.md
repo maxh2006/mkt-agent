@@ -33,6 +33,61 @@ Current execution priority (per ROADMAP.md):
 ## Done Tasks
 
 ### 2026-04-27
+- Task: Phase 4 — Event Visual Override UI + persistence
+  - Status: Complete (UI shipped, validation wired, migration applied via deploy)
+  - Why: Phase 4 follow-up #2 from 2026-04-23. Brand visual defaults shipped earlier today; this is the matching event-level override layer. Operators can now define ONLY what is special for a specific event while everything unspecified falls through to the brand defaults via `compileVisualPrompt()`.
+  - Persistence: new `Event.visual_settings_json Json?` column. Migration `20260427150000_event_visual_settings_json` (one `ALTER TABLE "events" ADD COLUMN "visual_settings_json" JSONB;`). Field is nullable — events without an override block load cleanly.
+  - Files modified:
+    - `prisma/schema.prisma` — added `visual_settings_json Json?` to `Event` with a doc comment pointing at the validation schema.
+    - `prisma/migrations/20260427150000_event_visual_settings_json/migration.sql` — new directory; non-destructive ALTER TABLE.
+    - `src/lib/ai/visual/validation.ts` — added `coerceEventVisualOverride()` tolerant reader (drops out-of-enum legacy values, returns clean `EventVisualOverrideInput`). Module-header comment updated to reflect both Brand + Event are now wired.
+    - `src/lib/validations/event.ts` — imported `eventVisualOverrideSchema`; extended `createEventSchema` + `updateEventSchema` with `visual_settings_json: eventVisualOverrideSchema.nullable().optional()`.
+    - `src/app/api/events/route.ts` — POST handler destructures `visual_settings_json` and uses the same `Prisma.JsonNull` pattern as `posting_instance_json`.
+    - `src/app/api/events/[id]/route.ts` — PATCH handler: same pattern. PATCH always writes `visual_settings_json` so operators can clear overrides by saving an empty block (round-trips as null).
+    - `src/lib/events-api.ts` — added `visual_settings_json: EventVisualOverrideInput | null` to client `Event` interface.
+    - `src/components/ui/tag-input.tsx` — **new shared component** extracted from the brand page's local `TagInput`. Adds an optional `maxItems` prop. Brand page keeps its local copy for now (out of scope to refactor today per the brief); future cleanup can DRY.
+    - `src/app/(app)/events/new/page.tsx` — extended `FormData` with 6 visual-override fields (`v_*` prefix), added `buildVisualOverridePayload()`, inserted "Visual Override (optional)" SectionHeader between "Notes for AI" and "Posting Schedule" with 4 selects + tag input + 200-char visual_notes.
+    - `src/app/(app)/events/[id]/page.tsx` — extended `EditData` with the same 6 fields, `initEditData()` calls `coerceEventVisualOverride()` to seed from the saved JSON, `saveEdit()` always writes `visual_settings_json: buildVisualOverridePayload(editData)` (object or null). New "Visual Override" card sits between Campaign Brief and Posting Schedule. Read mode lists only the overridden fields, or "Using brand defaults — no event-level overrides." when empty.
+    - `docs/02-data-model.md` — added `visual_settings_json` field to the events table doc with full shape + migration ref.
+    - `docs/03-ui-pages.md` — Events Create page → Section E flipped from "Planned Visual Override" to "Visual Override (Simple Mode) — UI shipped 2026-04-27" with full control table.
+    - `docs/07-ai-boundaries.md` — added "Event-level override persistence (UI shipped 2026-04-27)" paragraph alongside the existing Brand-level one.
+    - `docs/00-architecture.md` — Visual input architecture "Product rule" extended to mention the Event-level persistence + migration name.
+    - `ROADMAP.md` — Phase 4 sub-bullet 2 flipped 🟢 → ✅.
+    - `WORKLOG.md` — this entry; Ongoing entry removed.
+  - Visual override fields delivered (each Select offers an explicit "Use brand default" first item):
+    - `visual_emphasis` (Select, optional)
+    - `main_subject_type` (Select, optional)
+    - `layout_family` (Select, optional)
+    - `platform_format` (Select, optional)
+    - `negative_visual_elements` (TagInput, max 20) — layered on top of brand-level negatives at compile time
+    - `visual_notes` (textarea, optional, max 200 chars with live counter)
+    - `visual_style` intentionally NOT in the Event override layer — stays brand-level for cross-event consistency.
+  - Validation wiring:
+    - `eventVisualOverrideSchema.nullable().optional()` inside both create + update schemas — invalid enums reject cleanly via Zod's existing 422 path.
+    - `coerceEventVisualOverride()` provides defence-in-depth on read: out-of-enum legacy values are silently dropped (form falls back to "Use brand default" for that field).
+    - Empty / blank fields are dropped on save: blank `visual_notes` becomes absent; empty negative arrays become absent; empty whole-block becomes `null`.
+  - Brand base vs Event override preserved:
+    - Brand Management remains the base visual rule layer (`design_settings_json.visual_defaults`).
+    - Event override is a **partial** override — `compileVisualPrompt()` already merges Brand ← Event field-by-field with `overridden_by_event[]` audit echo (see `src/lib/ai/visual/compile.ts`).
+    - `visual_style` has no Event override slot — Brand-level only.
+    - Templates & Assets remains a non-rule supporting library (unchanged).
+  - Backward compatibility:
+    - Events with `visual_settings_json = null` load cleanly (read panel says "Using brand defaults"; edit form has all selects on "Use brand default", empty tag list, empty notes).
+    - Events with partial overrides round-trip cleanly via `coerceEventVisualOverride()`.
+    - Hand-edited JSON with bogus enum values doesn't crash the form — bogus values are silently dropped on read.
+  - Out of scope (deliberately):
+    - Brand Management UI not modified.
+    - AI text generation pipeline not modified.
+    - `runGeneration()` not yet wired to call `compileVisualPrompt(brand_visual_defaults, event_visual_settings, ...)` — separate small follow-up.
+    - No image-rendering provider, no overlay renderer (Phase 4 follow-ups #5/#6).
+    - The local `TagInput` in `src/app/(app)/brands/page.tsx` is NOT refactored to use the new shared component (out of scope per the brief).
+  - Verification:
+    - `npx prisma generate` clean.
+    - `npx tsc --noEmit` clean (EXIT=0).
+    - **UI not exercised in a browser this session** — terminal-only. Manual smoke recommended after deploy: create a new event, fill some override fields + leave others on "Use brand default", save, refresh, confirm the read panel shows only the fields you set; then edit, clear them, save again, confirm round-trip.
+  - Per the durable commit-batching rule: ROADMAP + 4 docs + WORKLOG + Prisma schema + migration + 6 source files land in the same commit.
+
+### 2026-04-27
 - Task: UI polish — shared Select dropdown content sizing
   - Status: Complete (1 file changed; UI styling only, no logic, no schema, no API)
   - Why: Long option labels (`"Professional — formal and authoritative"`, `"Reward-forward — the prize is the hero"`, etc.) were getting clipped horizontally when dropdowns opened — especially in the Brand Management modal Voice & Tone + Design tabs. Root cause: `SelectContent` was clamped to trigger width via `w-(--anchor-width)` + `overflow-x-hidden`, while `SelectTrigger` uses `w-fit` (sizes to current value, not longest option).

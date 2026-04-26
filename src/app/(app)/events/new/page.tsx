@@ -5,6 +5,13 @@ import { useRouter } from "next/navigation";
 import { eventsApi } from "@/lib/events-api";
 import { EVENT_TYPES, EVENT_TYPE_LABELS } from "@/lib/validations/event";
 import { formatPostingInstanceWithEnd, type PostingInstanceConfig } from "@/lib/posting-instance";
+import {
+  VISUAL_EMPHASES, VISUAL_EMPHASIS_LABELS,
+  MAIN_SUBJECT_TYPES, MAIN_SUBJECT_TYPE_LABELS,
+  LAYOUT_FAMILIES, LAYOUT_FAMILY_LABELS,
+  PLATFORM_FORMATS, PLATFORM_FORMAT_LABELS,
+} from "@/lib/validations/brand";
+import { TagInput } from "@/components/ui/tag-input";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -69,6 +76,14 @@ interface FormData {
   posting_weekdays: number[];
   posting_month_days: number[];
   auto_generate_posts: boolean;
+  // Visual Override (Phase 4 — partial override, all per-field optional).
+  // Empty string = "use brand default" for that field.
+  v_visual_emphasis: string;
+  v_main_subject_type: string;
+  v_layout_family: string;
+  v_platform_format: string;
+  v_negative_visual_elements: string[];
+  v_visual_notes: string;
 }
 
 const EMPTY: FormData = {
@@ -81,7 +96,27 @@ const EMPTY: FormData = {
   posting_frequency: "generate_now", posting_time: "15:00",
   posting_weekdays: [], posting_month_days: [],
   auto_generate_posts: false,
+  v_visual_emphasis: "", v_main_subject_type: "",
+  v_layout_family: "", v_platform_format: "",
+  v_negative_visual_elements: [], v_visual_notes: "",
 };
+
+// Sentinel used by the Visual Override Selects to represent "no override —
+// use brand default for this field". Stored as "" in form state.
+const USE_BRAND_DEFAULT = "_brand_default";
+
+function buildVisualOverridePayload(form: FormData): Record<string, unknown> | null {
+  const out: Record<string, unknown> = {};
+  if (form.v_visual_emphasis) out.visual_emphasis = form.v_visual_emphasis;
+  if (form.v_main_subject_type) out.main_subject_type = form.v_main_subject_type;
+  if (form.v_layout_family) out.layout_family = form.v_layout_family;
+  if (form.v_platform_format) out.platform_format = form.v_platform_format;
+  const negs = form.v_negative_visual_elements.map((s) => s.trim()).filter(Boolean);
+  if (negs.length > 0) out.negative_visual_elements = negs;
+  const notes = form.v_visual_notes.trim();
+  if (notes) out.visual_notes = notes;
+  return Object.keys(out).length > 0 ? out : null;
+}
 
 interface FieldErrors { title?: string; event_type?: string; end_date?: string; }
 
@@ -193,6 +228,8 @@ export default function NewEventPage() {
       if (form.platform_scope.length > 0) payload.platform_scope = form.platform_scope;
       if (form.notes_for_ai.trim()) payload.notes_for_ai = form.notes_for_ai.trim();
       if (postingConfig) payload.posting_instance_json = postingConfig;
+      const visualOverride = buildVisualOverridePayload(form);
+      if (visualOverride) payload.visual_settings_json = visualOverride;
       payload.auto_generate_posts = form.auto_generate_posts;
 
       const event = await eventsApi.create(payload);
@@ -368,6 +405,79 @@ export default function NewEventPage() {
           <textarea value={form.notes_for_ai} onChange={(e) => set("notes_for_ai", e.target.value)}
             maxLength={2000} rows={3} placeholder="e.g. Use Filipino-English mix, highlight the 100x multiplier, avoid mentioning competitor brands…"
             className={textareaClass} disabled={submitting} />
+        </LabeledField>
+
+        {/* ─── Visual Override (optional) ──────────────────────────── */}
+        <SectionHeader title="Visual Override (optional)" />
+
+        <p className="text-xs text-muted-foreground">
+          Use these only when this event needs a visual direction different from the brand defaults. Each field is independent — anything left as &ldquo;Use brand default&rdquo; falls through to the brand. <span className="font-medium text-foreground">Visual style</span> stays brand-level for cross-event consistency.
+        </p>
+
+        {[
+          {
+            key: "v_visual_emphasis" as const,
+            label: "Visual Emphasis",
+            options: VISUAL_EMPHASES,
+            labels: VISUAL_EMPHASIS_LABELS as Record<string, string>,
+          },
+          {
+            key: "v_main_subject_type" as const,
+            label: "Main Subject Type",
+            options: MAIN_SUBJECT_TYPES,
+            labels: MAIN_SUBJECT_TYPE_LABELS as Record<string, string>,
+          },
+          {
+            key: "v_layout_family" as const,
+            label: "Layout Family",
+            options: LAYOUT_FAMILIES,
+            labels: LAYOUT_FAMILY_LABELS as Record<string, string>,
+          },
+          {
+            key: "v_platform_format" as const,
+            label: "Platform Format",
+            options: PLATFORM_FORMATS,
+            labels: PLATFORM_FORMAT_LABELS as Record<string, string>,
+          },
+        ].map(({ key, label, options, labels }) => (
+          <LabeledField key={key} label={label}>
+            <Select
+              value={form[key] || USE_BRAND_DEFAULT}
+              onValueChange={(v) => set(key, v === USE_BRAND_DEFAULT ? "" : (v ?? ""))}
+              disabled={submitting}
+            >
+              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={USE_BRAND_DEFAULT}>Use brand default</SelectItem>
+                {options.map((opt) => (
+                  <SelectItem key={opt} value={opt}>{labels[opt]}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </LabeledField>
+        ))}
+
+        <LabeledField label="Negative Visual Elements" hint="Things this specific event should NEVER show, layered on top of the brand-level negatives. Up to 20 entries.">
+          <TagInput
+            value={form.v_negative_visual_elements}
+            onChange={(v) => set("v_negative_visual_elements", v)}
+            placeholder="e.g. fireworks, alcohol bottles"
+            disabled={submitting}
+            maxItems={20}
+          />
+        </LabeledField>
+
+        <LabeledField label="Visual Notes (optional)" hint="Short stylistic nudge for this event only — NOT a prompt. Max 200 characters.">
+          <textarea
+            value={form.v_visual_notes}
+            onChange={(e) => set("v_visual_notes", e.target.value)}
+            maxLength={200}
+            rows={2}
+            placeholder="e.g. Lean editorial, gold accents."
+            className={textareaClass}
+            disabled={submitting}
+          />
+          <p className="text-right text-xs text-muted-foreground">{form.v_visual_notes.length}/200</p>
         </LabeledField>
 
         {/* ─── Posting Schedule ────────────────────────────────────── */}

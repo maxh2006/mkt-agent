@@ -1,13 +1,13 @@
-// Zod schemas for the visual input shapes. Defined here (standalone)
-// rather than inside the existing brand/event validators so the shape
-// can land without touching active API routes. The next task wires
-// these into:
-//   - Brand Management design_settings_json (extends the existing
-//     brandDesignSchema shape)
-//   - Event create/update schemas (new optional `visual_override` sub-object)
+// Zod schemas + tolerant readers for the visual input shapes.
 //
-// Importing from this module does NOT affect the existing validators
-// — it just makes the shape available for UI forms + tests today.
+// Wiring status (as of 2026-04-27):
+//   - Brand: `brandVisualDefaultsSchema` is wired into `designSettingsSchema`
+//     in `src/lib/validations/brand.ts`. UI persists into
+//     `Brand.design_settings_json.visual_defaults`.
+//   - Event: `eventVisualOverrideSchema` is wired into `createEventSchema`
+//     and `updateEventSchema` in `src/lib/validations/event.ts`. UI
+//     persists into the new `Event.visual_settings_json` JSON column
+//     (migration 20260427150000_event_visual_settings_json).
 
 import { z } from "zod";
 import {
@@ -55,3 +55,39 @@ export const DEFAULT_BRAND_VISUAL_DEFAULTS: BrandVisualDefaultsInput = {
   platform_format_default: "square",
   negative_visual_elements: [],
 };
+
+/**
+ * Tolerant reader for `Event.visual_settings_json` raw JSON. Used by the
+ * Event create / edit forms to seed local form state from the persisted
+ * payload. Returns ONLY validated, present fields — out-of-enum values
+ * are silently dropped (the operator can re-pick on the form), and an
+ * empty / missing override block returns an empty object representing
+ * "no override on any field". Empty `negative_visual_elements` arrays and
+ * blank `visual_notes` strings are dropped so the resulting form state
+ * matches the persistence convention exactly (round-tripping is clean).
+ */
+export function coerceEventVisualOverride(raw: unknown): EventVisualOverrideInput {
+  if (!raw || typeof raw !== "object") return {};
+  const r = raw as Record<string, unknown>;
+  const inEnum = <T extends readonly string[]>(v: unknown, vals: T): v is T[number] =>
+    typeof v === "string" && (vals as readonly string[]).includes(v);
+
+  const out: EventVisualOverrideInput = {};
+  if (inEnum(r.visual_emphasis, VISUAL_EMPHASES)) out.visual_emphasis = r.visual_emphasis;
+  if (inEnum(r.main_subject_type, MAIN_SUBJECT_TYPES)) out.main_subject_type = r.main_subject_type;
+  if (inEnum(r.layout_family, LAYOUT_FAMILIES)) out.layout_family = r.layout_family;
+  if (inEnum(r.platform_format, PLATFORM_FORMATS)) out.platform_format = r.platform_format;
+
+  if (Array.isArray(r.negative_visual_elements)) {
+    const negs = (r.negative_visual_elements as unknown[])
+      .filter((s): s is string => typeof s === "string" && s.trim().length > 0)
+      .map((s) => s.trim());
+    if (negs.length > 0) out.negative_visual_elements = negs;
+  }
+
+  if (typeof r.visual_notes === "string" && r.visual_notes.trim().length > 0) {
+    out.visual_notes = r.visual_notes.trim();
+  }
+
+  return out;
+}

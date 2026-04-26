@@ -1,6 +1,8 @@
 // Client-side fetch helpers for the events API.
 // All functions throw on non-OK responses so TanStack Query surfaces them as errors.
 
+import type { EventVisualOverrideInput } from "@/lib/ai/visual/validation";
+
 export interface EventCreator {
   id: string;
   name: string;
@@ -37,6 +39,11 @@ export interface Event {
   platform_scope: string[] | null;
   notes_for_ai: string | null;
   posting_instance_json: PostingInstanceConfig | null;
+  /** Event-level visual override block (added 2026-04-27). Null / absent
+   *  means "no override" — the visual compiler falls through to the
+   *  Brand's `design_settings_json.visual_defaults` field-by-field. See
+   *  `src/lib/ai/visual/validation.ts#eventVisualOverrideSchema`. */
+  visual_settings_json: EventVisualOverrideInput | null;
   auto_generate_posts: boolean;
   created_at: string;
   updated_at: string;

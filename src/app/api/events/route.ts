@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
     return Errors.VALIDATION(parsed.error.issues[0]?.message ?? "Validation error");
   }
 
-  const { start_at, end_at, posting_instance_json, ...rest } = parsed.data;
+  const { start_at, end_at, posting_instance_json, visual_settings_json, ...rest } = parsed.data;
 
   const event = await db.event.create({
     data: {
@@ -82,6 +82,9 @@ export async function POST(req: NextRequest) {
       end_at: end_at ? new Date(end_at) : undefined,
       ...(posting_instance_json !== undefined
         ? { posting_instance_json: posting_instance_json === null ? Prisma.JsonNull : posting_instance_json }
+        : {}),
+      ...(visual_settings_json !== undefined
+        ? { visual_settings_json: visual_settings_json === null ? Prisma.JsonNull : visual_settings_json }
         : {}),
     },
     include: {

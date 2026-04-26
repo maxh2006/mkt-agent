@@ -167,14 +167,36 @@ Create form includes:
 - B. Campaign Brief — target audience, CTA, tone, platform scope, notes for AI
 - C. Posting Schedule — frequency: Generate Now / Daily / Weekly / Monthly. "Generate Now" hides recurrence controls and auto-generate toggle (it is the explicit intent).
 - D. Auto-generate toggle (hidden in Generate Now mode)
-- **Planned E. Visual Override (Simple Mode)** (spec landed 2026-04-23,
-  UI rollout pending — see `src/lib/ai/visual/`). Operator fills ONLY
-  the fields that differ from Brand defaults for this specific event;
-  everything unspecified falls through to the brand. Controls:
-  `visual_emphasis`, `main_subject_type`, `layout_family`,
-  `platform_format`, `negative_visual_elements`, optional
-  `visual_notes`. `visual_style` intentionally has no Event override —
-  stays brand-level for consistency across the brand's event lineup.
+- **E. Visual Override (Simple Mode)** (UI shipped 2026-04-27). Operator
+  fills ONLY the fields that differ from Brand defaults for this specific
+  event; everything unspecified falls through to the brand. Persists
+  into `Event.visual_settings_json` (nullable JSONB; migration
+  `20260427150000_event_visual_settings_json`). Validated server-side
+  via `eventVisualOverrideSchema` from `src/lib/ai/visual/validation.ts`,
+  wired through `createEventSchema` / `updateEventSchema` in
+  `src/lib/validations/event.ts`. Controls (each Select offers an
+  explicit "Use brand default" first item to clear an override):
+  - `visual_emphasis` (Select, optional) — reward-forward / winner-forward /
+    game-forward / brand-forward / lifestyle
+  - `main_subject_type` (Select, optional) — human / object / game-element /
+    symbol / abstract
+  - `layout_family` (Select, optional) — center_focus / left_split /
+    right_split / bottom_heavy
+  - `platform_format` (Select, optional) — square / portrait / landscape / story
+  - `negative_visual_elements` (TagInput, max 20) — layered on top of brand-
+    level negatives at compile time
+  - `visual_notes` (textarea, optional, max 200 chars) — short stylistic
+    nudge, NOT a prompt
+  `visual_style` intentionally has no Event override — stays brand-level
+  for consistency across the brand's event lineup. The new shared
+  `TagInput` component lives at `src/components/ui/tag-input.tsx`. Empty
+  override blocks round-trip as `null` so payloads stay clean. The Event
+  detail page renders a read-mode summary listing only the overridden
+  fields (or "Using brand defaults — no event-level overrides." when
+  empty). `coerceEventVisualOverride()` from
+  `src/lib/ai/visual/validation.ts` is the tolerant reader; out-of-enum
+  legacy values are silently dropped on load so operators can re-pick
+  rather than seeing the form crash.
 
 Right-side panel on the Create page: **Sample Event Brief** — reference-only guidance.
 Shows 8 rows (Theme, Objective, Rules, Reward, Target Audience, CTA, Tone, Notes for AI)
