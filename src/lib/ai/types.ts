@@ -22,6 +22,7 @@ import type {
   EventVisualOverrideInput,
 } from "@/lib/ai/visual/validation";
 import type { CompiledVisualPrompt } from "@/lib/ai/visual/types";
+import type { BackgroundImageResult } from "@/lib/ai/image/types";
 
 // ─── Brand + Event context ───────────────────────────────────────────────────
 
@@ -265,6 +266,17 @@ export interface NormalizedGenerationInput {
    * directly) keep typechecking.
    */
   visual?: CompiledVisualPrompt;
+
+  /**
+   * Background-image generation result (Phase 4 image provider boundary,
+   * 2026-04-27). Populated by the orchestrator after the text generation
+   * call completes — one shared result per run, replicated to every
+   * sibling draft via `generation_context_json.image_generation`. NOT
+   * the final publishable image — the deterministic overlay renderer
+   * (still deferred) is what produces that. Optional so off-pipeline
+   * call sites and pre-image-provider regressions keep typechecking.
+   */
+  image_result?: BackgroundImageResult;
 }
 
 // ─── AI output shape ─────────────────────────────────────────────────────────

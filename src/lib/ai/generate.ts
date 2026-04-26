@@ -5,6 +5,8 @@ import { insertSamplesAsDrafts } from "./queue-inserter";
 import { loadBrandContext, brandOr404 } from "./load-brand";
 import { loadBrandTemplates, countTemplates } from "./load-templates";
 import { compileVisualPrompt } from "./visual/compile";
+import { generateBackgroundImage } from "./image/client";
+import { buildImageErrorResult, type BackgroundImageRequest, type BackgroundImageResult, type ImageProviderErrorCode } from "./image/types";
 import type { NormalizedGenerationInput } from "./types";
 
 /**
@@ -62,8 +64,64 @@ export async function runGeneration(args: {
   const prompt = buildPrompt(inputWithVisual);
   const result = await generateSamples({ input: inputWithVisual, prompt });
 
+  // Background-image generation runs AFTER text generation so a slow or
+  // flaky image provider never blocks text drafts. One image per run is
+  // shared across every sibling draft (compiled visual prompt is the
+  // same for siblings, and operators can refine later). Failure is
+  // isolated — we synthesize an error result and continue to queue
+  // insertion so the run still ships.
+  const imageRequest: BackgroundImageRequest = {
+    background_image_prompt: visual.background_image_prompt,
+    negative_prompt: visual.negative_prompt,
+    platform_format: visual.platform_format,
+    layout_key: visual.layout_key,
+    safe_zone_config: visual.safe_zone_config,
+    subject_focus: visual.subject_focus,
+    visual_emphasis: visual.visual_emphasis,
+    brand_palette: {
+      primary: args.input.brand.primary_color,
+      secondary: args.input.brand.secondary_color,
+      accent: args.input.brand.accent_color,
+    },
+    trace: {
+      brand_id: args.input.brand.id,
+      sample_group_id: args.input.sample_group_id,
+      source_type: args.input.source_type,
+      platform: args.input.platform,
+    },
+  };
+
+  const imageStartedAt = Date.now();
+  const imageGeneratedAt = new Date(imageStartedAt).toISOString();
+  let imageResult: BackgroundImageResult;
+  try {
+    imageResult = await generateBackgroundImage(imageRequest);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    const code: ImageProviderErrorCode = /not configured|env not set/i.test(message)
+      ? "NOT_CONFIGURED"
+      : "UNKNOWN";
+    console.warn(
+      `[ai-image] FAILED source=${args.input.source_type} brand=${args.input.brand.id} group=${args.input.sample_group_id} code=${code} err=${message}`,
+    );
+    imageResult = buildImageErrorResult({
+      provider: (process.env.AI_IMAGE_PROVIDER ?? "stub").toLowerCase() as BackgroundImageResult["provider"],
+      model: process.env.AI_IMAGE_MODEL ?? null,
+      request: imageRequest,
+      error_code: code,
+      error_message: message,
+      generated_at: imageGeneratedAt,
+      duration_ms: Date.now() - imageStartedAt,
+    });
+  }
+
+  const inputWithImage: NormalizedGenerationInput = {
+    ...inputWithVisual,
+    image_result: imageResult,
+  };
+
   const inserted = await insertSamplesAsDrafts({
-    input: inputWithVisual,
+    input: inputWithImage,
     samples: result.samples,
     provider: result.provider,
     dry_run: result.dry_run,
@@ -72,7 +130,7 @@ export async function runGeneration(args: {
   });
 
   console.log(
-    `[ai-generator] run complete source=${inputWithVisual.source_type} brand=${inputWithVisual.brand.id} platform=${inputWithVisual.platform} samples=${result.samples.length} provider=${result.provider} dry_run=${result.dry_run} group=${inputWithVisual.sample_group_id} layout=${visual.layout_key} emphasis=${visual.visual_emphasis} format=${visual.platform_format} overrides=[${visual.effective_inputs.overridden_by_event.join(",")}] templates=copy:${templatesInjected.copy},cta:${templatesInjected.cta},banner:${templatesInjected.banner},prompt:${templatesInjected.prompt},asset:${templatesInjected.asset}`,
+    `[ai-generator] run complete source=${inputWithImage.source_type} brand=${inputWithImage.brand.id} platform=${inputWithImage.platform} samples=${result.samples.length} provider=${result.provider} dry_run=${result.dry_run} group=${inputWithImage.sample_group_id} layout=${visual.layout_key} emphasis=${visual.visual_emphasis} format=${visual.platform_format} overrides=[${visual.effective_inputs.overridden_by_event.join(",")}] image=${imageResult.provider}:${imageResult.status} templates=copy:${templatesInjected.copy},cta:${templatesInjected.cta},banner:${templatesInjected.banner},prompt:${templatesInjected.prompt},asset:${templatesInjected.asset}`,
   );
 
   return {

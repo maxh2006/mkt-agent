@@ -269,6 +269,57 @@ stub provider continues to work — `image_prompt` field still gets
 emitted, just now aligned with the structured direction. Real
 image-model + overlay rendering remain deferred.
 
+**Background-image provider boundary (2026-04-27 — stub-only).** A
+provider boundary symmetrical to the text-generation client lives at
+`src/lib/ai/image/` (`types.ts` + `client.ts`). Selected via
+`AI_IMAGE_PROVIDER`; default `stub` is the safe-prod fallback (returns
+a placeholder result with `artifact_url: null`, zero cost, zero
+external dependency). Real adapters (`gemini` / `imagen` / `stability`)
+are recognised provider values that throw fail-loud until implemented
+— no silent fallback to stub on misconfig (matches the
+`AI_PROVIDER=anthropic` pattern).
+
+Inputs (one request per generation run, shared across siblings):
+`background_image_prompt`, `negative_prompt`, `platform_format`,
+`layout_key`, `safe_zone_config`, `subject_focus`, `visual_emphasis`,
+`brand_palette` (primary/secondary/accent hex), and a `trace` block
+for observability log lines (`brand_id`, `sample_group_id`,
+`source_type`, `platform`).
+
+Output (`BackgroundImageResult`): `status` ∈ {`ok`, `skipped`,
+`error`}; `provider`; `model`; `artifact_url`; `provider_asset_id`;
+`width`; `height`; echoed `background_image_prompt` +
+`negative_prompt`; `skipped_reason`; `error_code` (canonical taxonomy:
+`NOT_CONFIGURED` / `AUTH_ERROR` / `RATE_LIMITED` / `INVALID_PROMPT` /
+`POLICY_REJECTED` / `TEMPORARY_UPSTREAM` / `NETWORK_ERROR` /
+`UNKNOWN`); `error_message`; `generated_at`; `duration_ms`;
+`render_version` (currently `v1-2026-04-27`).
+
+Orchestrator integration: `runGeneration()` calls
+`generateBackgroundImage()` AFTER `generateSamples()` (text). The call
+is wrapped in try/catch — any throw is caught, normalized via
+`buildImageErrorResult()` into a `status: "error"` result, and the
+run still ships text drafts. Operators can inspect failure metadata
+in the persisted `image_generation` block.
+
+Persistence: per-draft `generation_context_json.image_generation` —
+the queue inserter mirrors the result onto every sibling. **Crucially,
+`Post.image_url` is NOT touched.** That field is reserved for the
+FINAL publishable image produced by the deferred deterministic
+overlay renderer (Satori/sharp/etc., not yet implemented). The
+background artifact lives in metadata until that final composite step
+exists. Manus media-validation runs against `Post.image_url` only —
+background-only artifacts are never auto-shipped to Manus as the
+final creative.
+
+What's deferred:
+- Real image-model adapters (Gemini / Imagen / Stability / etc.).
+- The deterministic overlay renderer that composites text + logos
+  onto the AI background using `safe_zone_config`.
+- Asset hosting / S3 / CDN pipeline for storing real artifacts when
+  the provider returns inline binary data.
+- Image inspector UI in Content Queue.
+
 **Precedence** (mirrors the text pipeline): Brand Management (base) →
 source facts (context) → Event brief (override) → Templates (supporting
 library, never authoritative). Event override is per-field —

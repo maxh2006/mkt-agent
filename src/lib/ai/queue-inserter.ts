@@ -99,6 +99,37 @@ export async function insertSamplesAsDrafts(args: {
       };
     }
 
+    // Phase 4 (2026-04-27): persist the background-image provider
+    // result. Shared across every sibling draft in this run — the
+    // orchestrator runs the provider ONCE per run and replicates the
+    // result here. Status is one of "ok" / "skipped" / "error";
+    // `artifact_url` is null for the stub provider (placeholder) and
+    // for any error / skipped path. The future overlay renderer reads
+    // this block to fetch the background; until that ships, the block
+    // is purely metadata. NOTE: `Post.image_url` is NOT touched — that
+    // field is reserved for the FINAL composited asset produced by
+    // the deferred overlay renderer.
+    if (input.image_result) {
+      const r = input.image_result;
+      generationContext.image_generation = {
+        provider: r.provider,
+        model: r.model,
+        status: r.status,
+        artifact_url: r.artifact_url,
+        provider_asset_id: r.provider_asset_id,
+        width: r.width,
+        height: r.height,
+        background_image_prompt: r.background_image_prompt,
+        negative_prompt: r.negative_prompt,
+        skipped_reason: r.skipped_reason,
+        error_code: r.error_code,
+        error_message: r.error_message,
+        generated_at: r.generated_at,
+        duration_ms: r.duration_ms,
+        render_version: r.render_version,
+      };
+    }
+
     // Hot Games: mirror the existing refine contract — the refine modal
     // reads generation_context_json.type === "hot_games_snapshot" and
     // surfaces the frozen ranked-games list. Tag the node with `type`

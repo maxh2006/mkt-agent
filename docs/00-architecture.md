@@ -625,6 +625,25 @@ nullable `Event.visual_settings_json` JSONB column). Validated via
 **partial** override — only fields explicitly set are present;
 unspecified fields fall through to Brand defaults at compile time.
 
+**Background-image provider boundary (2026-04-27 — stub-only initial
+landing).** `src/lib/ai/image/` ships a provider boundary symmetrical
+to the text-generation boundary at `src/lib/ai/client.ts`. The
+orchestrator runs `generateBackgroundImage()` AFTER text generation —
+one image request per run, shared across every sibling draft (the
+compiled visual prompt is identical for siblings). The stub provider
+is the safe-prod default and returns `status: "ok"` with
+`artifact_url: null`; real adapters (Gemini / Imagen / Stability) are
+recognised provider values that throw fail-loud until their adapter
+is implemented (no silent fallback to stub on misconfig). Failure is
+isolated: any throw from the image provider is caught, normalized
+into a `status: "error"` result, and the run still inserts text
+drafts. The result is persisted per draft as
+`Post.generation_context_json.image_generation` — see "AI content
+generator → image_generation block" below for the persisted shape.
+**`Post.image_url` is intentionally untouched** — that field remains
+reserved for the FINAL composited image produced by the deferred
+overlay renderer.
+
 **Compiler activated in the live AI generation pipeline (2026-04-27).**
 `runGeneration()` in `src/lib/ai/generate.ts` now calls
 `compileVisualPrompt()` after templates load, threading
@@ -645,15 +664,25 @@ attached to `NormalizedGenerationInput.visual` and consumed by:
   `effective_inputs.overridden_by_event` (for audit), the compiled
   `background_image_prompt` (for the future image model), and the
   compiled `negative_prompt`.
+- The background-image provider (2026-04-27 — stub-only initial
+  landing). Per-draft `generation_context_json.image_generation` block
+  carries: `provider`, `model`, `status` (`ok`/`skipped`/`error`),
+  `artifact_url`, `provider_asset_id`, `width`, `height`,
+  `background_image_prompt`, `negative_prompt`, `skipped_reason`,
+  `error_code`, `error_message`, `generated_at`, `duration_ms`,
+  `render_version`. Error taxonomy: `NOT_CONFIGURED` / `AUTH_ERROR` /
+  `RATE_LIMITED` / `INVALID_PROMPT` / `POLICY_REJECTED` /
+  `TEMPORARY_UPSTREAM` / `NETWORK_ERROR` / `UNKNOWN`.
 
 The narrative `image_prompt` field on `Post` is still AI-emitted —
 operators continue to see + edit a human-readable visual description.
-The image-rendering provider + overlay renderer remain deferred; their
-inputs are now ready (compiled positive + negative prompts + safe-zone
-config persisted on every generated draft). `Post.image_url` + the
-media-validation layer (shipped 2026-04-23) already support any
-image-rendering backend once the image model + overlay renderer are
-in place.
+The image-rendering provider boundary now exists (stub provider only
+for MVP); the overlay renderer remains deferred. Their inputs are
+ready (compiled positive + negative prompts + safe-zone config +
+background-image provider result persisted on every generated draft).
+`Post.image_url` + the media-validation layer (shipped 2026-04-23)
+already support any image-rendering backend once a real image model
+adapter ships AND the overlay renderer composites a final image.
 
 **Live smoke.** `npm run visual:smoke` runs 27 assertions across 6
 cases exercising Brand-only / Event-override / layout fallback /

@@ -33,6 +33,54 @@ Current execution priority (per ROADMAP.md):
 ## Done Tasks
 
 ### 2026-04-27
+- Task: Phase 4 — Background-image provider adapter (boundary + stub)
+  - Status: Complete (provider boundary live; stub-only initial landing; real adapter implementation lands in a follow-up)
+  - Why: visual compiler is wired into `runGeneration()` and emits a fully-formed `background_image_prompt` + `negative_prompt` per generation, but no provider was actually consuming them. This task adds the provider boundary so a real image model (Gemini / Imagen / Stability / etc.) can slot in without re-plumbing the pipeline. Mirrors the text-provider boundary at `src/lib/ai/client.ts`.
+  - Files added:
+    - `src/lib/ai/image/types.ts` — provider contract: `BackgroundImageRequest`, `BackgroundImageResult`, `ImageProvider` (`stub|gemini|imagen|stability`), `ImageGenerationStatus` (`ok|skipped|error`), canonical `ImageProviderErrorCode` taxonomy (`NOT_CONFIGURED|AUTH_ERROR|RATE_LIMITED|INVALID_PROMPT|POLICY_REJECTED|TEMPORARY_UPSTREAM|NETWORK_ERROR|UNKNOWN`), `RENDER_VERSION` (`v1-2026-04-27`), `buildImageErrorResult()` helper.
+    - `src/lib/ai/image/client.ts` — `generateBackgroundImage()` provider switch + deterministic stub. Stub returns `status: "ok"` with `artifact_url: null` (zero cost, prod-safe). Real provider names (`gemini`, `imagen`, `stability`) are recognised values that throw fail-loud until adapters are implemented — no silent fallback to stub on misconfig (matches `AI_PROVIDER=anthropic` pattern).
+  - Files modified:
+    - `src/lib/ai/types.ts` — added optional `image_result?: BackgroundImageResult` to `NormalizedGenerationInput` for orchestrator → inserter handoff.
+    - `src/lib/ai/generate.ts` — orchestrator now constructs a `BackgroundImageRequest` from the compiled visual prompt + brand palette + trace fields, calls `generateBackgroundImage()` AFTER text generation (so text drafts ship even if image generation flakes), wraps the call in try/catch, normalizes throws via `buildImageErrorResult()` with code derivation from message (`NOT_CONFIGURED` for env errors, `UNKNOWN` otherwise). Shared image result attached as `inputWithImage.image_result` and threaded into queue insertion. Run-complete log line gains `image=<provider>:<status>`.
+    - `src/lib/ai/queue-inserter.ts` — writes `generation_context_json.image_generation` block per sibling draft when `input.image_result` present. Block fields: `provider`, `model`, `status`, `artifact_url`, `provider_asset_id`, `width`, `height`, `background_image_prompt`, `negative_prompt`, `skipped_reason`, `error_code`, `error_message`, `generated_at`, `duration_ms`, `render_version`. **`Post.image_url` deliberately not touched** — reserved for the final composited asset.
+    - `.env.production.example` — added `AI_IMAGE_PROVIDER="stub"` (default) + `AI_IMAGE_MODEL=""` with a callout that `Post.image_url` stays reserved for the final composite.
+    - `docs/00-architecture.md` — new "Background-image provider boundary" paragraph in the Visual input architecture subsection; queue-inserter persisted-block list extended.
+    - `docs/07-ai-boundaries.md` — full subsection on the boundary (inputs / outputs / error taxonomy / orchestrator integration / persistence / what's deferred).
+    - `docs/03-ui-pages.md` — Brand Design + Event Visual Override sections gain a note that every draft now carries an `image_generation` block alongside `visual_compiled`.
+    - `ROADMAP.md` — Phase 4 sub-bullet 7 (image-rendering provider adapter) flipped from ⏳ deferred → 🟡 boundary shipped (stub-only); sub-bullet 6 (overlay renderer) updated to note the input contract is now complete.
+    - `WORKLOG.md` — this entry.
+  - Provider/env contract:
+    - `AI_IMAGE_PROVIDER=stub` (default, safe prod, zero cost, deterministic placeholder result).
+    - `AI_IMAGE_PROVIDER=gemini|imagen|stability` — recognised but unimplemented. Selecting one throws "adapter is not implemented yet" — operator must implement or revert to stub.
+    - Unknown provider value → throws "Unknown AI_IMAGE_PROVIDER" with valid values listed.
+    - `AI_IMAGE_MODEL` — provider-specific; documented per adapter when shipped.
+  - Orchestrator integration point:
+    - In `runGeneration()`, after `generateSamples()` (text) and before `insertSamplesAsDrafts()` (queue insert). One image request per run (compiled visual prompt is identical for siblings); the result is replicated to every sibling draft via the queue inserter. Failure isolation via try/catch — text drafts always ship.
+  - Persisted shape (per-draft `generation_context_json.image_generation`):
+    - `provider`, `model`, `status`, `artifact_url`, `provider_asset_id`, `width`, `height`, `background_image_prompt`, `negative_prompt`, `skipped_reason`, `error_code`, `error_message`, `generated_at`, `duration_ms`, `render_version`. Sufficient for the future overlay renderer to fetch (when `artifact_url` is non-null) and for operator debugging.
+  - `Post.image_url`: **intentionally left untouched.** That field stays reserved for the FINAL composited image the deterministic overlay renderer (still deferred) will produce. Background-only artifacts are never auto-shipped to Manus as the final creative — Manus media-validation only runs against `Post.image_url`. This is the explicit product call from the task brief: "generated background artifact is stored as an intermediate asset; final publishable image remains a later overlay/composite concern."
+  - Failure behavior:
+    - Provider throws → caught by orchestrator → normalized to `BackgroundImageResult { status: "error", error_code, error_message, ... }` → persisted in `image_generation` block → run continues to insert text drafts.
+    - Provider returns `status: "skipped"` (e.g. dry-run flag) → persisted with `skipped_reason` populated → run continues.
+    - Stub provider always returns `status: "ok"` with `artifact_url: null` (placeholder).
+    - Real-provider misconfig (e.g. `AI_IMAGE_PROVIDER=gemini` with no API key) → fail-loud throw → orchestrator persists `NOT_CONFIGURED` error result + emits a warning log line. Operator sees the misconfig immediately rather than silently falling back to stub.
+  - What remains deferred for the overlay-renderer step:
+    - Real image-model adapter implementation (Gemini / Nano Banana 2 / Imagen / Stability). Contract is locked; implementation = ~50-100 lines per adapter following the stub's shape.
+    - Asset hosting / S3 / CDN pipeline for storing real artifacts when the provider returns binary or signed URLs. Stub returns null artifact_url so this isn't blocking yet.
+    - Deterministic overlay renderer (Satori + sharp or similar) — composites Post.headline/caption/cta/banner_text + brand logos onto the AI background using `safe_zone_config`. The output of THAT step is what populates `Post.image_url`.
+    - Image inspector UI in Content Queue (preview the persisted `image_generation` artifact + `visual_compiled` resolved direction).
+    - Automatic Manus publishing path with the final composited image.
+  - Roadmap/doc updates:
+    - ROADMAP Phase 4 sub-bullet 7 status flipped, sub-bullet 6 cross-referenced.
+    - 4 docs updated (00, 03, 07, plus env example).
+    - WORKLOG entry written.
+  - Verification:
+    - `npx tsc --noEmit` clean (EXIT=0).
+    - `npm run visual:smoke` clean (27/27 assertions across 6 cases) — confirms the visual compiler itself is unchanged.
+    - **End-to-end NOT exercised in a browser this session** — terminal-only. After deploy, recommended smoke: trigger any generation (Event "Generate Drafts" or `POST /api/ai/generate-from-fixture`); inspect the resulting `Post.generation_context_json.image_generation` — expect `{ provider: "stub", status: "ok", artifact_url: null, render_version: "v1-2026-04-27", ... }` and the orchestrator log line should include `image=stub:ok`.
+  - Per the durable commit-batching rule: ROADMAP + 3 docs + env example + WORKLOG + 5 source files (2 new, 3 modified) land in the same commit.
+
+### 2026-04-27
 - Task: Phase 4 — Wire compileVisualPrompt() into runGeneration() (activation)
   - Status: Complete (compiler now active in live AI generation pipeline; no Prisma migration; backward-compatible additive change)
   - Why: Phase 4 visual input system shipped end-to-end on the operator side earlier today (Brand Simple Mode UI + Event Visual Override UI), but `runGeneration()` was never calling the compiler. Saved Brand + Event visual settings sat in JSON columns unread; the AI's narrative `image_prompt` field was drafted with no awareness of the operator's structured choices. This task is the activation step.
