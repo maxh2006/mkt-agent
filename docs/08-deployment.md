@@ -55,13 +55,39 @@ sudo chown -R root:root /opt/mkt-agent
 # 2. Lock down the env file so only root (and the runtime) can read it
 sudo chmod 600 /opt/mkt-agent/.env
 
-# 3. Kill stale user-scoped PM2 daemons (leftovers; not running prod)
-sudo pkill -f "/home/max/.pm2"  2>/dev/null || true
+# 3. Kill stale user-scoped PM2 daemons AND disable their systemd respawn
+#    units. `pkill` alone is not enough: `pm2 startup` installs
+#    pm2-<user>.service which runs `pm2 resurrect` from
+#    /home/<user>/.pm2/dump.pm2 on every reboot. Leaving that enabled
+#    means the user-PM2 daemon comes back on the next reboot, claims
+#    port 3000 first, and silently serves stale code while root-PM2
+#    EADDRINUSE-loops. Both must be neutralised:
+sudo systemctl stop    pm2-max.service   2>/dev/null || true
+sudo systemctl disable pm2-max.service   2>/dev/null || true
+sudo systemctl stop    pm2-moloh.service 2>/dev/null || true
+sudo systemctl disable pm2-moloh.service 2>/dev/null || true
+sudo pkill -f "/home/max/.pm2"   2>/dev/null || true
 sudo pkill -f "/home/moloh/.pm2" 2>/dev/null || true
+# Archive (don't delete) the dump file so even a manual `pm2 resurrect`
+# can't bring the stale app definition back:
+[ -f /home/max/.pm2/dump.pm2 ] && \
+  sudo mv /home/max/.pm2/dump.pm2 /home/max/.pm2/dump.pm2.bak.$(date +%Y%m%d) || true
 
-# 4. Sanity-check: root's PM2 still has mkt-agent online
+# 4. Sanity-check: only pm2-root.service is enabled, root's PM2 has
+#    mkt-agent online, and port 3000 is owned by a process whose
+#    parent traces back to /root/.pm2:
+sudo systemctl list-unit-files | grep pm2
 sudo pm2 status
+sudo ss -ltnp | grep ':3000'
 ```
+
+**Symptom that points to this issue**: operators see `Unauthorized` on
+`/brands` (or any other authenticated page) despite a valid session, the
+brand selector dropdown is empty, AND `sudo pm2 logs mkt-agent` shows a
+torrent of `EADDRINUSE: address already in use :::3000` with the restart
+counter climbing fast. Run `sudo ps -ef | grep "PM2 v"` — if you see two
+`PM2 v6.x.y: God Daemon` rows (one `/root/.pm2`, one `/home/<user>/.pm2`)
+you have the dual-daemon collision and need the cleanup above.
 
 After this, deploy is always:
 

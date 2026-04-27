@@ -37,6 +37,20 @@ Current execution priority (per ROADMAP.md):
 
 ## Done Tasks
 
+### 2026-04-28
+- Task: Operational fix — dual PM2 daemon collision on prod VM
+  - Status: Resolved.
+  - Symptom: operators saw `Unauthorized` on `/brands` (and the brand selector was empty) after the Sample Comparison UI deploy. Root cause turned out to be unrelated to the deploy itself.
+  - Root cause: two PM2 god daemons were running on the VM — `pm2-root.service` (canonical, used by `deploy.sh`) and `pm2-max.service` (left over from the early ownership era). `pm2-max.service` had been quietly resurrecting `/home/max/.pm2/dump.pm2` (saved 2026-04-21) on every reboot, running its own copy of `mkt-agent` on port 3000. After today's deploy max's daemon won the bind race, root's PM2 went into an `EADDRINUSE` restart-loop (counter at 619+), and traffic was being served by max's stale process whose DB connection / session state had drifted out of sync with the redeployed app — hence the `Unauthorized` for valid sessions.
+  - Fix:
+    - Killed the orphan `next-server` from a previous deploy generation.
+    - `sudo -u max pm2 delete all && sudo -u max pm2 kill` to stop the live max-PM2 daemon (had restarted 3,736 times).
+    - `sudo systemctl stop pm2-max.service && sudo systemctl disable pm2-max.service` to remove the reboot trigger.
+    - Archived `/home/max/.pm2/dump.pm2` → `dump.pm2.bak.20260428` so even a manual `pm2 resurrect` finds nothing to bring back.
+  - Doc update: `docs/08-deployment.md` "One-time cleanup" section extended — the existing `pkill -f "/home/max/.pm2"` was insufficient on its own (didn't touch `pm2-<user>.service` or the dump file). Updated to disable the systemd unit + archive the dump file + added a "Symptom that points to this issue" callout describing the EADDRINUSE log torrent + dual-daemon `ps -ef | grep "PM2 v"` signature.
+  - Verification: `pm2-max.service` now `disabled / inactive (dead)`; `pm2-root.service` healthy with mkt-agent at uptime 4m+ and restart count frozen at 653; port 3000 owned by a single process (pid 189291) whose parent traces to `/root/.pm2`; `/queue/compare/*`, `/queue`, `/api/brands` all return `307 → /login` for unauth'd requests (proper middleware redirect).
+  - No code change. Doc-only commit.
+
 ### 2026-04-27
 - Task: Phase 4 sub-bullet 6 — Sample Comparison UI
   - Status: Complete (route + chip-as-link wired; reuses existing approve / reject / refine surfaces).
