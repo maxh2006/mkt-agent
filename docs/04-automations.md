@@ -159,6 +159,91 @@ Plus a start + done line for the run. No promo content in logs.
 
 ---
 
+## Adhoc Event automation flow (Phase 5 — shipped 2026-04-28)
+
+Server-side orchestration that scans eligible Adhoc Events on a cadence and routes their occurrences through the same `runGeneration()` pipeline as the manual "Generate Drafts" button. Module: `src/lib/automations/adhoc-events/`. Entry point: `runAdhocEventsAutomation({brand_id_filter?, event_id_filter?, lookahead_hours?, now?})`.
+
+This is the Event equivalent of the Running Promotions automation flow. Both share `getAutomationCreator()` and the same admin-only verification-surfaces shape, but the Event orchestrator is **event-first** (top-level loop is over events, not brands) because each brand owns many events.
+
+**Eligibility query**:
+```ts
+db.event.findMany({
+  where: {
+    status: "active",
+    auto_generate_posts: true,
+    brand: { active: true },
+    ...(args.brand_id_filter ? { brand_id: args.brand_id_filter } : {}),
+    ...(args.event_id_filter  ? { id: args.event_id_filter }      : {}),
+  },
+  include: { brand: { select: { id: true, name: true, active: true } } },
+  orderBy: { start_at: "asc" },
+});
+```
+
+**Operator opt-in via `Event.auto_generate_posts`** (existing schema field, default `false`). Operators flip it to `true` per event when they want unattended generation. The manual `POST /api/events/[id]/generate-drafts` route continues to ignore the flag — it's an explicit operator action and stays available regardless.
+
+**Lookahead window — `LOOKAHEAD_HOURS = 24` (default)**. Constant at the top of the orchestrator; override via `args.lookahead_hours` for testing. Reason: prevents "30-day daily event" floods where a single run would create 30 drafts. Operators see drafts appear ~24h before each scheduled occurrence — enough lead time for review/approve. Tighten the cycle via the future Cloud Scheduler interval (e.g. hourly tick + 24h window = each occurrence has ~24 chances to be picked up; the dedupe cuts duplicates).
+
+**Per-event flow** (sequential per event, sequential per slot):
+1. Compute occurrences:
+   - **Recurrence mode** (posting_instance_json parses to a config): require both `start_at` + `end_at`. Call `generateOccurrences(piConfig, start_at, end_at)` (already filters to `>= now`), then additionally filter to `<= now + lookahead_hours`.
+   - **Generate Now mode** (null piConfig): synthesize one occurrence at `now`. Always inside the window by construction.
+2. If zero occurrences land in the window → mark `ineligible_reason: "no_occurrences_in_window"`, no slots processed.
+3. `loadBrandContext(brand.id)` — failure here records `{phase: "context_load"}` and skips the event.
+4. Resolve platforms from `event.platform_scope` (string array) or fall back to `["facebook"]` — mirrors the manual route's MVP fallback.
+5. For each `(occurrence × platform)` slot:
+   - Dedup check: `db.post.findFirst({where: {brand_id, source_type: "event", source_id: event.id, source_instance_key: occurrence.toISOString(), platform}, select: {id: true}})`. Hit → skip + increment `skipped_dedupe_count`; miss → generate.
+   - Build `EventOverride` (mirrors manual route lines 112-129).
+   - Coerce visual settings via `coerceEventVisualOverride(event.visual_settings_json)`.
+   - `normalizers.normalizeEvent({brand, event: eventOverride, platform, sample_count: 1})`.
+   - `runGeneration({input, created_by: <first admin>})` — full pipeline (text → image → composite → GCS upload → queue insert).
+6. When `generated_drafts_count > 0`, write a single per-event audit log entry using `AuditAction.EVENT_DRAFTS_GENERATED` with `automation: true` and `lookahead_hours_at_run` in the after-state. Reuses the existing audit action — no schema change.
+
+**Dedup rule** (locked, mirrors manual route + Running Promotions discipline):
+- Exact match on `(brand_id, source_type='event', source_id=event.id, source_instance_key=occurrence ISO, platform)`.
+- **Status-agnostic**: even if a previous draft is `rejected` or `failed`, reruns still skip generating a new one. Operators handle re-generation manually for MVP — delete the prior Post row to force a new draft. Status-aware dedup is a documented future enhancement.
+- The dedup mirrors the manual route's identity logic exactly so manual + automated runs cannot race-condition into duplicates.
+
+**`samples_per_slot = 1` (locked, MVP)**. Manual route accepts `?samples_per_slot=N` (1–5); automation does not expose that knob today. Operators run the manual route when they want sibling-sample comparison.
+
+**`created_by` for automation drafts**: first admin user found, ordered by `created_at ASC`. Helper: `src/lib/automations/get-creator.ts#getAutomationCreator()` — same TEMPORARY MVP shortcut Running Promotions uses; future system-user migration swaps internals with no caller-side change.
+
+**Failure isolation** (locked behavior):
+
+| Scenario | Result |
+|---|---|
+| No eligible events | `events_scanned: 0`, empty `events[]`; not an error. |
+| `getAutomationCreator()` finds no admin | Throws — orchestrator can't run; surfaces via API 500 / CLI exit 1. |
+| Event has posting_instance_json but missing start_at/end_at | `ineligible_reason: "missing_dates"`, no slots processed; other events continue. |
+| Event has zero occurrences in `[now, now+24h]` | `ineligible_reason: "no_occurrences_in_window"`, no slots processed; other events continue. |
+| `loadBrandContext()` fails for an event's brand | `errors[]` records `{phase: "context_load", message}`; that event skipped; others continue. |
+| One slot's `runGeneration` throws | `errors[]` records `{phase: "generate", occurrence_iso, platform, message}`; other slots within the event continue; other events continue. |
+| Slot already exists (dedupe hit) | `skipped_dedupe_count` incremented; no generation call. |
+
+Text drafts always ship even when image generation / GCS storage fail — that discipline is in `runGeneration()` itself; this orchestrator doesn't re-implement it.
+
+**Verification surfaces**:
+- **Admin-only API route**: `POST /api/automations/adhoc-events/run` with optional body `{brand_id?: string, event_id?: string, lookahead_hours?: number}`. Returns the `EventAutomationRunResult` JSON. Suitable for ops dashboards and the future Cloud Scheduler trigger.
+- **CLI wrapper**: `npm run automation:adhoc-events [-- <brand_id> | --event=<event_id> | --lookahead=<hours>]`. Pretty-prints the result. Suitable for one-shot ops verification and ad-hoc re-runs when an operator just flipped a flag and wants the drafts to appear immediately.
+
+**Observability** — three log line shapes:
+```
+[automation:event] start lookahead_hours=<N> events=<N> creator=<id> [filter=<...>]
+[automation:event] event=<id> brand=<id> occurrences=<N> slots=<N> skipped_dedupe=<N> generated=<N> errors=<N> [reason=<ineligible_reason>]
+[automation:event] done events_scanned=<N> events_eligible=<N> slots_processed=<N> skipped_dedupe=<N> generated=<N> errors=<N> duration_ms=<N>
+```
+No event content in logs (titles only, max 80 chars).
+
+**Out of scope for the orchestrator** (deferred):
+- Cloud Scheduler job for periodic invocation (separate infra step; same shape as `mkt-agent-dispatch` for Manus). Needed once for both this AND the Running Promotions automation.
+- Multi-sample-per-slot from automation. `samples_per_slot = 1` is MVP — operators run the manual route when they want sibling samples.
+- Window-shifting / smart cadence — running every hour with a 24h lookahead means a daily-recurrence event has its slot considered ~24× before the dedupe cuts duplicates. Acceptable for MVP at low query volume.
+- A real "system" user via migration — find-first-admin shortcut today.
+- Composite index on `Post(brand_id, source_type, source_id, source_instance_key, platform)` — small N, low frequency for now.
+- Auto-approval / delivery rows / Manus dispatch — drafts only.
+
+---
+
 ## Tab 2: On Going Promotions
 
 API-based promotion detection with per-promo rule configuration.

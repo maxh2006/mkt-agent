@@ -38,6 +38,63 @@ Current execution priority (per ROADMAP.md):
 ## Done Tasks
 
 ### 2026-04-28
+- Task: Phase 5 sub-bullet 4 — Adhoc Event automation generation flow
+  - Status: Complete (orchestrator + admin API + CLI shipped; manual-trigger surfaces ready). No deploy needed for runtime activation — the orchestrator is invocable the moment it lands in prod.
+  - Why: Phase 5's second concrete deliverable. Adhoc Events already had the manual `POST /api/events/[id]/generate-drafts` route (operator-clicked from the Event detail page); what was missing was the cadence-driven automation that scans eligible events and routes them through the same pipeline without operator clicks. Adhoc Events do not depend on the upstream promo endpoint that's still in dev-team prep, so it was the obvious next item to ship.
+  - Files added:
+    - `src/lib/automations/adhoc-events/types.ts` — `EventAutomationError`, `EventAutomationEventSummary`, `EventAutomationRunResult`, `EventAutomationRunArgs`, plus the `EventAutomationIneligibleReason` discriminator (`status_inactive` | `auto_generate_off` | `brand_inactive` | `missing_dates` | `no_occurrences_in_window`). Captures per-event outcomes (eligibility, occurrences in window, slots processed, dedupe skips, drafts generated, errors[]) and roll-up totals (events_scanned, events_eligible, slots_processed, skipped_dedupe, drafts_generated, errors).
+    - `src/lib/automations/adhoc-events/orchestrator.ts` — `runAdhocEventsAutomation({brand_id_filter?, event_id_filter?, lookahead_hours?, now?})`. Single Prisma query for eligibility (`status='active'` + `auto_generate_posts=true` + `brand.active=true` with optional id filters); resolves `getAutomationCreator()` once; per-event sequential loop computing occurrences in `[now, now + LOOKAHEAD_HOURS]` via the existing `parsePostingInstance()` + `generateOccurrences()` helpers (Generate Now events synthesize one occurrence at `now`); per-slot dedup via `Post.findFirst` on `(brand_id, source_type='event', source_id, source_instance_key, platform)`; per-slot `normalizers.normalizeEvent()` + `runGeneration({input, created_by})` wrapped in try/catch. Per-event audit log via existing `AuditAction.EVENT_DRAFTS_GENERATED` with `automation: true` + `lookahead_hours_at_run` in the after-state. ~340 lines.
+    - `src/app/api/automations/adhoc-events/run/route.ts` — admin-only `POST` (returns `Errors.UNAUTHORIZED`/`FORBIDDEN` for others). Optional body `{brand_id?, event_id?, lookahead_hours?}` for verification scoping. Calls the orchestrator; returns the structured `EventAutomationRunResult` JSON. Wraps the orchestrator in try/catch — only the configuration-error throw path (no admin user) returns 500; per-event and per-slot failures are normal payload data.
+    - `scripts/adhoc-events-automation.ts` — thin CLI wrapper. `import "dotenv/config"`. Parses `process.argv` for optional `<brand_id>` positional, `--event=<id>` flag, `--lookahead=<hours>` flag. Pretty-prints the JSON result + a one-line summary; exits 0 on completion (per-event errors are normal); exits 1 only on orchestrator throw.
+  - Files modified:
+    - `package.json` — added `automation:adhoc-events` npm script.
+    - `docs/04-automations.md` — new "Adhoc Event automation flow (Phase 5 — shipped 2026-04-28)" section after the Running Promotions section. Eligibility query, lookahead-window rationale, per-event flow steps, dedup rule (status-agnostic), `created_by` strategy, failure-isolation table, verification surfaces, observability log shape, deferred items.
+    - `docs/00-architecture.md` — new "Event automation entry point" paragraph in the AI generator section, sibling to the existing "Event entry point" + "Running Promotions live adapter" subsections. Notes the trigger surface is manual today; Cloud Scheduler is the next infra step.
+    - `docs/07-ai-boundaries.md` — extended the existing "Automation-driven generation" section to cover BOTH automation flows. The boundary discipline is unchanged — both flow through the same `runGeneration()` pipeline; AI still only generates content from structured packets.
+    - `ROADMAP.md` — Phase 5 sub-bullet 4 flipped from "already partially shipped" to ✅ with full module + contract summary; EXECUTION PRIORITY paragraph 4 updated to reflect both automations are shipped (2 of 5 source automations done; Big Wins + Hot Games still gated on `shared.game_rounds`); next concrete step listed as Cloud Scheduler job(s).
+    - `WORKLOG.md` — this entry; Ongoing entry removed.
+  - Locked product calls (per the approved plan):
+    - **Operator opt-in via `Event.auto_generate_posts`** (existing schema field; default `false`). The manual `POST /api/events/[id]/generate-drafts` continues to ignore the flag — explicit operator action.
+    - **Eligibility (locked):** `Event.status='active'` AND `Event.auto_generate_posts=true` AND `Brand.active=true` AND ≥1 occurrence in `[now, now + LOOKAHEAD_HOURS]`.
+    - **`LOOKAHEAD_HOURS = 24` (default)**, override-able via `args.lookahead_hours`. Reason: prevents long-recurrence floods (a 30-day daily event would create 30 drafts in a single run otherwise). Drafts appear ~24h before each scheduled occurrence — enough lead time for review/approve. Tighten via the future Cloud Scheduler interval.
+    - **Dedup = `Post.findFirst` on `(brand_id, source_type='event', source_id=event.id, source_instance_key=occurrence ISO, platform)`**, status-agnostic. Same identity as the manual route — manual + automated runs cannot race-condition into duplicates. Operators delete the prior Post row to force re-generation (MVP discipline).
+    - **`samples_per_slot = 1` (locked, MVP).** Manual route accepts `?samples_per_slot=N` (1–5); automation does not expose that knob today.
+    - **`created_by` = first admin** via the shared `getAutomationCreator()` helper (TEMPORARY shortcut). Same caveat as Running Promotions.
+    - **Per-event sequential, per-slot sequential within an event.** No parallelism in MVP.
+    - **Failure isolation at three levels.** One brand failing doesn't block others; one event failing doesn't block other events; one slot failing within an event doesn't block other slots. Errors collected into the result; orchestrator never throws on per-row issues. Only fail-fast condition is `getAutomationCreator()` finding no admin user.
+    - **Top-level loop is event-first (not brand-first).** Events are inherently a per-event resource; the result `events[]` array carries `brand_id` + `brand_name` per entry.
+    - **NO new `AuditAction` enum value.** Reuses existing `EVENT_DRAFTS_GENERATED` with `automation: true` in the after-state.
+  - Verification surfaces:
+    - **Admin-only API**: `POST /api/automations/adhoc-events/run` (optional body `{brand_id?, event_id?, lookahead_hours?}`). Returns the run result JSON. Suitable for ops dashboards + future Cloud Scheduler.
+    - **CLI**: `npm run automation:adhoc-events [-- <brand_id> | --event=<event_id> | --lookahead=<hours>]`. Useful for one-shot ops verification + ad-hoc re-runs when an operator just flipped the opt-in flag.
+  - Observability:
+    - Run start: `[automation:event] start lookahead_hours=<N> events=<N> creator=<id> [filter=<...>]`
+    - Per event: `[automation:event] event=<id> brand=<id> occurrences=<N> slots=<N> skipped_dedupe=<N> generated=<N> errors=<N> [reason=<ineligible_reason>]`
+    - Run done: `[automation:event] done events_scanned=<N> events_eligible=<N> slots_processed=<N> skipped_dedupe=<N> generated=<N> errors=<N> duration_ms=<N>`
+    - No event content in logs (titles only, max 80 chars).
+  - Failure isolation behavior table:
+
+    | Scenario | Result |
+    |---|---|
+    | No eligible events | `events_scanned: 0`, empty `events[]`; not an error. |
+    | No admin user found | Orchestrator throws → API 500 / CLI exit 1. |
+    | Event missing `start_at`/`end_at` (recurrence mode) | `ineligible_reason: "missing_dates"`; other events continue. |
+    | Event has zero occurrences in `[now, now+24h]` | `ineligible_reason: "no_occurrences_in_window"`; other events continue. |
+    | `loadBrandContext()` fails | `errors[]` records `{phase: "context_load"}`; that event skipped; others continue. |
+    | One slot's `runGeneration` throws | `errors[]` records `{phase: "generate", occurrence_iso, platform, message}`; other slots within the event continue; other events continue. |
+    | Slot already exists in queue | `skipped_dedupe_count` incremented; no generation call. |
+
+  - Verification:
+    - `npx tsc --noEmit` clean (EXIT=0).
+    - `npm run visual:smoke` clean (27/27; visual compiler unchanged).
+    - **Manual prod smoke pending after deploy** — covered by the post-deploy checklist (CLI all-events run on prod expects `events_scanned: 0` since none of the seeded test events have `auto_generate_posts=true` flipped; the orchestrator should boot, resolve creator, query DB, and return cleanly with zero work).
+  - What remains deferred (NEXT concrete step):
+    - **Cloud Scheduler job** that hits `POST /api/automations/adhoc-events/run` AND `POST /api/automations/running-promotions/run` on a cadence. Same shape as the existing `mkt-agent-dispatch` Manus scheduler. ~5 lines of gcloud + a `x-dispatch-secret`-style auth header per route. Single infra task that activates BOTH automations.
+    - Multi-sample-per-slot from automation. Operators run the manual route when they want sibling-sample comparison.
+    - Composite index on `Post(brand_id, source_type, source_id, source_instance_key, platform)` — small N, low frequency for now; revisit when query volume grows.
+    - Real "system" user via migration (one-line internals swap when convenient).
+    - Auto-approval / delivery rows / Manus dispatch — drafts only.
+
 - Task: Phase 4 — Image Inspector UI in Content Queue
   - Status: Complete (modal + entry button shipped; reuses existing detail-page surface).
   - Why: Closes one of the two remaining Phase 4 product gaps. The visual / image pipeline persists three structured blocks per draft (`generation_context_json.{visual_compiled, image_generation, composited_image}`) plus the auto-populated `Post.image_url`, but operators and developers had no clean way to inspect that state. Existing surfaces showed only `image_url` in the Preview pane — no visibility into provider, fallback flags, GCS metadata, error codes, or compiled visual direction.

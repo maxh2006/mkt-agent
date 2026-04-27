@@ -787,6 +787,22 @@ doesn't already have a draft. Legacy dedupe on
 `(source_instance_key, platform)` is preserved. Add
 `?samples_per_slot=N` (1–5) for multiple sibling samples per slot.
 
+**Event automation entry point.** As of 2026-04-28, an automation
+orchestrator at `src/lib/automations/adhoc-events/orchestrator.ts`
+exposes `runAdhocEventsAutomation({brand_id_filter?, event_id_filter?,
+lookahead_hours?})` which scans events flagged `auto_generate_posts: true`,
+computes occurrences in `[now, now + 24h]`, and routes each
+`(occurrence × platform)` slot through the SAME `runGeneration()`
+pipeline — no divergent code path. Same dedup identity as the manual
+route (`source_type='event'`, `source_id`, `source_instance_key`,
+`platform`) so manual + automated runs cannot race-condition into
+duplicates. Verification surfaces: admin-only `POST
+/api/automations/adhoc-events/run` + `npm run automation:adhoc-events`.
+Trigger surface today is manual; a Cloud Scheduler job (similar shape
+to `mkt-agent-dispatch` for Manus) is the next infra step. See
+`docs/04-automations.md` "Adhoc Event automation flow" for the
+complete contract.
+
 **Refine compatibility.** Because refine is locked to review-side
 statuses (see docs/06-workflows-roles.md) and source-constrained to
 visual/tone/presentation, the generator's `generation_context_json`
