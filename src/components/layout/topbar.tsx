@@ -3,16 +3,8 @@
 import { useState, useEffect, useRef } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Building2, ChevronDown, Bell, User, Check, Layers, Menu } from "lucide-react";
+import { Building2, ChevronDown, Bell, User, Check, Layers, Menu, LogOut } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { brandsApi, type Brand } from "@/lib/brands-api";
 import { cn } from "@/lib/utils";
@@ -163,6 +155,77 @@ function BrandSwitcher({
   );
 }
 
+// ─── Custom user menu (no Base UI — avoids error #31 on signOut) ─────────────
+//
+// Same hazard as the BrandSwitcher rebuild (commit fffd69b): Base UI's
+// DropdownMenu throws "error #31" when something unmounts the menu's
+// React-context provider mid-exit-animation. signOut() triggers a
+// session-state change that does exactly that. Plain button + absolute
+// panel + outside-click handler keeps Base UI off the signOut path.
+
+function UserMenu({ displayName }: { displayName: string }) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(e: PointerEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [open]);
+
+  function handleSignOut() {
+    setOpen(false);
+    // Defer one tick so the panel's unmount happens before next-auth's
+    // session-state churn — same defensive ordering the brand switcher
+    // uses around invalidateQueries.
+    setTimeout(() => {
+      signOut({ callbackUrl: "/login" });
+    }, 0);
+  }
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-label="Account menu"
+        className={cn(
+          buttonVariants({ variant: "ghost", size: "icon" }),
+          "rounded-full"
+        )}
+      >
+        <Avatar className="h-7 w-7">
+          <AvatarFallback>
+            <User className="h-4 w-4" />
+          </AvatarFallback>
+        </Avatar>
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full z-50 mt-1 w-48 rounded-lg border bg-popover p-1 shadow-md">
+          <p className="truncate px-2 py-1.5 text-xs text-muted-foreground">
+            {displayName}
+          </p>
+          <div className="my-1 h-px bg-border" />
+          <button
+            type="button"
+            onClick={handleSignOut}
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-destructive transition-colors hover:bg-destructive/10"
+          >
+            <LogOut className="h-3.5 w-3.5 shrink-0" />
+            <span className="flex-1 text-left">Sign Out</span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── TopBar ───────────────────────────────────────────────────────────────────
 
 export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
@@ -252,33 +315,7 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
           <Bell className="h-4 w-4" />
         </button>
 
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            className={cn(
-              buttonVariants({ variant: "ghost", size: "icon" }),
-              "rounded-full"
-            )}
-          >
-            <Avatar className="h-7 w-7">
-              <AvatarFallback>
-                <User className="h-4 w-4" />
-              </AvatarFallback>
-            </Avatar>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-44">
-            <DropdownMenuLabel className="truncate font-normal text-muted-foreground text-xs">
-              {displayName}
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              className="text-destructive"
-              onClick={() => signOut({ callbackUrl: "/login" })}
-            >
-              Sign Out
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <UserMenu displayName={displayName} />
       </div>
     </header>
   );
