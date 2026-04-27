@@ -17,11 +17,15 @@ Current execution priority (per ROADMAP.md):
 ## Ongoing Tasks
 
 - **⏳ REMINDER — Top up Anthropic credits** (console.anthropic.com → Billing). Required to flip `AI_PROVIDER=anthropic` in prod for real text generation.
-- **⏳ REMINDER — Upgrade Gemini API key to paid tier** (https://aistudio.google.com/api-keys → key settings → "Set up billing" / paid tier). Verified blocker on 2026-04-27: key + project + Generative Language API are all set up correctly, but the API key itself is on free tier and `gemini-3.1-flash-image-preview` (Nano Banana 2) has free-tier limit = 0. Local `npm run gemini:smoke` returns `429 RATE_LIMITED` with body `Quota exceeded for metric: ...generate_content_free_tier_requests`. Image-generation models are paid-tier-only; project-level billing isn't sufficient — the key itself must be opted in. Until upgraded, prod stays on `AI_IMAGE_PROVIDER=stub` (current safe-prod default; stub generates placeholder result with `artifact_url: null` — overlay renderer falls back to brand-color background, text drafts ship cleanly). When upgraded: re-run `npm run gemini:smoke` locally → if `OK`, follow the prod flip procedure in `docs/08-deployment.md` "Image generation provider — Gemini / Nano Banana 2".
   - Blocks: real AI generation in prod (Anthropic returns `403 Request not allowed` until credits exist)
   - Current account plan: Evaluation access (free, zero credits)
   - Ballpark: $5 minimum top-up ≈ 150+ full Event generate-drafts runs at sonnet-4.6 rates
   - When done: say "credits added" to the session → resume Phase 4 validation
+- **⏳ REMINDER — Upgrade Gemini API key to paid tier** (https://aistudio.google.com/api-keys → key settings → "Set up billing" / paid tier).
+  - Blocks: real background-image generation in prod (Gemini returns `429 RATE_LIMITED` with body `Quota exceeded for metric: ...generate_content_free_tier_requests, limit: 0, model: gemini-3.1-flash-image` until the key is opted into paid tier).
+  - Verified blocker on 2026-04-27 via `npm run gemini:smoke` against the local env. Key + project + Generative Language API are all set up correctly; only the key's tier is the gate. Image-generation models are paid-tier-only; project-level billing on `mktagent-493404` isn't sufficient on its own — the key itself must be opted in.
+  - Current state: `AI_IMAGE_PROVIDER=stub` in prod. Stub returns placeholder result with `artifact_url: null`; overlay renderer falls back to brand-color solid background; text drafts ship cleanly.
+  - When done: re-run `npm run gemini:smoke` locally → if `OK`, follow the prod flip procedure in `docs/08-deployment.md` "Image generation provider — Gemini / Nano Banana 2", then say "key on paid tier" to the session.
 
 
 

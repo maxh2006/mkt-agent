@@ -229,17 +229,18 @@ Definition of done:
 
 ## EXECUTION PRIORITY
 
-Current practical priority order (updated 2026-04-23):
-1. ✅ Phase 2 Manus publishing lifecycle — original 10 items resolved; ongoing bridge-hardening landing as needed
-2. 🟡 Phase 3 BigQuery/API source layer — 5 of 8 done; items 4 & 5 blocked on platform team `shared.game_rounds` provisioning
-3. 🟡 Phase 4 AI content generator agent — core done (prompt builder, draft flow, brand-aware, learning metadata); image generation and dedicated sample-comparison UI remaining
+Current practical priority order (updated 2026-04-27):
+1. ✅ Phase 2 Manus publishing lifecycle — original 10 items resolved; ongoing bridge-hardening landing as needed.
+2. 🟡 Phase 3 BigQuery/API source layer — 5 of 8 done; items 4 & 5 blocked on platform team `shared.game_rounds` provisioning.
+3. 🟡 Phase 4 AI content generator agent — visual chain shipped end-to-end on 2026-04-27 (Brand Simple Mode UI, Event Visual Override UI + persistence, `compileVisualPrompt()` wired into `runGeneration()`, background-image provider boundary, Nano Banana 2 / Gemini real adapter, deterministic Satori + Resvg overlay renderer). Operational gates remain: Anthropic credits (text gen) + Gemini paid-tier upgrade (image gen) — both currently fall back to safe stubs in prod. Remaining product gaps: GCS-backed `artifact_url` migration (which then unblocks auto-population of `Post.image_url` from the composite), image inspector UI in Content Queue, dedicated sample-comparison UI.
 4. **Phase 5 automate draft creation flows** — next major focus. Scheduler that calls `fetchPromotionsForBrand()` / `fetchBigWinsForBrand()` / `fetchHotGamesForBrand()` on each brand's `automation_rules.config_json` cadence + routes the resulting facts through the AI pipeline.
-5. Phase 6 close learning loop
-6. Phase 1 & 7 secondary audits/polish
+5. Phase 6 close learning loop.
+6. Phase 1 & 7 secondary audits/polish.
 
 **Known unblockers needed** before resuming blocked Phase 3/4 items:
 - Platform team provisions `shared.game_rounds` → unlocks Phase 3 #4/#5 + exercises Big Wins / Hot Games adapters against live data.
 - Anthropic credits top-up → flip `AI_PROVIDER=anthropic`, re-test Generate Drafts with real model output.
+- Gemini API key paid-tier upgrade → flip `AI_IMAGE_PROVIDER=gemini`, re-test image generation with real Nano Banana 2 output. Verified blocker on 2026-04-27 via `npm run gemini:smoke`: the key returns `429 RATE_LIMITED` with `free_tier_requests, limit: 0` for `gemini-3.1-flash-image-preview`. Project-level billing on `mktagent-493404` isn't sufficient on its own — the key itself must be opted into paid tier at https://aistudio.google.com/api-keys. Until then prod stays on `AI_IMAGE_PROVIDER=stub` (overlay renderer falls back to brand-color solid background).
 
 ---
 
