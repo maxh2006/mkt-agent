@@ -107,6 +107,68 @@ Post detail:
 - Source ID links to the source event for event-derived posts.
 - Rejection block now shows rejected_at timestamp and rejected_by (in addition to reason).
 - **Image URL field** (2026-04-23): editable when post is in Draft or Rejected (same gate as other fields). Helper text: "Public URL for publishing. Must be reachable (http or https). Leave blank for text-only posts." The field is an optional URL up to 2048 chars; syntactic sanity is enforced by the post Zod schema, and full public-URL reachability is enforced pre-dispatch by `src/lib/manus/media-validation.ts`. The post preview at the top of the page renders the image when `image_url` is set (with a broken-image fallback to the banner_text placeholder if the browser fails to load it — this is a browser CORS / hotlink resilience concern, not a validation signal).
+- **Image Inspector button** (2026-04-28): in the Preview panel header. Opens a modal that surfaces the visual / image generation chain for the draft. Read-only — no editing, no regeneration. Disabled with tooltip "No image-related metadata for this draft" when neither `Post.image_url` nor any of `generation_context_json.{visual_compiled, image_generation, composited_image}` blocks are present.
+
+#### Image Inspector modal (2026-04-28)
+
+Component: [`src/components/posts/image-inspector-modal.tsx`](src/components/posts/image-inspector-modal.tsx).
+
+Inspection-only surface so operators + developers can understand what
+the visual / image pipeline produced for a draft. Closes one of the
+remaining Phase 4 product gaps. No mutation API — pulls everything from
+the Post the detail page already loaded.
+
+Top-of-modal **outcome summary** banner — one-line headline driven by
+the persisted blocks. Tones: ok / warn / error / neutral. Examples:
+- "Final composite ready and hosted" — composited.status=ok + Post.image_url is https
+- "Composite generated with brand-color fallback background" — composited.background_fallback=true
+- "Composite generated but not yet uploaded to GCS" — composited.status=ok + image_url null (data: URI fallback)
+- "Background generation failed" — image_generation.status=error and no composite
+- "Image pipeline failed (both background and composite)" — both blocks errored
+- "No image artifact available yet" — nothing in any block
+
+**Preview area** (square, max 420px tall) with priority:
+1. `Post.image_url` (hosted URL preferred — same as Manus dispatch)
+2. `generation_context_json.composited_image.artifact_url` (data: URI labeled when not hosted)
+3. `generation_context_json.image_generation.artifact_url`
+4. Empty state with "No image artifact available yet"
+
+A small line under the preview names which source was used so operators
+know whether they are looking at the final composite or the raw
+background.
+
+**Sections**:
+- *Final composite* — Post.image_url (with copy + open links), composited
+  artifact URL, dimensions, GCS bucket/object_path, background-fallback
+  flag, logo_drawn flag, byte size, uploaded_at, render_version, render
+  error block when present.
+- *Visual direction* — visual_compiled summary: layout_key, platform_format,
+  visual_emphasis, subject_focus, render_intent, safe-zone count + gradient
+  overlay flag, effective visual_style + main_subject_type, and event-
+  override badges (`overridden_by_event[]`).
+- *Background generation* — image_generation: provider, model, status chip
+  (ok / skipped / error), artifact URL, asset id, dimensions, generated_at,
+  duration_ms, render_version, skipped_reason / error_code+message blocks
+  when present. Stub-mode null artifact gets an inline note clarifying
+  the renderer falls back to brand-color background.
+- *Compositing details* — small slice of composited_image that is
+  layout/format/MIME-specific.
+- *Raw `generation_context_json` expander* — collapsible, off by default.
+  Last-resort affordance for debugging full metadata; operator UI is the
+  primary path.
+
+External URLs render as `<a target="_blank">` with a Copy button. Long
+data: URIs are summarized as a "data: URI" pill plus their KB size — never
+dumped inline.
+
+**Edge cases handled**:
+- Missing `visual_compiled` block → friendly note ("may predate visual chain rollout").
+- Missing `image_generation` block → "No background-image provider was invoked".
+- Missing `composited_image` block + null `image_url` → only Post.image_url field shown.
+- `image_generation.artifact_url` is a `data:` URI → labeled inline, KB shown.
+- Broken preview URL → `onError` hides the broken `<img>` and falls through to the empty state.
+- Stub provider (status=ok with null artifact_url) → explicit note, not silently empty.
+- All sections tolerate older drafts whose JSON predates the current shape.
 
 Row actions (target model — refine per implementation):
 - Core (visible): View, Refine, Approve (or Approve & Post when immediate), Reject

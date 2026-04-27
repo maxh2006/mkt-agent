@@ -38,6 +38,45 @@ Current execution priority (per ROADMAP.md):
 ## Done Tasks
 
 ### 2026-04-28
+- Task: Phase 4 — Image Inspector UI in Content Queue
+  - Status: Complete (modal + entry button shipped; reuses existing detail-page surface).
+  - Why: Closes one of the two remaining Phase 4 product gaps. The visual / image pipeline persists three structured blocks per draft (`generation_context_json.{visual_compiled, image_generation, composited_image}`) plus the auto-populated `Post.image_url`, but operators and developers had no clean way to inspect that state. Existing surfaces showed only `image_url` in the Preview pane — no visibility into provider, fallback flags, GCS metadata, error codes, or compiled visual direction.
+  - Files added:
+    - `src/components/posts/image-inspector-modal.tsx` — read-only Dialog. Tolerates partial / missing blocks. Sections (rendered in order):
+      1. **Outcome summary banner** — one-line headline computed from the persisted blocks. Tones: ok / warn / error / neutral. Examples: "Final composite ready and hosted", "Composite generated with brand-color fallback background", "Composite generated but not yet uploaded to GCS", "Background generation failed", "Image pipeline failed (both background and composite)", "No image artifact available yet".
+      2. **Preview area** (square, max 420px tall) — priority `Post.image_url` → `composited_image.artifact_url` → `image_generation.artifact_url` → empty state. Click-to-open in new tab. A small line under the preview names the resolved source so operators know whether they're seeing the final composite or just the raw background.
+      3. **Final composite** — Post.image_url + composited artifact URL (with copy + open links), dimensions, GCS bucket/object_path, background-fallback flag, logo_drawn flag, byte size, uploaded_at, render_version, render-error block when present.
+      4. **Visual direction** — visual_compiled summary: layout_key, platform_format, visual_emphasis, subject_focus, render_intent, safe-zone count + gradient overlay flag, effective visual_style + main_subject_type, and event-override badges (`overridden_by_event[]`).
+      5. **Background generation** — image_generation: provider, model, status chip (ok / skipped / error), artifact URL, asset id, dimensions, generated_at, duration_ms, render_version, skipped_reason / error_code+message blocks when present. Stub-mode null artifact gets an inline note clarifying the renderer falls back to brand-color background.
+      6. **Compositing details** — small slice of composited_image that is layout/format/MIME-specific.
+      7. **Raw `generation_context_json` expander** — collapsible, off by default. Last-resort affordance for full metadata; operator UI is the primary path.
+    - Helpers exported from the same file: `postHasImageInspectorData(post)` — single boolean for entry-point gating; returns true when any of the three blocks OR `Post.image_url` is present.
+  - Files modified:
+    - `src/app/(app)/queue/[id]/page.tsx` — added Image Inspector button into the Preview panel header. Disabled with tooltip "No image-related metadata for this draft" when `postHasImageInspectorData(post)` is false. New `inspectorOpen` state; modal mounted at the bottom of the page.
+    - `docs/03-ui-pages.md` — added "Image Inspector button" line in the Post detail section + a new "Image Inspector modal (2026-04-28)" subsection covering outcome-summary semantics, preview priority, sections, and edge cases.
+    - `ROADMAP.md` — EXECUTION PRIORITY paragraph 3 updated to drop "image inspector UI" from the remaining-Phase-4-gaps list. Composite cleanup/lifecycle is now the only remaining product gap; operational gates (Anthropic credits, Gemini paid-tier, GCS bucket) are unchanged.
+    - `WORKLOG.md` — this entry; Ongoing entry removed.
+  - Locked product calls (per the brief):
+    - **Inspection only.** No regeneration / edit affordances. Approval / rejection / refine remain on the existing detail-page action row.
+    - **Modal, not a route.** Reuses the existing Dialog primitive (same shape as `DeliveryStatusModal`, `EditPostModal`, `RejectDialog`). No URL state.
+    - **Single entry point on the post detail page.** Brief allowed an optional row-action variant on the queue list, but the queue row already has many actions and adding another icon would crowd it. Detail-page button is the canonical entry; queue-row affordance can be added later if operators ask.
+    - **Friendly wording first; technical codes secondary.** Section titles say "Final composite" / "Background generation" / "Visual direction"; technical codes (e.g. `render_version`, `error_code`) appear in compact metadata rows beneath.
+    - **Raw JSON expander is secondary.** Off by default; collapsed at the bottom; one-line button reveals it.
+  - Edge cases handled (none of these crash the inspector):
+    - Missing `visual_compiled` block (e.g. drafts predating the visual chain rollout) → friendly note in the section.
+    - Missing `image_generation` block → "No background-image provider was invoked".
+    - Missing `composited_image` block + null `image_url` → only the Post.image_url field is shown in the Final composite section.
+    - `image_generation.artifact_url` or `composited_image.artifact_url` is a `data:` URI → labeled as a "data: URI" pill with KB size, never dumped inline.
+    - Broken preview URL → `<img onError>` hides the broken element and falls through to the empty state.
+    - Stub provider `status: "ok"` with `artifact_url: null` → explicit note ("Stub provider returned a placeholder result with no real artifact…") rather than a confusing blank.
+    - All sections defensively narrow `unknown` JSON values (`asObject` helper) so a malformed older draft never throws.
+  - Verification:
+    - `npx tsc --noEmit` clean (EXIT=0).
+    - `npm run visual:smoke` clean (27/27 — visual compiler unchanged).
+    - Manual prod smoke deferred until at least one draft has a populated visual chain to exercise (Anthropic credits + Gemini paid-tier are gated). The modal also handles the no-data path gracefully — opening it on a manual / pre-visual-chain draft will show empty-state messaging in each section instead of crashing.
+  - What remains in Phase 4 after this:
+    - **Composite cleanup / lifecycle policy for GCS artifacts** — only remaining product gap. Operational gates (Anthropic credits, Gemini paid-tier, GCS bucket creation) unchanged and tracked in the Ongoing reminders + ROADMAP "Known unblockers" section.
+
 - Task: Operational fix — dual PM2 daemon collision on prod VM
   - Status: Resolved.
   - Symptom: operators saw `Unauthorized` on `/brands` (and the brand selector was empty) after the Sample Comparison UI deploy. Root cause turned out to be unrelated to the deploy itself.

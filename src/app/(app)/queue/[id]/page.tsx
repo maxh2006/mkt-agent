@@ -8,8 +8,12 @@ import { postsApi, type Post } from "@/lib/posts-api";
 import { StatusBadge } from "@/components/posts/status-badge";
 import { RejectDialog } from "@/components/posts/reject-dialog";
 import { ScheduleDialog } from "@/components/posts/schedule-dialog";
+import {
+  ImageInspectorModal,
+  postHasImageInspectorData,
+} from "@/components/posts/image-inspector-modal";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Pencil, CheckCircle, XCircle, CalendarClock, X, Save } from "lucide-react";
+import { ArrowLeft, Pencil, CheckCircle, XCircle, CalendarClock, X, Save, ImageIcon } from "lucide-react";
 
 function canApproveRole(role?: string) {
   return role === "admin" || role === "brand_manager";
@@ -99,6 +103,7 @@ export default function PostDetailPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
 
   const { data: post, isLoading, isError, error } = useQuery({
     queryKey: ["post", id],
@@ -402,7 +407,29 @@ export default function PostDetailPage() {
         <div className="space-y-4">
           {/* Preview panel */}
           <div className="rounded-lg border border-border p-5 space-y-4">
-            <h2 className="text-sm font-semibold">Preview</h2>
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-sm font-semibold">Preview</h2>
+              {postHasImageInspectorData(post) ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setInspectorOpen(true)}
+                >
+                  <ImageIcon className="h-3.5 w-3.5" />
+                  Image Inspector
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled
+                  title="No image-related metadata for this draft"
+                >
+                  <ImageIcon className="h-3.5 w-3.5" />
+                  Image Inspector
+                </Button>
+              )}
+            </div>
             <PostPreview
               post={editing ? { ...post, ...editData } : post}
             />
@@ -424,6 +451,12 @@ export default function PostDetailPage() {
           </div>
         </div>
       </div>
+
+      <ImageInspectorModal
+        post={post}
+        open={inspectorOpen}
+        onClose={() => setInspectorOpen(false)}
+      />
     </div>
   );
 }
