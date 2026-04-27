@@ -235,3 +235,11 @@ Refinement scope — MVP policy (locked 2026-04-21):
 - Enforced in three places: row-level Refine button gating, modal-level
   defensive lockout render, and server-side PATCH `/api/posts/[id]` (which
   only accepts `draft` / `rejected` updates).
+
+Sample comparison page (2026-04-27):
+- The Sample Comparison page (`/queue/compare/[group_id]`) reuses the same
+  approve / reject / refine gating semantics as queue rows — no new
+  permissions, no bulk-action affordance. Each sibling column's action
+  buttons read the live Post status and apply the existing role + status
+  gates. Approving one sibling does NOT auto-reject the others; operators
+  handle sibling cleanup explicitly.

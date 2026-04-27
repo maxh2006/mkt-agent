@@ -65,6 +65,7 @@ export interface PostFilters {
   post_type?: string;
   date_from?: string;
   date_to?: string;
+  sample_group_id?: string;
   page?: number;
   per_page?: number;
 }
@@ -84,6 +85,7 @@ export function buildPostsUrl(filters: PostFilters): string {
   if (filters.post_type) params.set("post_type", filters.post_type);
   if (filters.date_from) params.set("date_from", filters.date_from);
   if (filters.date_to) params.set("date_to", filters.date_to);
+  if (filters.sample_group_id) params.set("sample_group_id", filters.sample_group_id);
   if (filters.page) params.set("page", String(filters.page));
   if (filters.per_page) params.set("per_page", String(filters.per_page));
   const qs = params.toString();

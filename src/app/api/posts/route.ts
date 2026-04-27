@@ -66,9 +66,21 @@ export async function GET(req: NextRequest) {
     return Errors.VALIDATION(queryParsed.error.issues[0]?.message ?? "Invalid query");
   }
 
-  const { status, statuses, platform, post_type, date_from, date_to, page, per_page } = queryParsed.data;
+  const { status, statuses, platform, post_type, date_from, date_to, sample_group_id, page, per_page } = queryParsed.data;
 
   const brandFilter = { brand_id: { in: ctx.brandIds } };
+
+  // Sample-group filter — used by the comparison page to fetch all
+  // siblings of a given sample_group_id. The id lives inside
+  // generation_context_json (Prisma JSONB path filter).
+  const sampleGroupFilter = sample_group_id
+    ? {
+        generation_context_json: {
+          path: ["sample_group_id"],
+          equals: sample_group_id,
+        },
+      }
+    : {};
 
   // Multi-status support: "statuses" (comma-separated) overrides single "status"
   let statusFilter: Record<string, unknown> = {};
@@ -105,7 +117,7 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  const where = { ...brandFilter, ...statusFilter, ...dateFilter, ...(platform && { platform }), ...(post_type && { post_type }) };
+  const where = { ...brandFilter, ...statusFilter, ...dateFilter, ...sampleGroupFilter, ...(platform && { platform }), ...(post_type && { post_type }) };
 
   const [posts, total] = await Promise.all([
     db.post.findMany({

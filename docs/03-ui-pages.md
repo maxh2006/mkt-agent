@@ -55,6 +55,38 @@ Columns:
 - Type filter now includes **Hot Games** in addition to Running Promotion / Big Win / Adhoc Event / Educational.
 - Sample group chip appears in the preview cell when sibling drafts share a `sample_group_id`
   (e.g. "Sample 1/3"). Siblings also share a thin colored left border for subtle visual grouping.
+  When the group has more than one sample, the chip is a link to the **Sample Comparison page**
+  (`/queue/compare/[group_id]`). Singletons keep the chip as a plain badge.
+
+#### Sample Comparison page (2026-04-27)
+
+Route: `/queue/compare/[group_id]` (client-rendered, brand-scoped via the existing
+`GET /api/posts` filter).
+
+Closes Phase 4 sub-bullet 6 ("operators can compare and choose between samples").
+Lays sibling drafts of one `sample_group_id` side-by-side so operators can pick a winner
+without scrolling between unrelated rows.
+
+- **Header**: source-type badge (Promo / Big Win / Event / Educational / Hot Games) + a
+  readable source identity line drawn from `generation_context_json.source_snapshot`
+  (e.g. "Running promotion: Welcome Bonus +100%", "Event: Diwali Spin-a-Win") + brand chip +
+  "← Queue" back link. **No page-level image** — images render per column.
+- **Columns**: one card per sibling, ordered by `sample_index` ascending. Each card carries:
+  - per-sample image preview (`Post.image_url` → `composited_image.artifact_url` →
+    "No preview" fallback). Click-to-open in new tab.
+  - "Sample N/M" badge + status badge
+  - headline / caption (with "Show more" toggle past 240 chars) / CTA pill / banner text
+  - per-column actions: **Approve** / **Reject** / **Refine** / **Details**
+- **Actions reuse existing single-post endpoints** (`POST /api/posts/[id]/approve`,
+  `/reject`, `EditPostModal` for refine, `/queue/[id]` for full detail). No bulk actions:
+  approving one sample does NOT auto-reject siblings — operators handle sibling cleanup
+  manually for MVP.
+- **Status gating** mirrors the queue: Approve/Reject only on `draft`/`pending_approval`,
+  Refine only on `draft`/`pending_approval`/`rejected` (per the locked
+  "no refine after approval" rule), Details always enabled.
+- **Singleton groups** redirect to `/queue/[id]` automatically — no degraded "compare 1" view.
+- **Discovery**: the existing "Sample N/M" chip in queue rows is a `<Link>` to the
+  comparison route when the group has more than one sample.
 
 Edit modal (renamed to "Refine Post"):
 - Available only for review-side statuses: **Draft**, **Pending Approval**,

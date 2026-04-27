@@ -38,6 +38,35 @@ Current execution priority (per ROADMAP.md):
 ## Done Tasks
 
 ### 2026-04-27
+- Task: Phase 4 sub-bullet 6 — Sample Comparison UI
+  - Status: Complete (route + chip-as-link wired; reuses existing approve / reject / refine surfaces).
+  - Why: Phase 4's last open product gap. Sibling drafts of one `sample_group_id` were visually marked in the queue (chip + accent border) but operators couldn't see them next to each other or pick one without scrolling. The data shape (`sample_group_id` / `sample_index` / `sample_total` in `generation_context_json`) was already complete; what was missing was a dedicated comparison surface.
+  - Files added:
+    - `src/app/(app)/queue/compare/[group_id]/page.tsx` — single client component (TanStack Query + `useSession` + `useRouter`) that fetches all siblings via the new `sample_group_id` filter, sorts by `sample_index` ascending, renders the page header (source-type badge + readable source identity from `source_snapshot` + brand chip + "← Queue" back link) and a horizontally-scrolling grid of `<SiblingColumn>`s. Singleton groups redirect to `/queue/[id]`. Empty groups show a friendly empty state (covers brand-scope mismatch / deleted siblings).
+    - `<SiblingColumn>` (inline in same file) — per-sibling card with: aspect-fixed image preview (`Post.image_url` → `generation_context_json.composited_image.artifact_url` → "No preview" fallback; click-to-open in new tab), Sample N/M badge, status badge, headline, caption with "Show more" toggle past 240 chars, CTA pill, banner text, and per-column actions Approve / Reject / Refine / Details. Approve/Reject/Refine reuse existing endpoints + `RejectDialog` + `EditPostModal` exactly; Details is a `<Link>` to `/queue/[id]` so browser Back returns to the comparison page.
+  - Files modified:
+    - `src/lib/validations/post.ts` — added `sample_group_id: z.string().min(1).max(200).optional()` to `listPostsQuerySchema`.
+    - `src/app/api/posts/route.ts` — applies a Prisma JSONB path filter on `generation_context_json.sample_group_id` when the query param is set; brand-scope filter + enrichment unchanged.
+    - `src/lib/posts-api.ts` — added `sample_group_id` to `PostFilters` + `buildPostsUrl`.
+    - `src/app/(app)/queue/page.tsx` — the existing "Sample N/M" chip is now a `<Link href="/queue/compare/[group_id]">` when `sample_group.total > 1` (singletons stay plain). Click bubbles to row navigation are stopped via `e.stopPropagation()`.
+    - `docs/03-ui-pages.md` — new "Sample Comparison page (2026-04-27)" subsection under Content Queue describing the route, header, columns, action gating, singleton redirect, and chip-as-link discovery.
+    - `docs/06-workflows-roles.md` — one-line note that the comparison page reuses approve / reject / refine gating with no new permissions or bulk-action affordance.
+    - `ROADMAP.md` — Phase 4 sub-bullet 6 flipped pending → ✅ with the route + caveat; "Definition of done" line updated; EXECUTION PRIORITY paragraph 3 updated to drop "dedicated sample-comparison UI" from the remaining-gaps list.
+    - `WORKLOG.md` — this entry; Ongoing entry removed.
+  - Locked product calls (per the approved plan + user revision):
+    - **Per-sample image preview, no shared "one image at the top".** The plan originally rendered the composited image once at the page level with copy claiming "only the text varies"; user pushed back ("we do not know if the background image stays the same and only the text varies"). Updated to render an image inside each column with the resolution order `Post.image_url → composited_image.artifact_url → fallback block`. The UI is now agnostic about whether the generator emits one image per group or one per sample.
+    - **No bulk actions in MVP.** Approving one sibling does NOT auto-reject the others. Defer until first user feedback.
+    - **Discovery via the existing chip-as-link** (no new menu / button on the row).
+    - **Singleton groups** redirect to `/queue/[id]`.
+    - **Status gating** mirrors queue + post-detail: Approve/Reject only on `draft`/`pending_approval`; Refine only on `draft`/`pending_approval`/`rejected`; Details always enabled.
+  - Verification:
+    - `npx tsc --noEmit` clean (EXIT=0).
+    - `npm run visual:smoke` clean (27/27 — compiler unchanged).
+    - Manual prod smoke deferred until at least one multi-sample group exists (Anthropic credits remain a gate; today's stub provider produces drafts but with the same text content per sample). When credits + a real generation run land, the smoke checklist is documented in [the plan file](/Users/maxh2006/.claude/plans/before-the-next-product-toasty-creek.md) — header content, per-column previews + actions, fallback rendering, singleton redirect, browser-back from Details.
+  - What remains in Phase 4 (still open):
+    - Image inspector UI for the `visual_compiled` / `image_generation` / `composited_image` debug surface — separate developer-facing affordance.
+    - Composite cleanup / lifecycle policy for GCS artifacts.
+
 - Task: Phase 5 — Running Promotions automation generation flow
   - Status: Complete (orchestrator + admin API + CLI shipped; manual-trigger surfaces ready). No deploy needed for this commit — runtime activates the next time the API route or CLI is invoked.
   - Why: Phase 5's first concrete deliverable. The live promo adapter was shipped earlier (`src/lib/promotions/`) and the AI generation pipeline was complete; the missing piece was the orchestration glue (eligibility query → fetch → dedup → loop → runGeneration). This task is that glue, plus two safe verification surfaces so we can manually exercise the flow before a future Cloud Scheduler job is wired in.
@@ -82,7 +111,15 @@ Current execution priority (per ROADMAP.md):
   - Verification:
     - `npx tsc --noEmit` clean (EXIT=0).
     - `npm run visual:smoke` clean (27/27; compiler unchanged).
-    - **`npm run automation:running-promotions` NOT exercised this session** — would require an active brand with a configured promo endpoint that returns real promos. Recommended manual smoke after the next deploy: pick a configured brand, run the CLI, verify `fetched_count > 0` + `drafts_generated > 0`; re-run immediately, verify `skipped_dedupe_count > 0` + `drafts_generated = 0`.
+    - **Prod manual smoke (2026-04-27, post-deploy of `2d2a5f4`)** — exercised everything except live-fetch (no test brand has a real promo endpoint configured; user explicitly scoped the smoke to "test if all is in place and working well except fetching the real data"):
+      - Prep: enabled `running_promotion` rules on all 3 active test brands (`brand_test_01` NYKasino, `cmo8pdahh0000e00lubx44du7` 123casino, `cmofz9aav0001al0lf3mycawq` maxca) via one-off `scripts/enable-promo-rules-for-smoke.ts`. Created the missing rule row for maxca with `rule_name: "Running promotions"`.
+      - All-brands run: `npm run automation:running-promotions` → all 3 brands processed sequentially → each returned `fetch_error_code: "BRAND_NOT_CONFIGURED"` (expected — none have an upstream endpoint configured) → zero exceptions thrown → totals: brands_scanned=3, errors=3 (all from fetch_error_code), drafts_generated=0, duration_ms≈5400.
+      - Single-brand run: `npm run automation:running-promotions -- brand_test_01` → only that brand processed → identical fetch_error_code path → totals: brands_scanned=1, errors=1, duration_ms≈4200. Confirms `brand_id_filter` narrowing.
+      - Idempotency: re-ran all-brands → identical structured output and totals. No state leakage.
+      - API auth gate: `curl -X POST http://localhost:3000/api/automations/running-promotions/run` (unauthenticated) → `HTTP 401 {"error":"Unauthorized"}`. Confirms route is wired and admin gate active.
+      - Observability: all three log line shapes (`start`, per-brand, `done`) emitted as designed. No promo content in logs.
+      - Wiring confirmed: eligibility query → creator resolution (`creator=cmnvveznb0000x0ulyu7morqo`) → per-brand sequential iteration → adapter call → `fetch_error_code` capture into summary → roll-up totals → JSON shape matches `PromoAutomationRunResult`.
+      - NOT exercised (no live promo data available): inner loop body — `Post.findFirst` dedup check, `normalizers.normalizePromo` call, `runGeneration` invocation, queue-row insert. These are all known-good elsewhere (Events flow exercises the same `runGeneration` path; `normalizePromo` has unit coverage) — they wait for the first brand with a real upstream endpoint.
   - What remains deferred (NEXT concrete step):
     - **Cloud Scheduler job** that hits `POST /api/automations/running-promotions/run` on a cadence (e.g. every 6h or per the brand-rule `check_schedule`). Same shape as the existing `mkt-agent-dispatch` Manus scheduler. Separate infra work; ~5 lines of gcloud + the job's `x-dispatch-secret`-style auth header.
     - Cadence honoring (read `config.check_schedule.weekdays/time` per brand and gate the per-brand call).

@@ -60,6 +60,7 @@ export const listPostsQuerySchema = z.object({
   post_type: z.enum(postTypeValues).optional(),
   date_from: z.string().optional(),
   date_to: z.string().optional(),
+  sample_group_id: z.string().min(1).max(200).optional(),
   page: z.coerce.number().int().min(1).default(1),
   per_page: z.coerce.number().int().min(1).max(200).default(25),
 });

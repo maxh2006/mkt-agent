@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import { postsApi, type Post, type PostFilters } from "@/lib/posts-api";
@@ -486,9 +487,20 @@ function PostRow({
             <span className="text-xs text-muted-foreground/70">{post.creator.name}</span>
           )}
           {sampleGroup && (
-            <span className="inline-flex items-center rounded border px-1.5 py-0 text-[10px] font-medium leading-4 bg-muted/40 text-muted-foreground border-border">
-              Sample {sampleGroup.index}/{sampleGroup.total}
-            </span>
+            sampleGroup.total > 1 ? (
+              <Link
+                href={`/queue/compare/${sampleGroup.id}`}
+                title="Compare samples"
+                onClick={(e) => e.stopPropagation()}
+                className="inline-flex items-center rounded border px-1.5 py-0 text-[10px] font-medium leading-4 bg-muted/40 text-muted-foreground border-border hover:bg-muted hover:text-foreground transition-colors"
+              >
+                Sample {sampleGroup.index}/{sampleGroup.total}
+              </Link>
+            ) : (
+              <span className="inline-flex items-center rounded border px-1.5 py-0 text-[10px] font-medium leading-4 bg-muted/40 text-muted-foreground border-border">
+                Sample {sampleGroup.index}/{sampleGroup.total}
+              </span>
+            )
           )}
         </div>
       </td>
