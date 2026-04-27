@@ -15,7 +15,8 @@
     "visual:smoke": "tsx scripts/visual-compile-smoke.ts",
     "render:smoke": "tsx scripts/render-smoke.ts",
     "gemini:smoke": "tsx scripts/gemini-image-smoke.ts",
-    "gcs:smoke": "tsx scripts/gcs-storage-smoke.ts"
+    "gcs:smoke": "tsx scripts/gcs-storage-smoke.ts",
+    "automation:running-promotions": "tsx scripts/running-promotions-automation.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.90.0",

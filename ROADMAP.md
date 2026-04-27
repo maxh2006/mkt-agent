@@ -166,13 +166,13 @@ Use source rules + AI generation to create drafts automatically at the right
 times.
 
 Includes:
-1. Big Wins automation generation flow
-2. Running Promotions automation generation flow
-3. Hot Games automation generation flow
-4. Adhoc Event generation flow
-5. Educational cadence generation flow
-6. Group/sample generation handling
-7. Generation health and observability
+1. Big Wins automation generation flow — ⏳ blocked on `shared.game_rounds` provisioning
+2. ✅ **Running Promotions automation generation flow — Done 2026-04-27.** Orchestrator at `src/lib/automations/running-promotions/orchestrator.ts` (`runRunningPromotionsAutomation({brand_id_filter?})`). Eligibility = active brand + active `running_promotion` rule. Dedup = exact-match `Post.findFirst` on `(brand_id, source_type='promo', source_id, platform)`, status-agnostic. `created_by` = first admin user (TEMPORARY shortcut; helper at `src/lib/automations/get-creator.ts`). Default platform = `["facebook"]` (MVP-only). Failure-isolated per-brand AND per-promo. Verification: admin-only `POST /api/automations/running-promotions/run` + `npm run automation:running-promotions [-- <brand_id>]`. Deferred (next steps): Cloud Scheduler job for cadence; per-promo recurrence (`config.promo_rules[].posting_mode`); platform expansion. See `docs/04-automations.md` "Running Promotions automation flow" for the complete contract.
+3. Hot Games automation generation flow — ⏳ blocked on `shared.game_rounds` provisioning
+4. Adhoc Event generation flow — already partially shipped (Events "Generate Drafts" button in UI; future automation could trigger this on a cadence)
+5. Educational cadence generation flow — no live source yet
+6. Group/sample generation handling — partially shipped via `sample_group_id` + Queue chip
+7. Generation health and observability — partial via per-flow log lines + structured run results
 
 Definition of done:
 - automations create drafts reliably into Content Queue
@@ -233,7 +233,7 @@ Current practical priority order (updated 2026-04-27):
 1. ✅ Phase 2 Manus publishing lifecycle — original 10 items resolved; ongoing bridge-hardening landing as needed.
 2. 🟡 Phase 3 BigQuery/API source layer — 5 of 8 done; items 4 & 5 blocked on platform team `shared.game_rounds` provisioning.
 3. 🟡 Phase 4 AI content generator agent — visual chain shipped end-to-end on 2026-04-27 (Brand Simple Mode UI, Event Visual Override UI + persistence, `compileVisualPrompt()` wired into `runGeneration()`, background-image provider boundary, Nano Banana 2 / Gemini real adapter, deterministic Satori + Resvg overlay renderer, GCS-backed artifact storage with auto-populated `Post.image_url`). Operational gates remain: Anthropic credits (text gen) + Gemini paid-tier upgrade (image gen) + one-time GCS bucket creation per docs/08 — all three currently fall back cleanly. Remaining product gaps: image inspector UI in Content Queue, dedicated sample-comparison UI, composite cleanup/lifecycle policy.
-4. **Phase 5 automate draft creation flows** — next major focus. Scheduler that calls `fetchPromotionsForBrand()` / `fetchBigWinsForBrand()` / `fetchHotGamesForBrand()` on each brand's `automation_rules.config_json` cadence + routes the resulting facts through the AI pipeline.
+4. 🟡 **Phase 5 automate draft creation flows** — in progress. Running Promotions orchestrator shipped 2026-04-27 (manual trigger via admin API + CLI; see Phase 5 sub-bullet 2). Big Wins + Hot Games flows blocked on `shared.game_rounds` provisioning. Next concrete step: Cloud Scheduler job that hits `POST /api/automations/running-promotions/run` on a cadence (separate infra work, mirrors the existing `mkt-agent-dispatch` Manus job).
 5. Phase 6 close learning loop.
 6. Phase 1 & 7 secondary audits/polish.
 

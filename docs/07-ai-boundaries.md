@@ -504,6 +504,24 @@ The following stay fixed across refinement cycles:
 The modal shows a Locked Context panel summarizing the immutable source details
 and a universal helper note restating the constraint.
 
+## Automation-driven generation (2026-04-27)
+
+Phase 5's first source-automation flow ships with the Running
+Promotions orchestrator at `src/lib/automations/running-promotions/`.
+**The AI boundary is unchanged**: automation-driven generation flows
+through the exact same `runGeneration()` pipeline operator-triggered
+generation uses. There is no separate AI path for automations. The
+orchestrator's only job is the glue (eligibility query, fetch, dedup,
+loop) — once it produces a `NormalizedGenerationInput`, the rest of
+the pipeline (prompt builder + provider client + visual compiler +
+image provider + overlay renderer + GCS storage + queue inserter) is
+identical to operator-triggered runs. The boundary discipline holds:
+AI still only generates content from structured packets; automations
+just produce more packets. See `docs/04-automations.md` "Running
+Promotions automation flow" for the orchestrator contract.
+
+---
+
 ## Multi-sample Draft Grouping
 
 Automations create multiple sibling drafts per scenario (defaults set in

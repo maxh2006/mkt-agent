@@ -103,6 +103,62 @@ Batch snapshot mode — system checks source data periodically.
 
 ---
 
+## Running Promotions automation flow (Phase 5 — shipped 2026-04-27)
+
+Server-side orchestration that turns the existing live promo adapter into auto-generated Content Queue drafts. Module: `src/lib/automations/running-promotions/`. Entry point: `runRunningPromotionsAutomation({brand_id_filter?})`.
+
+**Eligibility query**: `Brand.findMany({where: {active: true, automation_rules: {some: {rule_type: "running_promotion", enabled: true}}}})`. Optional `brand_id_filter` arg narrows to a single brand for verification.
+
+**Per-brand flow** (sequential per brand, sequential per promo):
+1. `loadBrandContext(brand.id)` — needed by the normalizer.
+2. `fetchPromotionsForBrand(brand.id)` — adapter never throws on expected conditions; errors come back via `result.error.code`.
+3. For each `PromoFacts × platform`:
+   - Dedup check: `db.post.findFirst({where: {brand_id, source_type: "promo", source_id: facts.promo_id, platform}, select: {id: true}})`. Hit → skip; miss → generate.
+   - `normalizers.normalizePromo({brand, facts, platform})` → `NormalizedGenerationInput`.
+   - `runGeneration({input, created_by: <first admin>})` — full pipeline (text → image → composite → GCS upload → queue insert).
+
+**Default platform = `["facebook"]`** when the rule config doesn't specify platforms. **MVP-ONLY** — not a permanent product rule. Mirrors the Events generate-drafts fallback. Future enhancement: read from `Brand.channels` active rows or add a `platforms[]` array to the running_promotion config_json.
+
+**Dedup rule** (locked):
+- Exact match on `(brand_id, source_type='promo', source_id=promo_id, platform)`.
+- **Status-agnostic**: even if a previous draft is in `rejected` or `failed`, reruns still skip generating a new one. Operators handle re-generation manually for MVP — delete the prior row to force a new draft from updated upstream data. Status-aware dedup is a documented future enhancement.
+- When upstream mutates a promo's mechanics under the same `promo_id`, we still skip (operator can manually refine the existing draft).
+
+**`created_by` for automation drafts**: first admin user found, ordered by `created_at ASC` (deterministic). Helper: `src/lib/automations/get-creator.ts#getAutomationCreator()`. **TEMPORARY MVP shortcut** — replaceable by a real "system" / "service" user via a one-time data migration; the helper's internals will swap with no caller-side change.
+
+**Failure isolation** (locked behavior):
+
+| Scenario | Result |
+|---|---|
+| No eligible brands | Empty `brands[]`; not an error. |
+| `getAutomationCreator()` finds no admin | Throws — orchestrator can't run; surfaces via API 500 / CLI exit 1. |
+| Brand A's adapter returns `error` | `brands[A].fetch_error_code` populated; brand A skipped; B/C/… continue. |
+| Brand A's promo P1 generation throws | `brands[A].errors[]` records `{phase: "generate", promo_id, message}`; P2/P3 continue. |
+| Promo P1 already in queue | `brands[A].skipped_dedupe_count` incremented; no generation call. |
+
+Text drafts always ship even when image generation / GCS storage fail — that discipline is in `runGeneration()` itself; this orchestrator doesn't re-implement it.
+
+**Verification surfaces**:
+- **Admin-only API route**: `POST /api/automations/running-promotions/run` with optional body `{brand_id?: string}`. Returns the `PromoAutomationRunResult` JSON. Suitable for ops dashboards and the future Cloud Scheduler trigger.
+- **CLI wrapper**: `npm run automation:running-promotions [-- <brand_id>]`. Pretty-prints the result. Suitable for one-shot ops verification + ad-hoc re-runs.
+
+**Observability** — one-line-per-brand log:
+```
+[automation:promo] brand=<id> fetched=<N> skipped_dedupe=<N> generated=<N> errors=<N> [fetch_error=<code>]
+```
+Plus a start + done line for the run. No promo content in logs.
+
+**Out of scope for the orchestrator** (deferred):
+- Cadence honoring (`config.check_schedule.weekdays/time` is only read by future scheduler infra).
+- Per-promo recurrence (`config.promo_rules[].posting_mode = daily/weekly/monthly`).
+- Cloud Scheduler job for periodic invocation (separate infra step; same shape as `mkt-agent-dispatch` for Manus).
+- Auto-approval / delivery rows / Manus dispatch — drafts only.
+- Platform expansion beyond `["facebook"]`.
+- New `AuditAction` enum value — orchestrator logs to console; audit-action expansion is a separate cleanup task.
+- Real "system" user via migration — find-first-admin shortcut today.
+
+---
+
 ## Tab 2: On Going Promotions
 
 API-based promotion detection with per-promo rule configuration.

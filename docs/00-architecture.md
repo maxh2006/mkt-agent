@@ -860,8 +860,23 @@ for (const facts of res.promos) {
 ```
 
 The actual scheduler that calls `fetchPromotionsForBrand()` on a
-cadence is **Phase 5** — the adapter is complete source-side but is
-not yet wired to an automation.
+cadence is the next infra step. The **orchestration glue** that
+turns the adapter into Content Queue drafts is now live (Phase 5,
+2026-04-27): `src/lib/automations/running-promotions/orchestrator.ts`
+exposes `runRunningPromotionsAutomation({brand_id_filter?})` which
+discovers eligible brands (active + active `running_promotion` rule),
+fetches promos, dedupes against existing queue rows on
+`(brand_id, source_type, source_id, platform)`, and routes each
+non-dupe `(promo × platform)` slot through `runGeneration()`.
+Failure-isolated per-brand AND per-promo. Default platform is
+`["facebook"]` (MVP-only). Drafts are attributed to the first
+admin user via the temporary `getAutomationCreator()` helper. Manual
+trigger surfaces today: admin-only `POST /api/automations/running-
+promotions/run` and `npm run automation:running-promotions`. A
+future Cloud Scheduler job (same shape as `mkt-agent-dispatch` for
+Manus) will hit the same API route on a cadence — that's separate
+infra work. See `docs/04-automations.md` "Running Promotions
+automation flow" for the complete contract.
 
 ### Big Wins live adapter — `src/lib/big-wins/`
 

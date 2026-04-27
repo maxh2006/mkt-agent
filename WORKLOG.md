@@ -38,6 +38,63 @@ Current execution priority (per ROADMAP.md):
 ## Done Tasks
 
 ### 2026-04-27
+- Task: Phase 5 — Running Promotions automation generation flow
+  - Status: Complete (orchestrator + admin API + CLI shipped; manual-trigger surfaces ready). No deploy needed for this commit — runtime activates the next time the API route or CLI is invoked.
+  - Why: Phase 5's first concrete deliverable. The live promo adapter was shipped earlier (`src/lib/promotions/`) and the AI generation pipeline was complete; the missing piece was the orchestration glue (eligibility query → fetch → dedup → loop → runGeneration). This task is that glue, plus two safe verification surfaces so we can manually exercise the flow before a future Cloud Scheduler job is wired in.
+  - Files added:
+    - `src/lib/automations/get-creator.ts` — `getAutomationCreator()`. Returns the first admin user (`role: "admin"`, `active: true`, `orderBy: created_at ASC`). Module-cached. Throws if no admin exists. **Marked TEMPORARY** in the file-level comment — replaceable by a real "system" / "service" user via a one-time data migration; the helper's internals will swap with no caller-side change. `_resetAutomationCreatorCache()` exported as a test seam.
+    - `src/lib/automations/running-promotions/types.ts` — `PromoAutomationBrandSummary` + `PromoAutomationRunResult` + `PromoAutomationError` + `PromoAutomationRunArgs`. Captures per-brand outcomes (eligibility, fetched_count, skipped_dedupe_count, generated_drafts_count, errors[], optional fetch_error_code) and roll-up totals (brands_scanned, promos_fetched, promos_skipped_dedupe, drafts_generated, errors).
+    - `src/lib/automations/running-promotions/orchestrator.ts` — `runRunningPromotionsAutomation({brand_id_filter?})`. ~150 lines. Discovers eligible brands → resolves creator once → for each brand sequentially: load context → fetch promos → for each `(promo × platform)`: dedup-check via `Post.findFirst` → normalize via `normalizers.normalizePromo` → call `runGeneration({input, created_by})`. Failure-isolated per-brand AND per-promo. Per-brand log line + run start/done log lines.
+    - `src/app/api/automations/running-promotions/run/route.ts` — admin-only `POST` (returns `Errors.UNAUTHORIZED`/`FORBIDDEN` for others). Optional `{brand_id?: string}` body for single-brand verification. Calls the orchestrator; returns the structured `PromoAutomationRunResult` JSON. Wraps the orchestrator in try/catch — only the configuration-error throw path (no admin user) returns 500; per-brand and per-promo failures are normal payload data.
+    - `scripts/running-promotions-automation.ts` — thin CLI wrapper. Reads `process.argv[2]` for optional brand id, calls the orchestrator, pretty-prints the JSON result + a one-line summary, exits 1 only on orchestrator throw.
+  - Files modified:
+    - `package.json` — added `automation:running-promotions` npm script.
+    - `docs/04-automations.md` — new "Running Promotions automation flow (Phase 5 — shipped 2026-04-27)" section above Tab 2 with the eligibility query, per-brand flow steps, default-platform MVP shortcut, dedup rule (status-agnostic), `created_by` strategy, failure-isolation table, verification surfaces, observability log shape, deferred items.
+    - `docs/00-architecture.md` — Running Promotions live adapter subsection extended: notes the orchestrator is now live and links to `docs/04` for the contract.
+    - `docs/07-ai-boundaries.md` — new "Automation-driven generation (2026-04-27)" subsection. Reinforces the boundary: automations flow through the same `runGeneration()` pipeline; no separate AI path.
+    - `ROADMAP.md` — Phase 5 sub-bullet 2 flipped pending → ✅ with the full module + contract summary; Phase 5 sub-bullets 1, 3 annotated with their `shared.game_rounds` block; sub-bullet 4 noted as already partially shipped via Events "Generate Drafts"; sub-bullets 5, 6, 7 annotated with current state. EXECUTION PRIORITY paragraph 4 updated 🟡 (in progress) — Running Promotions shipped, Big Wins / Hot Games still blocked, next concrete step is the Cloud Scheduler job.
+    - `WORKLOG.md` — this entry; Ongoing entry removed.
+  - Locked product calls (per the approved plan):
+    - **Default platform = `["facebook"]`** when rule config doesn't specify platforms. **MVP-ONLY**, called out in the orchestrator code comment + docs. Mirrors the Events fallback. Future enhancement: read from `Brand.channels` or add a `platforms[]` config field.
+    - **Dedup = `Post.findFirst` on `(brand_id, source_type='promo', source_id=promo_id, platform)`**, status-agnostic. Even rejected/failed prior drafts cause skip. Operators handle re-generation manually for MVP (delete the old row first).
+    - **`created_by` = first admin** via `getAutomationCreator()`. TEMPORARY shortcut — explicit in code + WORKLOG; future system-user migration swaps internals only.
+    - **Per-brand + per-promo sequential.** No parallelism in MVP.
+    - **Failure isolation at both levels.** One brand's adapter error doesn't block other brands; one promo's generation failure doesn't block other promos within that brand.
+    - **NO new `AuditAction` enum value** — orchestrator logs to console; audit-action expansion is a separate cleanup task.
+  - Verification surfaces:
+    - **Admin-only API**: `POST /api/automations/running-promotions/run` (optional body `{brand_id?: string}`). Returns the run result JSON. Suitable for ops dashboards + future Cloud Scheduler.
+    - **CLI**: `npm run automation:running-promotions [-- <brand_id>]`. Useful for one-shot ops verification + ad-hoc re-runs.
+  - Observability:
+    - One run-start line: `[automation:promo] start brands=<N> [filter=<id>] creator=<id>`
+    - One per-brand line: `[automation:promo] brand=<id> fetched=<N> skipped_dedupe=<N> generated=<N> errors=<N> [fetch_error=<code>]`
+    - One run-done line: `[automation:promo] done brands=<N> fetched=<N> skipped_dedupe=<N> generated=<N> errors=<N> duration_ms=<N>`
+    - No promo content in logs.
+  - Failure isolation behavior table:
+
+    | Scenario | Result |
+    |---|---|
+    | No eligible brands | empty `brands[]`; not an error |
+    | No admin user found | orchestrator throws → API 500 / CLI exit 1 |
+    | Brand A's adapter returns `error` | `brands[A].fetch_error_code` populated; brand A skipped; B/C continue |
+    | Brand A's promo P1 generation throws | `brands[A].errors[]` populated; P2/P3 continue |
+    | Promo P1 already in queue | `skipped_dedupe_count` incremented; no generation call |
+
+  - Verification:
+    - `npx tsc --noEmit` clean (EXIT=0).
+    - `npm run visual:smoke` clean (27/27; compiler unchanged).
+    - **`npm run automation:running-promotions` NOT exercised this session** — would require an active brand with a configured promo endpoint that returns real promos. Recommended manual smoke after the next deploy: pick a configured brand, run the CLI, verify `fetched_count > 0` + `drafts_generated > 0`; re-run immediately, verify `skipped_dedupe_count > 0` + `drafts_generated = 0`.
+  - What remains deferred (NEXT concrete step):
+    - **Cloud Scheduler job** that hits `POST /api/automations/running-promotions/run` on a cadence (e.g. every 6h or per the brand-rule `check_schedule`). Same shape as the existing `mkt-agent-dispatch` Manus scheduler. Separate infra work; ~5 lines of gcloud + the job's `x-dispatch-secret`-style auth header.
+    - Cadence honoring (read `config.check_schedule.weekdays/time` per brand and gate the per-brand call).
+    - Per-promo recurrence (`config.promo_rules[].posting_mode = daily/weekly/monthly`).
+    - Platform expansion beyond `["facebook"]` (read from `Brand.channels` or add `platforms[]` to config).
+    - Big Wins + Hot Games orchestrators (gated on `shared.game_rounds` provisioning).
+    - Educational orchestrator (no live source yet).
+    - Real "system" user migration to replace the first-admin shortcut.
+    - New `AuditAction` enum value for automation runs.
+  - Per the durable cadence rule (every accomplished task → both ROADMAP and WORKLOG updated, every time, in one commit): ROADMAP EXECUTION PRIORITY + Phase 5 sub-bullet + 3 docs + WORKLOG + 5 source files (3 new + 2 modified) + CLI script + npm script land in the same commit. No deploy needed today (runtime activates on the next API/CLI trigger; PM2 will see the new code on the next deploy).
+
+### 2026-04-27
 - Task: Phase 4 — GCS-backed artifact storage for composited images
   - Status: Complete + activated end-to-end in prod 2026-04-27. Bucket `gs://mktagent-493404-artifacts` created (asia-east2, uniform-bucket-level-access, allUsers:objectViewer, VM SA `125619101656-compute@developer.gserviceaccount.com` granted `roles/storage.objectAdmin` on the bucket). Local `npm run gcs:smoke` green using `gcloud auth application-default login` ADC. VM `cloud-platform` access scope set (was `devstorage.read_only` by default — caused initial `Provided scope(s) are not authorized` error; one-time fix via VM stop + `set-service-account --scopes=cloud-platform` + start). VM-side `npm run gcs:smoke` then green via VM SA's ADC. `GCS_ARTIFACT_BUCKET=mktagent-493404-artifacts` set in `/opt/mkt-agent/.env` + `pm2 restart --update-env`. Storage boundary live; orchestrator wired; `Post.image_url` auto-populates from composites for every future generation run. Safe-fallback paths preserved when storage is unconfigured or upload fails.
   - Why: the deterministic overlay renderer was producing real composites, but they sat as `data:` URIs in `generation_context_json.composited_image.artifact_url`. Manus dispatch only accepts http(s) URLs (media-validation host-privacy/scheme check), so AI-generated creatives couldn't actually publish. This task is the missing bridge — composites now upload to a public-read GCS bucket, get a permanent `https://storage.googleapis.com/...` URL, and the URL flows into `Post.image_url`. Existing Manus media-validation + dispatch + retry paths activate naturally with no code change to those layers.
