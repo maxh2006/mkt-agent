@@ -93,13 +93,39 @@ export interface CompositedImageResult {
   status: RenderStatus;
 
   /**
-   * `data:image/png;base64,…` URI of the composited PNG. Null on
-   * `status: "error"`. MVP-only; GCS storage migration will swap
-   * for hosted https URLs.
+   * Composited PNG URL. After the GCS storage migration (2026-04-27),
+   * this is `https://storage.googleapis.com/<bucket>/<path>` when
+   * upload succeeded; `data:image/png;base64,…` (fallback metadata)
+   * when storage is unconfigured; `null` on render failure or upload
+   * failure. The orchestrator sets `Post.image_url` from this field
+   * ONLY when it starts with `https://`.
    */
   artifact_url: string | null;
   width: number | null;
   height: number | null;
+
+  /**
+   * Raw PNG bytes — populated by the renderer on success, consumed
+   * by the orchestrator's GCS upload step, and STRIPPED before the
+   * queue inserter persists `composited_image` to
+   * `generation_context_json` (these bytes are memory-only; the
+   * `artifact_url` field is what's persisted).
+   */
+  png_bytes?: Uint8Array | null;
+
+  // ── GCS upload metadata (populated by orchestrator after a
+  //    successful storage upload; absent / null when upload was
+  //    skipped or failed) ────────────────────────────────────────
+  /** GCS bucket the artifact lives in. */
+  bucket?: string | null;
+  /** Object path within the bucket (deterministic per generation run). */
+  object_path?: string | null;
+  /** MIME type, typically "image/png". */
+  mime_type?: string | null;
+  /** Decoded byte length of the uploaded artifact. */
+  byte_length?: number | null;
+  /** ISO timestamp of the successful upload. */
+  uploaded_at?: string | null;
 
   /**
    * Audit echo of which layout + platform format produced this
@@ -131,9 +157,13 @@ export interface CompositedImageResult {
 }
 
 /**
- * Stable taxonomy for render failures. Mirrors the
+ * Stable taxonomy for render + storage failures. Mirrors the
  * `ImageProviderErrorCode` shape so future operator UX (filters,
  * dashboards) can treat the two failure surfaces uniformly.
+ *
+ * STORAGE_* codes are added by the orchestrator's GCS upload step
+ * (see `src/lib/storage/gcs.ts#StorageErrorCode`); the renderer
+ * itself only emits the render-side codes.
  */
 export type RenderErrorCode =
   | "MISSING_INPUTS"           // request shape is invalid (shouldn't happen at runtime)
@@ -141,6 +171,10 @@ export type RenderErrorCode =
   | "FONT_LOAD_FAILED"         // bundled font files missing / unreadable on disk
   | "SATORI_FAILED"            // JSX → SVG step threw
   | "RESVG_FAILED"             // SVG → PNG step threw
+  | "STORAGE_NOT_CONFIGURED"   // orchestrator: GCS_ARTIFACT_BUCKET unset (skipped, not an error)
+  | "STORAGE_AUTH_FAILED"      // orchestrator: ADC failed / SA missing role
+  | "STORAGE_UPLOAD_FAILED"    // orchestrator: bucket OK, upload threw
+  | "STORAGE_UNKNOWN"          // orchestrator: unclassified storage failure
   | "UNKNOWN";
 
 /** Synthesizer for error results — lets callers stay terse. */

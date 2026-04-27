@@ -84,7 +84,7 @@ so renames can be absorbed in one place.
 - cta
 - banner_text
 - image_prompt — narrative AI input (describes what an image should look like); NEVER a URL
-- image_url — optional public media URL for publishing (nullable string, added 2026-04-23). Validated pre-dispatch by `src/lib/manus/media-validation.ts`; MVP single-image shape. Leave null for text-only posts.
+- image_url — optional public media URL for publishing (nullable string, added 2026-04-23). Validated pre-dispatch by `src/lib/manus/media-validation.ts`; MVP single-image shape. Leave null for text-only posts. **Auto-populated by AI generation when GCS storage is configured (Phase 4 storage migration, 2026-04-27)**: the orchestrator's GCS uploader writes the composited PNG's https URL into this field on successful upload. When `GCS_ARTIFACT_BUCKET` is unset, when upload fails, or when render itself fails, this field stays null and operators can paste a hosted URL manually (the existing override path is preserved). Manus dispatch only fetches http(s) URLs — `data:` URIs in metadata never reach this field.
 - source_type
 - source_id
 - source_instance_key (occurrence datetime key for event-derived posts)

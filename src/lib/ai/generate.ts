@@ -9,6 +9,12 @@ import { generateBackgroundImage } from "./image/client";
 import { buildImageErrorResult, type BackgroundImageRequest, type BackgroundImageResult, type ImageProviderErrorCode } from "./image/types";
 import { renderFinalImage } from "./render";
 import { buildRenderErrorResult, type CompositedImageResult, type RenderRequest } from "./render/types";
+import {
+  isStorageConfigured,
+  uploadCompositedPng,
+  StorageError,
+  classifyStorageError,
+} from "@/lib/storage/gcs";
 import type { NormalizedGenerationInput } from "./types";
 
 /**
@@ -175,6 +181,55 @@ export async function runGeneration(args: {
     });
   }
 
+  // Phase 4 storage migration (2026-04-27): when configured, upload
+  // the composited PNG to GCS so it gets a real https URL that can
+  // flow into Post.image_url + Manus media-validation. Skip cleanly
+  // when storage isn't configured (composite stays as a `data:` URI
+  // in metadata; Post.image_url stays null — the safe-fallback path
+  // that worked before this migration).
+  let storageStatus: "uploaded" | "skipped" | "render_failed" | "upload_failed" = "skipped";
+  if (composited.status === "ok" && composited.png_bytes && composited.png_bytes.byteLength > 0) {
+    if (isStorageConfigured()) {
+      try {
+        const uploaded = await uploadCompositedPng({
+          brand_id: args.input.brand.id,
+          sample_group_id: args.input.sample_group_id,
+          bytes: composited.png_bytes,
+        });
+        composited.artifact_url = uploaded.url;
+        composited.bucket = uploaded.bucket;
+        composited.object_path = uploaded.object_path;
+        composited.mime_type = uploaded.mime_type;
+        composited.byte_length = uploaded.byte_length;
+        composited.uploaded_at = uploaded.uploaded_at;
+        storageStatus = "uploaded";
+      } catch (err) {
+        // Failure isolation — text drafts still ship. Composite
+        // status flips to "error" so Post.image_url won't be auto-
+        // populated downstream.
+        const code = err instanceof StorageError
+          ? err.code
+          : classifyStorageError(err instanceof Error ? err.message : String(err));
+        const message = err instanceof Error ? err.message : String(err);
+        composited.status = "error";
+        composited.error_code = code as CompositedImageResult["error_code"];
+        composited.error_message = truncateRenderMessage(message);
+        composited.artifact_url = null;
+        storageStatus = "upload_failed";
+        console.warn(
+          `[ai-render] storage upload FAILED brand=${args.input.brand.id} group=${args.input.sample_group_id} code=${code} err=${message}`,
+        );
+      }
+    } else {
+      // Storage not configured — leave composite.artifact_url as the
+      // `data:` URI fallback. Post.image_url stays null (queue-
+      // inserter only writes when artifact_url starts with https://).
+      storageStatus = "skipped";
+    }
+  } else if (composited.status !== "ok") {
+    storageStatus = "render_failed";
+  }
+
   const inputWithComposite: NormalizedGenerationInput = {
     ...inputWithImage,
     composited,
@@ -190,7 +245,7 @@ export async function runGeneration(args: {
   });
 
   console.log(
-    `[ai-generator] run complete source=${inputWithComposite.source_type} brand=${inputWithComposite.brand.id} platform=${inputWithComposite.platform} samples=${result.samples.length} provider=${result.provider} dry_run=${result.dry_run} group=${inputWithComposite.sample_group_id} layout=${visual.layout_key} emphasis=${visual.visual_emphasis} format=${visual.platform_format} overrides=[${visual.effective_inputs.overridden_by_event.join(",")}] image=${imageResult.provider}:${imageResult.status} composite=${composited.status}${composited.background_fallback ? "/fallback" : ""} templates=copy:${templatesInjected.copy},cta:${templatesInjected.cta},banner:${templatesInjected.banner},prompt:${templatesInjected.prompt},asset:${templatesInjected.asset}`,
+    `[ai-generator] run complete source=${inputWithComposite.source_type} brand=${inputWithComposite.brand.id} platform=${inputWithComposite.platform} samples=${result.samples.length} provider=${result.provider} dry_run=${result.dry_run} group=${inputWithComposite.sample_group_id} layout=${visual.layout_key} emphasis=${visual.visual_emphasis} format=${visual.platform_format} overrides=[${visual.effective_inputs.overridden_by_event.join(",")}] image=${imageResult.provider}:${imageResult.status} composite=${composited.status}${composited.background_fallback ? "/fallback" : ""} storage=${storageStatus}${composited.byte_length ? ":" + composited.byte_length + "b" : ""} templates=copy:${templatesInjected.copy},cta:${templatesInjected.cta},banner:${templatesInjected.banner},prompt:${templatesInjected.prompt},asset:${templatesInjected.asset}`,
   );
 
   return {
@@ -224,6 +279,11 @@ export type {
 // modules import {db} transitively. (Intentionally referenced so the
 // import is retained in build output.)
 void db;
+
+function truncateRenderMessage(s: string): string {
+  if (!s) return "";
+  return s.length <= 500 ? s : `${s.slice(0, 500)}…`;
+}
 
 /**
  * Pulls the four brand-logo URLs out of `BrandContext.design` for the

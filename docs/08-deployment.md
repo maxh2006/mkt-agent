@@ -190,6 +190,130 @@ sudo sed -i 's/^AI_IMAGE_PROVIDER=.*/AI_IMAGE_PROVIDER=stub/' /opt/mkt-agent/.en
 sudo pm2 restart mkt-agent --update-env
 ```
 
+---
+
+## GCS artifact bucket — one-time setup
+
+The deterministic overlay renderer (Phase 4) outputs composited PNGs.
+When `GCS_ARTIFACT_BUCKET` is set, the orchestrator uploads each
+composite to that bucket and writes the resulting
+`https://storage.googleapis.com/<bucket>/<path>` URL into both
+`Post.image_url` and `generation_context_json.composited_image.artifact_url`.
+This is what unlocks the existing Manus media-validation + dispatch
+path for AI-generated creatives — Manus can only fetch http(s) URLs,
+not `data:` URIs.
+
+**Locked product calls:**
+- **Public-read bucket**, uniform-bucket-level-access. Permanent
+  https URLs; no signing logic; matches the use case (these images
+  go public on Meta / Telegram anyway).
+- One bucket per environment. The recommended naming is
+  `mkt-agent-artifacts` for prod, `mkt-agent-artifacts-dev` for dev.
+- Auth via ADC (Application Default Credentials). The prod VM uses
+  its attached service account via metadata service. Local dev uses
+  `gcloud auth application-default login` (already set up for BQ).
+- No JSON key files in code. Mirrors the
+  `@google-cloud/bigquery` auth pattern.
+
+### One-time bucket creation (gcloud)
+
+Run once from a machine with `gcloud` authenticated to the project.
+Replace `<vm-sa-email>` with the VM's attached service account
+(find it via `gcloud compute instances describe mkt-agent-dev
+--project=mktagent-493404 --zone=asia-east2-c
+--format='value(serviceAccounts.email)'`).
+
+```bash
+PROJECT=mktagent-493404
+BUCKET=mkt-agent-artifacts          # change for dev: mkt-agent-artifacts-dev
+LOCATION=asia-east2                 # match the VM region for low-latency writes
+VM_SA=<vm-sa-email>                 # the VM's attached service account
+
+# 1. Create the bucket with uniform bucket-level access (required
+#    for allUsers grants below).
+gcloud storage buckets create "gs://${BUCKET}" \
+  --project="${PROJECT}" \
+  --location="${LOCATION}" \
+  --uniform-bucket-level-access
+
+# 2. Grant public-read at the bucket level. Permanent URLs become
+#    fetchable by anyone (Manus, Meta, Telegram, browsers).
+gcloud storage buckets add-iam-policy-binding "gs://${BUCKET}" \
+  --member="allUsers" --role="roles/storage.objectViewer"
+
+# 3. Grant the VM service account write access to the bucket only.
+#    objectAdmin lets the app create / delete its own objects without
+#    granting wider project-level storage permissions.
+gcloud storage buckets add-iam-policy-binding "gs://${BUCKET}" \
+  --member="serviceAccount:${VM_SA}" \
+  --role="roles/storage.objectAdmin"
+
+# 4. (Optional but recommended) Set CORS so a future Content Queue
+#    image inspector can fetch via XHR from the dashboard origin.
+cat > /tmp/cors.json <<'EOF'
+[
+  { "origin": ["*"], "method": ["GET"], "responseHeader": ["Content-Type"], "maxAgeSeconds": 3600 }
+]
+EOF
+gcloud storage buckets update "gs://${BUCKET}" --cors-file=/tmp/cors.json
+```
+
+### Wire it into `/opt/mkt-agent/.env`
+
+```bash
+# Append the bucket name (no gs:// prefix; just the bucket id).
+sudo bash -c 'echo "GCS_ARTIFACT_BUCKET=mkt-agent-artifacts" >> /opt/mkt-agent/.env'
+
+# PM2 must re-read env on restart.
+sudo pm2 restart mkt-agent --update-env
+```
+
+### Verify the round trip
+
+From a workstation with `GCS_ARTIFACT_BUCKET` set in `.env` + ADC
+authenticated:
+
+```bash
+npm run gcs:smoke
+```
+
+The smoke uploads a 67-byte test PNG, fetches the resulting public
+URL, and asserts the bytes round-trip. Costs ~$0.0001 per run. On
+success it prints the URL — paste it into a browser to eyeball.
+
+### What the storage helper does + does NOT do
+
+- Uploads ONLY the FINAL composited PNG. The AI background
+  (Gemini output) stays as a `data:` URI in
+  `image_generation.artifact_url` — it's debug metadata, never
+  publishable.
+- Object path: `generated/<brand_id>/<sample_group_id>.png`. One
+  composite per generation run; siblings share the URL since the
+  composite content is identical.
+- Cache headers: `public, max-age=31536000, immutable`. Artifacts
+  are content-addressed by `sample_group_id` (UUID); never re-written.
+- DOES NOT auto-create the bucket — that's an explicit infra action
+  via the gcloud commands above.
+- DOES NOT mutate IAM — the public-read grant lives in the bucket
+  config, not in app code.
+- DOES NOT delete artifacts. Rejected drafts' composites stay until
+  a future cleanup job (out of scope for this task).
+
+### Failure modes + meanings
+
+| Adapter `error_code` | Likely cause |
+|---|---|
+| `STORAGE_NOT_CONFIGURED` | `GCS_ARTIFACT_BUCKET` env unset. Composite stays as `data:` URI in metadata; `Post.image_url` stays null. Safe fallback. |
+| `STORAGE_AUTH_FAILED` | ADC failed / VM SA missing `roles/storage.objectAdmin` on the bucket. Re-run the IAM step above. |
+| `STORAGE_UPLOAD_FAILED` | Bucket OK, auth OK, but the upload threw (transient network, quota). Retrying the generation should work; the orchestrator never blocks the run on this. |
+| `STORAGE_UNKNOWN` | Unclassified. Check the `[storage-gcs] FAILED` log line for the raw provider message. |
+
+All four persist as `composited_image.error_code` per draft. Text
+drafts always ship — image_url just stays null until the next
+successful generation run.
+
+---
+
 ### What the adapter does + does NOT do
 
 - Generates a BACKGROUND image only. The "Absolutely no text in image"

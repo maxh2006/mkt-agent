@@ -38,6 +38,56 @@ Current execution priority (per ROADMAP.md):
 ## Done Tasks
 
 ### 2026-04-27
+- Task: Phase 4 — GCS-backed artifact storage for composited images
+  - Status: Complete (storage boundary live; orchestrator wired; `Post.image_url` auto-populates from composites when GCS is configured; safe-fallback paths preserved when storage is unconfigured or upload fails). One-time bucket creation per `docs/08-deployment.md` is the operator gate; the runbook is in place.
+  - Why: the deterministic overlay renderer was producing real composites, but they sat as `data:` URIs in `generation_context_json.composited_image.artifact_url`. Manus dispatch only accepts http(s) URLs (media-validation host-privacy/scheme check), so AI-generated creatives couldn't actually publish. This task is the missing bridge — composites now upload to a public-read GCS bucket, get a permanent `https://storage.googleapis.com/...` URL, and the URL flows into `Post.image_url`. Existing Manus media-validation + dispatch + retry paths activate naturally with no code change to those layers.
+  - Files added:
+    - `src/lib/storage/gcs.ts` — sole storage boundary. `uploadCompositedPng()` (deterministic object path, public-read URL, structured failure), `isStorageConfigured()` (env check; orchestrator skips when false), `StorageError` class, `classifyStorageError()` heuristic for SDK error messages → canonical `StorageErrorCode` taxonomy. ~140 lines.
+    - `scripts/gcs-storage-smoke.ts` — round-trip smoke (uploads a 67-byte test PNG, fetches via plain https GET, asserts byte-identity). New `npm run gcs:smoke` script. Costs ~$0.0001 per run.
+  - Files modified:
+    - `package.json` — added `@google-cloud/storage ^7.19.0` (sibling of existing `@google-cloud/bigquery`). Added `gcs:smoke` npm script.
+    - `src/lib/ai/render/types.ts` — `CompositedImageResult` extended with `png_bytes?` (memory-only, stripped before persist), `bucket?`, `object_path?`, `mime_type?`, `byte_length?`, `uploaded_at?`. `RenderErrorCode` taxonomy extended with the four `STORAGE_*` codes the orchestrator's upload step adds.
+    - `src/lib/ai/render/index.ts` — `renderFinalImage()` now also returns `png_bytes: pngBytes` alongside the data URI. The data URI stays as the fallback metadata representation when storage isn't configured.
+    - `src/lib/ai/generate.ts` — orchestrator now calls `uploadCompositedPng()` between render + queue insert. Failure isolation: render fails → no upload, status=error; render OK + `isStorageConfigured()` false → upload skipped (composite stays as `data:` URI fallback, `Post.image_url` stays null); render OK + upload throws → status flipped to error with `STORAGE_*` code + message; text drafts always ship. Strips `png_bytes` from the result before passing to the queue inserter (memory-only field). Run-complete log line gains `storage=<status>:<bytes>b`.
+    - `src/lib/ai/queue-inserter.ts` — `composited_image` block extended with `bucket` / `object_path` / `mime_type` / `byte_length` / `uploaded_at` (null when upload skipped/failed). New `Post.image_url` auto-populate logic: set ONLY when `composited.status === "ok"` AND `artifact_url.startsWith("https://")`. Operators retain the manual-paste override path (set once at creation; subsequent edits are operator-driven).
+    - `.env.production.example` — new `GCS_ARTIFACT_BUCKET=""` section with full doc-comment about safe-fallback semantics + pointer to `docs/08-deployment.md` setup runbook.
+    - `docs/08-deployment.md` — new "GCS artifact bucket — one-time setup" section: locked product calls, gcloud bucket-creation commands (uniform-bucket-level-access + public-read + VM SA write), wire into `/opt/mkt-agent/.env`, `npm run gcs:smoke` verification, what the helper does + does NOT do, common errors + meanings table mapping `STORAGE_*` codes to causes.
+    - `docs/00-architecture.md` — Visual input architecture "MVP storage decision" subsection split into two contracts: AI background stays as `data:` URI (debug metadata; never publishable per the brand rule); composited final image uploads to GCS with permanent https URL. Notes the failure-isolation behavior.
+    - `docs/02-data-model.md` — `Post.image_url` field doc updated: now auto-populated by AI generation when GCS is configured + composite renders successfully; manual operator override path preserved.
+    - `docs/07-ai-boundaries.md` — overlay renderer subsection updated with the GCS storage migration paragraph; deferred-list updated to remove "GCS-backed artifact_url" (now done) and add "lifecycle / cleanup of composite artifacts" as the new deferred item; renderer error-taxonomy line extended with the four `STORAGE_*` codes; persisted shape extended with the upload metadata fields.
+    - `ROADMAP.md` — Phase 4 EXECUTION PRIORITY paragraph updated: GCS storage migration removed from "remaining product gaps"; remaining gaps are now image inspector UI + sample-comparison UI + composite cleanup/lifecycle. Known unblockers extended with the one-time GCS bucket setup as a third operational gate alongside Anthropic credits + Gemini paid-tier (until the user runs the gcloud commands + sets `GCS_ARTIFACT_BUCKET`, `Post.image_url` stays null).
+    - `WORKLOG.md` — this entry; Ongoing entry removed.
+  - Storage boundary contract:
+    - **Auth**: ADC. Prod uses VM SA via metadata service; local dev uses `gcloud auth application-default login`. No JSON key files in code. Mirrors the `@google-cloud/bigquery` pattern at `src/lib/bq/client.ts`.
+    - **Bucket access model**: public-read at the bucket level (uniform-bucket-level-access + `allUsers:objectViewer`). Permanent `https://storage.googleapis.com/<bucket>/<path>` URLs. Zero signing code. Matches the use case (these images go public on Meta/Telegram anyway).
+    - **Object path**: `generated/<brand_id>/<sample_group_id>.png`. One composite per generation run; siblings share the URL since the composite content is identical.
+    - **Cache headers**: `public, max-age=31536000, immutable`. Artifacts are content-addressed by `sample_group_id` (UUID); never re-written.
+    - **What's uploaded**: ONLY the FINAL composited PNG. The AI background (`image_generation.artifact_url`) stays as a `data:` URI since it's debug metadata, not publishable. The brand rule "AI generates backgrounds; app composites text + logos" forbids ever shipping the background-only image as the final creative.
+  - Auto-population of `Post.image_url` (the locked behavior table):
+
+    | Scenario | `composited.status` | `composited.artifact_url` | `Post.image_url` |
+    |---|---|---|---|
+    | Render fails | `error` | `null` | `null` |
+    | Render OK, `GCS_ARTIFACT_BUCKET` unset | `ok` | `data:image/png;base64,...` (fallback) | `null` |
+    | Render OK, GCS upload throws | `error` (code: `STORAGE_*`) | `null` | `null` |
+    | Render OK, GCS upload succeeds | `ok` | `https://storage.googleapis.com/<bucket>/<path>` | same https URL |
+
+    `Post.image_url` is set ONLY when there's a real https URL. Text drafts always ship in every scenario.
+  - Manus / media-validation compatibility: NO changes to `src/lib/manus/media-validation.ts`, `collectMediaUrls()`, `validateMediaUrls()`, dispatcher, or callback. The existing path works unchanged because `Post.image_url` now has a real https URL flowing through the same field. The retryability classifier and Manus protocol are untouched.
+  - Verification:
+    - `npx tsc --noEmit` clean (EXIT=0).
+    - `npm run visual:smoke` clean (27/27; compiler unchanged).
+    - `npm run render:smoke` clean (renderer still produces a 140KB 1080x1080 PNG; the new `png_bytes` field is populated).
+    - `npm run gcs:smoke` — **NOT exercised this session.** Requires `GCS_ARTIFACT_BUCKET` set + bucket created. The operator runbook in `docs/08-deployment.md` is what unblocks this; until they run the gcloud commands, the safe-fallback path is what applies (composite stays as `data:` URI; `Post.image_url` stays null; everything still works).
+    - End-to-end fixture / Manus dispatch verification — also pending the bucket creation.
+  - What remains deferred (these are now the only Phase 4 gaps):
+    - Image inspector UI in Content Queue showing composite preview + visual_compiled resolved direction.
+    - Dedicated sample-comparison / selection UI for sibling drafts.
+    - Composite artifact lifecycle / cleanup (rejected drafts' artifacts stay in GCS until a future cleanup job).
+    - Per-sibling composite re-renders (still one composite per run; siblings share).
+  - Per the durable cadence rule (every accomplished task → both ROADMAP and WORKLOG updated, every time, in one commit): ROADMAP EXECUTION PRIORITY + Known unblockers + 4 docs + WORKLOG + 7 source files (3 new, 4 modified) + smoke script + env example land in the same commit. No deploy needed today (zero runtime change in prod since `GCS_ARTIFACT_BUCKET` is unset there); deploy + bucket-creation can be sequenced together when the operator is ready.
+
+### 2026-04-27
 - Task: Phase 4 — Deterministic overlay renderer (Satori + Resvg)
   - Status: Complete (renderer wired, persisted, smoke-tested; closes Phase 4 sub-bullet 6)
   - Why: Phase 4 visual chain was input-side complete and provider-side complete (Nano Banana 2 wired earlier today), but no step was actually composing the final image. Operators couldn't see what the post would look like once published. This task is the composite step: Post text + brand logo overlaid on the AI background using the layout spec's text zones / safe zones / logo slot.

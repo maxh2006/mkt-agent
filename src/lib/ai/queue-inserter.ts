@@ -142,6 +142,11 @@ export async function insertSamplesAsDrafts(args: {
     // the queue (image inspector UI is a separate follow-up).
     if (input.composited) {
       const c = input.composited;
+      // Persist the composited_image block. NOTE: `c.png_bytes` is a
+      // memory-only field used by the orchestrator to upload to GCS;
+      // we deliberately don't include it here — the persisted
+      // representation is `artifact_url` (https URL post-upload, or
+      // a `data:` URI fallback when storage is unconfigured).
       generationContext.composited_image = {
         status: c.status,
         artifact_url: c.artifact_url,
@@ -152,6 +157,14 @@ export async function insertSamplesAsDrafts(args: {
         visual_emphasis: c.visual_emphasis,
         background_fallback: c.background_fallback,
         logo_drawn: c.logo_drawn,
+        // GCS upload metadata (Phase 4 storage migration, 2026-04-27).
+        // Present when the orchestrator's upload step succeeded;
+        // null/absent when storage was unconfigured or upload failed.
+        bucket: c.bucket ?? null,
+        object_path: c.object_path ?? null,
+        mime_type: c.mime_type ?? null,
+        byte_length: c.byte_length ?? null,
+        uploaded_at: c.uploaded_at ?? null,
         error_code: c.error_code,
         error_message: c.error_message,
         generated_at: c.generated_at,
@@ -171,6 +184,25 @@ export async function insertSamplesAsDrafts(args: {
       generationContext.ranked_games = input.source_facts.ranked_games;
     }
 
+    // Phase 4 storage migration (2026-04-27): auto-populate
+    // `Post.image_url` ONLY when the composite was uploaded to GCS
+    // and we have a real http(s) URL. The orchestrator sets
+    // `composited.artifact_url` to the GCS URL on success; on
+    // storage failure it's null; when storage is unconfigured it's
+    // a `data:` URI (which Manus dispatch can't fetch). The
+    // `https://` prefix check is the dispatch-safety gate.
+    //
+    // Operators retain the manual-override path: if they edit
+    // `Post.image_url` later, that's preserved (we set it once at
+    // creation; subsequent edits are operator-driven).
+    const compositedUrl = input.composited?.artifact_url ?? null;
+    const imageUrl =
+      input.composited?.status === "ok" &&
+      compositedUrl &&
+      compositedUrl.startsWith("https://")
+        ? compositedUrl
+        : null;
+
     return {
       brand_id: input.brand.id,
       post_type: input.post_type satisfies PostType,
@@ -181,6 +213,7 @@ export async function insertSamplesAsDrafts(args: {
       cta: sample.cta,
       banner_text: sample.banner_text,
       image_prompt: sample.image_prompt,
+      image_url: imageUrl,
       source_type: input.source_type satisfies SourceType,
       source_id: input.source_id,
       source_instance_key: input.source_instance_key,

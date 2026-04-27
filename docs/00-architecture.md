@@ -658,15 +658,36 @@ generator → image_generation block" below for the persisted shape.
 reserved for the FINAL composited image produced by the deferred
 overlay renderer.
 
-**MVP storage decision (locked 2026-04-27).** Gemini returns inline
-image bytes (no hosted URL). For the smallest clean persistence path
-we encode them as `data:image/png;base64,…` URIs and store directly
-in `image_generation.artifact_url`. DB cost: ~100KB-1MB per draft per
-generation run; acceptable while volume is low. Migrating to a
-GCS-backed `https://…` URL is a follow-up (the field is stable; only
-the URL scheme changes). The overlay renderer (below) reads the data
-URI directly via `Buffer.from(base64, "base64")` without hitting any
-external storage.
+**Storage decisions (locked 2026-04-27).** Two separate artifact
+contracts, two different storage paths:
+
+- **AI background** (`image_generation.artifact_url`): stays as a
+  `data:image/png;base64,…` URI. This is debug metadata only — the
+  background-only image is NEVER publishable as a final creative
+  (the brand-rule "AI generates backgrounds; app renders text +
+  logos as deterministic overlay" forbids it). Keeping it inline
+  avoids a redundant upload step and lets the overlay renderer
+  decode the bytes directly via `Buffer.from(base64, "base64")`
+  without hitting external storage.
+- **Composited final image** (`composited_image.artifact_url`):
+  uploaded to a public-read GCS bucket. Returns a permanent
+  `https://storage.googleapis.com/<bucket>/<path>` URL. This URL
+  is what flows into `Post.image_url` and through the existing
+  Manus media-validation + dispatch path.
+
+The composite uploader lives at
+[`src/lib/storage/gcs.ts`](src/lib/storage/gcs.ts) — a small
+boundary using `@google-cloud/storage` with ADC auth (mirrors the
+existing `@google-cloud/bigquery` pattern). One object per
+generation run at deterministic path
+`generated/<brand_id>/<sample_group_id>.png`; siblings share the URL.
+Failure isolation: when `GCS_ARTIFACT_BUCKET` is unset, the
+orchestrator skips the upload (composite stays as a `data:` URI in
+metadata; `Post.image_url` stays null — safe fallback). When upload
+throws, the orchestrator persists `composited_image.error_code`
+(`STORAGE_AUTH_FAILED` / `STORAGE_UPLOAD_FAILED` / `STORAGE_UNKNOWN`)
+and text drafts still ship. See `docs/08-deployment.md` "GCS
+artifact bucket" for the one-time bucket setup runbook.
 
 **Deterministic overlay renderer (2026-04-27).** New module
 `src/lib/ai/render/` composites Post text + brand logo onto the AI

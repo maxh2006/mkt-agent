@@ -320,15 +320,12 @@ background-only artifacts are never auto-shipped to Manus as the
 final creative.
 
 What's deferred:
-- GCS-backed `artifact_url` (currently `data:` URI in MVP — works
-  end-to-end, just bloats `generation_context_json` at scale). This
-  is also the gate that finally unblocks auto-population of
-  `Post.image_url` from the composite, since Manus dispatch requires
-  http(s) URLs.
 - Additional real image-model adapters (Imagen / Stability / etc. —
   Gemini shipped today).
 - Image inspector UI in Content Queue showing the composite preview
   + visual_compiled resolved direction.
+- Lifecycle / cleanup of composite artifacts in GCS (rejected drafts'
+  artifacts stay until a future cleanup job).
 
 **Deterministic overlay renderer (2026-04-27 — shipped).** Module
 `src/lib/ai/render/` composites Post text + brand logo onto the AI
@@ -338,19 +335,44 @@ slot. Satori (JSX → SVG) + @resvg/resvg-js (SVG → PNG). Inputs:
 `visual_compiled`, first sample's `headline / caption / cta /
 banner_text`, brand logos with SSRF-safe fetch. Output:
 `Post.generation_context_json.composited_image` per draft —
-`{status, artifact_url (data URI), width, height, layout_key,
-platform_format, visual_emphasis, background_fallback, logo_drawn,
-error_code, error_message, generated_at, duration_ms,
-render_version}`. Error taxonomy: `MISSING_INPUTS` /
-`BACKGROUND_DECODE_FAILED` / `FONT_LOAD_FAILED` / `SATORI_FAILED` /
-`RESVG_FAILED` / `UNKNOWN`. One composite per run, mirrored across
-siblings (text deltas between siblings are minor; per-sibling
-re-renders aren't worth the cost in MVP). The orchestrator wraps
-the call in try/catch — text drafts always ship even if the renderer
-throws. **`Post.image_url` is STILL not touched** — gated on the
-GCS storage migration that converts the data URI to a Manus-
-dispatchable https URL. `npm run render:smoke` produces a sample
-composite from a synthetic request without touching DB / network.
+`{status, artifact_url, width, height, layout_key, platform_format,
+visual_emphasis, background_fallback, logo_drawn, bucket?,
+object_path?, mime_type?, byte_length?, uploaded_at?, error_code,
+error_message, generated_at, duration_ms, render_version}`. Error
+taxonomy: `MISSING_INPUTS` / `BACKGROUND_DECODE_FAILED` /
+`FONT_LOAD_FAILED` / `SATORI_FAILED` / `RESVG_FAILED` /
+`STORAGE_NOT_CONFIGURED` / `STORAGE_AUTH_FAILED` /
+`STORAGE_UPLOAD_FAILED` / `STORAGE_UNKNOWN` / `UNKNOWN`. One
+composite per run, mirrored across siblings (text deltas between
+siblings are minor; per-sibling re-renders aren't worth the cost in
+MVP). The orchestrator wraps the call in try/catch — text drafts
+always ship even if the renderer throws. `npm run render:smoke`
+produces a sample composite from a synthetic request without
+touching DB / network.
+
+**GCS storage migration (2026-04-27 — shipped).** When
+`GCS_ARTIFACT_BUCKET` is configured, the orchestrator uploads the
+composited PNG to a public-read GCS bucket via
+`src/lib/storage/gcs.ts#uploadCompositedPng()` (auth: ADC). The
+resulting `https://storage.googleapis.com/<bucket>/<object_path>`
+URL replaces the `data:` URI in `composited_image.artifact_url`,
+and the queue inserter ALSO writes the same URL into
+`Post.image_url` for every sibling draft — but ONLY when
+`composited.status === "ok"` AND the URL starts with `https://`.
+This is the single unlock that lets `Post.image_url` be auto-
+populated for AI-generated creatives. Manus dispatch (existing,
+unchanged) now naturally activates: `collectMediaUrls(post)` reads
+`Post.image_url`, the existing `validateMediaUrls()` runs scheme +
+host-privacy + reachability against the GCS URL, and the dispatch
+proceeds. Failure isolation preserved: when storage is unconfigured
+the composite stays as a `data:` URI fallback in metadata and
+`Post.image_url` stays null; when upload throws the
+`composited_image.error_code` captures the failure (operator can
+paste a hosted URL manually as before) and text drafts still ship.
+Object path is deterministic: `generated/<brand_id>/<sample_group_id>.png` —
+siblings share one URL since the composite content is identical.
+See `docs/08-deployment.md` "GCS artifact bucket" for the one-time
+bucket setup + auth runbook.
 
 **Precedence** (mirrors the text pipeline): Brand Management (base) →
 source facts (context) → Event brief (override) → Templates (supporting

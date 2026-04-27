@@ -180,6 +180,12 @@ export async function renderFinalImage(
     generated_at: generatedAt,
     duration_ms: durationMs,
     render_version: RENDER_VERSION,
+    // Memory-only field — orchestrator passes these bytes to the GCS
+    // upload step, then queue-inserter strips before persisting
+    // `composited_image` to generation_context_json. The persisted
+    // representation is `artifact_url` (https URL post-upload, or a
+    // `data:` URI fallback when storage is unconfigured).
+    png_bytes: pngBytes,
   };
 }
 

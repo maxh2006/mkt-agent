@@ -14,12 +14,14 @@
     "media:smoke": "tsx scripts/media-validation-smoke.ts",
     "visual:smoke": "tsx scripts/visual-compile-smoke.ts",
     "render:smoke": "tsx scripts/render-smoke.ts",
-    "gemini:smoke": "tsx scripts/gemini-image-smoke.ts"
+    "gemini:smoke": "tsx scripts/gemini-image-smoke.ts",
+    "gcs:smoke": "tsx scripts/gcs-storage-smoke.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.90.0",
     "@base-ui/react": "^1.3.0",
     "@google-cloud/bigquery": "^8.1.1",
+    "@google-cloud/storage": "^7.19.0",
     "@hookform/resolvers": "^5.2.2",
     "@prisma/adapter-pg": "^7.7.0",
     "@prisma/client": "^7.7.0",
