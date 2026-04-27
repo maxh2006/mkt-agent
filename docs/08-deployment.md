@@ -554,6 +554,13 @@ Must be set in `/opt/mkt-agent/.env` before Cloud Scheduler is enabled:
 - `DATABASE_URL` — Postgres connection string
 - `AUTH_SECRET` — NextAuth session secret
 - `AUTH_TRUST_HOST=true`
+- `AUTH_URL` — canonical base URL for this deployment (e.g. `http://34.92.70.250`
+  for the dev VM, or `https://mkt.example.com` once a domain is wired up).
+  Required even with `AUTH_TRUST_HOST=true`: relying on host-header forwarding
+  alone has been observed to make NextAuth's signOut redirect resolve to
+  `http://localhost:3000` (the PM2-bound port that Nginx proxies to) instead
+  of the public host. Setting `AUTH_URL` pins the redirect target. **Update
+  this value any time the public host changes** (DNS cutover, new domain).
 - `NODE_ENV=production`
 - `MANUS_DISPATCH_SECRET` — shared secret the scheduler sends
 - `MANUS_WEBHOOK_SECRET` — shared secret Manus signs callbacks with (if
