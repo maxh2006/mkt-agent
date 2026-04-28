@@ -494,6 +494,46 @@ interface ActivePromotionsResponse {
   error?: { code: string; message: string };
 }
 
+// Connectivity status pill. Derived purely from the active-promotions
+// query — same source of truth the dropdown uses, so the pill never
+// disagrees with the picker. Operators read this to know whether
+// Brand Management → Integration Settings is wired correctly.
+function PromoApiStatusPill({
+  loading,
+  error,
+  errorCode,
+  count,
+}: {
+  loading: boolean;
+  error: string | null;
+  errorCode?: string;
+  count: number;
+}) {
+  if (loading) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full border bg-muted/40 px-2.5 py-1 text-xs text-muted-foreground">
+        <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40 animate-pulse" />
+        Checking…
+      </span>
+    );
+  }
+  if (error) {
+    const isNotConfigured = errorCode === "BRAND_NOT_CONFIGURED";
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-destructive/30 bg-destructive/10 px-2.5 py-1 text-xs text-destructive font-medium">
+        <span className="h-1.5 w-1.5 rounded-full bg-destructive" />
+        {isNotConfigured ? "Not Connected" : "Connection Error"}
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-700 font-medium">
+      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+      Connected · {count} active promotion{count === 1 ? "" : "s"}
+    </span>
+  );
+}
+
 function OnGoingPromotionsCard({ rule, canEdit, onSaved }: { rule: AutomationRule; canEdit: boolean; onSaved: () => void }) {
   const stored = migrateOngoingPromo(rule.config_json);
   const [cfg, setCfg] = useState<OnGoingPromotionRuleConfig>(stored);
@@ -597,8 +637,13 @@ function OnGoingPromotionsCard({ rule, canEdit, onSaved }: { rule: AutomationRul
 
         <div>
           <SectionLabel>Running Promotions API</SectionLabel>
-          <FieldRow label="Running Promotions API URL" hint="Used to fetch currently active promotions.">
-            <TextInput value={cfg.api_url ?? ""} onChange={(v) => updateCfg("api_url", v || null)} placeholder="https://api.example.com/promotions" disabled={disabled} />
+          <FieldRow label="Integration status" hint="Configured in Brand Management → Integration Settings.">
+            <PromoApiStatusPill
+              loading={promoQuery.isLoading}
+              error={promoErrorMessage}
+              errorCode={promoQuery.data?.error?.code}
+              count={promoQuery.data?.promotions.length ?? 0}
+            />
           </FieldRow>
         </div>
 
@@ -645,35 +690,24 @@ function OnGoingPromotionsCard({ rule, canEdit, onSaved }: { rule: AutomationRul
                 <p className="text-sm font-medium">{pr.promo_name || "New Promotion Rule"}</p>
                 {canEdit && <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => removePromoRule(pr.id)}><Trash2 className="h-3.5 w-3.5" /></Button>}
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <p className="text-xs text-muted-foreground mb-1">Promo ID</p>
-                  <PromoCombobox
-                    mode="id"
-                    options={promoOptions}
-                    value={{ promo_id: pr.promo_id, promo_name: pr.promo_name }}
-                    onChange={(next) => updatePromoRule(pr.id, { promo_id: next.promo_id, promo_name: next.promo_name })}
-                    loading={promoQuery.isLoading}
-                    error={promoErrorMessage}
-                    onRetry={refetchPromos}
-                    disabled={disabled}
-                    placeholder="Select promo"
-                  />
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground mb-1">Promo Name</p>
-                  <PromoCombobox
-                    mode="name"
-                    options={promoOptions}
-                    value={{ promo_id: pr.promo_id, promo_name: pr.promo_name }}
-                    onChange={(next) => updatePromoRule(pr.id, { promo_id: next.promo_id, promo_name: next.promo_name })}
-                    loading={promoQuery.isLoading}
-                    error={promoErrorMessage}
-                    onRetry={refetchPromos}
-                    disabled={disabled}
-                    placeholder="Select promotion"
-                  />
-                </div>
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">Promotion</p>
+                <PromoCombobox
+                  mode="name"
+                  options={promoOptions}
+                  value={{ promo_id: pr.promo_id, promo_name: pr.promo_name }}
+                  onChange={(next) => updatePromoRule(pr.id, { promo_id: next.promo_id, promo_name: next.promo_name })}
+                  loading={promoQuery.isLoading}
+                  error={promoErrorMessage}
+                  onRetry={refetchPromos}
+                  disabled={disabled}
+                  placeholder="Select promotion"
+                />
+                {pr.promo_id && (
+                  <p className="text-[10px] text-muted-foreground mt-1 font-mono">
+                    id: {pr.promo_id}
+                  </p>
+                )}
               </div>
               <FieldRow label="Posting mode">
                 <Select value={pr.posting_mode} onValueChange={(v) => {

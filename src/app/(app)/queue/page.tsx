@@ -192,7 +192,8 @@ function canApproveRole(role?: string) {
 const EDITABLE_STATUSES = new Set(["draft", "pending_approval", "rejected"]);
 const DELIVERY_STATUSES = new Set(["scheduled", "publishing", "posted", "partial", "failed"]);
 
-const PER_PAGE = 25;
+const PER_PAGE_OPTIONS = [10, 20, 25, 50, 100] as const;
+const DEFAULT_PER_PAGE = 25;
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
@@ -203,7 +204,7 @@ export default function ContentQueuePage() {
   const canApprove = canApproveRole(session?.user?.role);
   const { isAllBrands } = useActiveBrand();
 
-  const [filters, setFilters] = useState<PostFilters>({ page: 1, per_page: PER_PAGE });
+  const [filters, setFilters] = useState<PostFilters>({ page: 1, per_page: DEFAULT_PER_PAGE });
   const [editPost, setEditPost] = useState<Post | null>(null);
   const [deliveryPostId, setDeliveryPostId] = useState<string | null>(null);
 
@@ -221,6 +222,10 @@ export default function ContentQueuePage() {
     setFilters((prev) => ({ ...prev, page }));
   }
 
+  function setPerPage(perPage: number) {
+    setFilters((prev) => ({ ...prev, per_page: perPage, page: 1 }));
+  }
+
   async function handleApprove(id: string) {
     await postsApi.approve(id);
     queryClient.invalidateQueries({ queryKey: ["posts"] });
@@ -236,7 +241,8 @@ export default function ContentQueuePage() {
     queryClient.invalidateQueries({ queryKey: ["posts"] });
   }
 
-  const totalPages = data ? Math.ceil(data.total / PER_PAGE) : 1;
+  const currentPerPage = filters.per_page ?? DEFAULT_PER_PAGE;
+  const totalPages = data ? Math.max(1, Math.ceil(data.total / currentPerPage)) : 1;
   const currentPage = filters.page ?? 1;
 
   return (
@@ -375,21 +381,40 @@ export default function ContentQueuePage() {
           </div>
 
           {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-muted-foreground">
-                {data?.total} post{data?.total !== 1 ? "s" : ""} — page {currentPage} of {totalPages}
-              </p>
-              <div className="flex gap-1">
-                <Button variant="outline" size="sm" onClick={() => setPage(currentPage - 1)} disabled={currentPage <= 1}>
-                  <ChevronLeft className="h-3.5 w-3.5" />
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => setPage(currentPage + 1)} disabled={currentPage >= totalPages}>
-                  <ChevronRight className="h-3.5 w-3.5" />
-                </Button>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <p className="text-xs text-muted-foreground">
+              {data?.total ?? 0} post{(data?.total ?? 0) !== 1 ? "s" : ""}
+              {totalPages > 1 && ` — page ${currentPage} of ${totalPages}`}
+            </p>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-muted-foreground">Per page</span>
+                <Select
+                  value={String(currentPerPage)}
+                  onValueChange={(v) => v && setPerPage(parseInt(v, 10))}
+                >
+                  <SelectTrigger className="w-[72px] h-8">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PER_PAGE_OPTIONS.map((n) => (
+                      <SelectItem key={n} value={String(n)}>{n}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
+              {totalPages > 1 && (
+                <div className="flex gap-1">
+                  <Button variant="outline" size="sm" onClick={() => setPage(currentPage - 1)} disabled={currentPage <= 1}>
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => setPage(currentPage + 1)} disabled={currentPage >= totalPages}>
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              )}
             </div>
-          )}
+          </div>
         </>
       )}
 
