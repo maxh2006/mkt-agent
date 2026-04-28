@@ -16,17 +16,51 @@ Current execution priority (per ROADMAP.md):
 
 ## Ongoing Tasks
 
-- **⏳ REMINDER — Top up Anthropic credits** (console.anthropic.com → Billing). Required to flip `AI_PROVIDER=anthropic` in prod for real text generation.
+> **2026-04-28 strategic re-frame**: mkt-agent ⇄ Platform merge has been agreed (see ROADMAP "Phase M"). Work runs as **two parallel tracks** — Track A (real-AI quality audit) + Track B (Migration Step 1 — data-source merge). The Anthropic + Gemini reminders below are now Track A blockers; the BigQuery `shared.*` access regression discovered today is no longer a blocker because Track B / Step 1 replaces BigQuery as the source of truth.
+
+- **🟢 Track A — Real-AI quality audit** (active, blocked on operator action)
+  - Goal: confirm the AI generation pipeline produces casino-marketer-quality output before merging the product into the platform. Today the standalone tool runs end-to-end against real WildSpinz promo data (105 drafts created on first smoke 2026-04-28), but text + image are stub placeholders — we have never seen a real Claude caption or real Gemini image in prod.
+  - Steps:
+    1. **Top up Anthropic credits** (~$5; pending user action)
+    2. **Upgrade Gemini API key to paid tier** (pending user action; details below in this Ongoing list)
+    3. Re-run the WildSpinz Running Promotions automation against the same 37 active promos with `AI_PROVIDER=anthropic` + `AI_IMAGE_PROVIDER=gemini`
+    4. Audit output quality:
+       - **Text**: tone, brand voice fit, length compliance per platform, refusal-rate, hallucination-rate
+       - **Image**: brand color compliance, safe-zone respect, logo positioning, text overlay readability
+       - **Workflow**: refine round-trips, sample comparison usability, image inspector findings
+    5. Iterate on prompt builder (`src/lib/ai/prompt-builder.ts`) / source normalizers (`src/lib/ai/source-normalizers/*`) / visual compiler (`src/lib/ai/visual/compile.ts`) based on findings
+    6. Document findings + iteration in WORKLOG; update prompt version when changing the prompt builder
+  - Existing checkpoint already captured: caption-quality verification for Event-derived drafts (the `event.objective + event.reward + event.rules` echo is documented stub behavior, not a bug — see screenshot user flagged on 2026-04-28).
+  - Cheap, reversible (env flip back to stub at any time), runs entirely inside the standalone mkt-agent. **Catches AI bugs at the cheapest iteration cost — before merge complexity lands.**
+
+- **🟢 Track B — Migration Step 1: data-source merge** (active, blocked on platform-team handoff)
+  - Goal: replace mkt-agent's Promotions API adapter with a direct Supabase query against `public.promotions` + `public.brand_promotions`. Permanently fixes the BigQuery `shared.*` access regression without burning a re-grant. Read-path-only — does not disturb the AI pipeline.
+  - Pending user action: **Get Supabase service-role + read-only key from platform team** (initially scoped to `public.promotions` + `public.brand_promotions`; later expansions to `users` / `vip_levels` / `user_tags` / `game_rounds` / `games` as Step 1 broadens).
+  - Steps once key is in hand:
+    1. Add Supabase client setup (`src/lib/supabase/client.ts`, parallel to `src/lib/bq/client.ts`)
+    2. Replace `src/lib/promotions/` adapter — keep the `PromoFacts` output shape; swap the read path from HTTP fetch to Supabase select. Same `is_active = true && is_expired = false` filter applied as a Supabase `.eq()` instead of in the normalizer (cleaner; pushes the filter to the DB).
+    3. Update `src/lib/promotions/load-integration.ts` — the WildSpinz brand's integration_settings_json `api_base_url` / `promo_list_endpoint` / `api_key` become obsolete (read directly from Supabase, no per-brand external API config needed). Keep the fields for non-WildSpinz brands that may still use external sources during transition.
+    4. Run the same end-to-end smoke that passed today against WildSpinz; expect identical or better output (no upstream rate limits, no auth header gymnastics).
+    5. Update `docs/04-automations.md` Running Promotions section + ROADMAP to reflect the read-path swap.
+  - Out of scope for Step 1: write-path changes, auth merge (Step 2), scheduler migration (Step 3), storage migration (Step 4), UI merge (Step 5).
+
+- **⏳ REMINDER — Top up Anthropic credits** (console.anthropic.com → Billing). Required to flip `AI_PROVIDER=anthropic` in prod for real text generation. **Track A blocker.**
   - Blocks: real AI generation in prod (Anthropic returns `403 Request not allowed` until credits exist)
   - Current account plan: Evaluation access (free, zero credits)
   - Ballpark: $5 minimum top-up ≈ 150+ full Event generate-drafts runs at sonnet-4.6 rates
-  - When done: say "credits added" to the session → resume Phase 4 validation
+  - When done: say "credits added" to the session → kick off Track A audit
   - **Verify after flip: caption quality on Event-derived drafts.** Today's stub at `src/lib/ai/client.ts:151-158` builds the caption by concatenating `event.objective + event.reward + event.rules` verbatim — that's deterministic placeholder behavior, not a product bug. After flipping to `anthropic`, regenerate the same event and confirm the caption reads like a casino marketer wrote it (transformed copy, not echoed structured fields). User flagged 2026-04-28 in a screenshot of a stub-generated 123casino "300% massive bonus hunt" draft.
-- **⏳ REMINDER — Upgrade Gemini API key to paid tier** (https://aistudio.google.com/api-keys → key settings → "Set up billing" / paid tier).
+
+- **⏳ REMINDER — Upgrade Gemini API key to paid tier** (https://aistudio.google.com/api-keys → key settings → "Set up billing" / paid tier). **Track A blocker.**
   - Blocks: real background-image generation in prod (Gemini returns `429 RATE_LIMITED` with body `Quota exceeded for metric: ...generate_content_free_tier_requests, limit: 0, model: gemini-3.1-flash-image` until the key is opted into paid tier).
   - Verified blocker on 2026-04-27 via `npm run gemini:smoke` against the local env. Key + project + Generative Language API are all set up correctly; only the key's tier is the gate. Image-generation models are paid-tier-only; project-level billing on `mktagent-493404` isn't sufficient on its own — the key itself must be opted in.
   - Current state: `AI_IMAGE_PROVIDER=stub` in prod. Stub returns placeholder result with `artifact_url: null`; overlay renderer falls back to brand-color solid background; text drafts ship cleanly.
   - When done: re-run `npm run gemini:smoke` locally → if `OK`, follow the prod flip procedure in `docs/08-deployment.md` "Image generation provider — Gemini / Nano Banana 2", then say "key on paid tier" to the session.
+
+- **⏳ REMINDER — Get Supabase service-role + read-only key from platform team.** **Track B blocker.**
+  - Blocks: Migration Step 1 cannot start.
+  - Initial scope: read access to `public.promotions` + `public.brand_promotions`. Later: `users` / `vip_levels` / `user_tags` / `game_rounds` / `games`.
+  - When done: store in prod env (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`) + local `.env`; kick off Track B work in `src/lib/supabase/client.ts`.
 
 
 
@@ -37,6 +71,51 @@ Current execution priority (per ROADMAP.md):
 
 
 ## Done Tasks
+
+### 2026-04-28 (later in the day)
+- Task: Platform-merge architecture alignment + ROADMAP refactor
+  - Status: Direction agreed with platform team via Q1–Q15 response.
+  - Why: BigQuery `shared.*` access regression (see entry below) made it clear we'd be patching a doomed integration if we kept building on the standalone-tool model. Aligned with platform team to merge mkt-agent into the platform monorepo as `apps/marketing/`, sharing the same Supabase database for source-of-truth data.
+  - Outcome:
+    - 5-step migration sequence locked: data-source → auth → scheduler → storage → UI
+    - Source-of-truth assignments locked (see ROADMAP Phase M table)
+    - Marketing-owned tables to be prefixed `marketing_*` and joined to platform tables via `brand_id`
+    - New `marketing_brand_profiles` table planned (1:1 with platform's `brands.id`) for voice / design / sample-captions data
+    - Multi-channel marketing module agreed (sms / telegram / facebook / email / push / outbound-call)
+    - External-signal entry point shape decided (HTTP webhook → `marketing_signals` table → worker drain)
+    - Strategic re-frame: Track A (real-AI quality audit) + Track B (Migration Step 1) run in parallel; Steps 2–5 of migration gated on Track A confirming AI pipeline solidity
+  - Files modified:
+    - `ROADMAP.md` — new "Phase M" section; EXECUTION PRIORITY rewritten to reflect Track A + Track B + refreshed unblockers; CORE PRODUCT RULES updated to reflect post-merge data-source rules
+    - `WORKLOG.md` — Track A + Track B Ongoing entries + new Supabase-key reminder
+  - Decision document preserved at: `/Users/maxh2006/.claude/plans/before-the-next-product-toasty-creek.md` (forward-ready summary of Q1–Q15 platform team responses)
+  - Open follow-up questions to platform team:
+    - Manus publishing-worker fate — does platform replace it or keep it as the boundary?
+    - AI cost / billing routing post-merge (Anthropic + Gemini API spend)
+    - Brand/tenant identity reconciliation (will fall out of Step 1 but worth confirming)
+    - Timeline / sprint allocation per migration step
+
+- Task: BigQuery `shared.*` dataset access audit (regression discovered)
+  - Status: Documented; **deliberately not patched** — Track B / Step 1 supersedes the BQ access path entirely.
+  - Finding: `npm run bq:smoke` against prod returned `Access Denied` for ALL 5 shared tables (`brands`, `users`, `transactions`, `game_rounds`, `games`). As of 2026-04-22, four of those (everything except `game_rounds`) were known-good. Something changed in the platform team's setup since then.
+  - Likely cause: the SA `mkt-agent-bq@mktagent-493404.iam.gserviceaccount.com` lost its `BigQuery Data Viewer` role on the `newgen-492518.shared` dataset, OR the dataset was rebuilt without re-granting.
+  - Action taken: instead of asking the platform team for a re-grant we'd throw away, captured the regression as concrete evidence supporting the platform-merge decision (see entry above). Big Wins + Hot Games adapters degrade cleanly to `status: "missing"` so this isn't an immediate operational blocker — it just confirms the standalone-BigQuery model has run its course.
+  - Resolution path: Migration Step 1 (Track B) replaces the BigQuery `shared.*` reads with Supabase direct queries against the same upstream tables. Big Wins + Hot Games adapters get rewritten as part of the merge.
+
+- Task: Promo dropdown picker for Automation Rules → On Going Promotions tab
+  - Status: Complete (commit `545700f`).
+  - Why: The Promotion Rule cards had two free-text inputs (Promo ID + Promo Name). Operators were copy-pasting from an upstream dashboard; error-prone and didn't scale (WildSpinz returns 37 active promos).
+  - Files added:
+    - `src/app/api/brands/[id]/promotions/active/route.ts` — read-only GET endpoint, brand-scoped (any session user with brand access). Returns `{promo_id, promo_name}[]` sorted by name. Uses `fetchPromotionsForBrand()` so the active+not-expired filter from today's commit applies automatically.
+    - `src/components/automations/promo-combobox.tsx` — searchable Combobox built on the no-Base-UI pattern (button + absolute panel + outside-click), avoiding the "error #31" hazard. Filters by id-substring OR name-substring case-insensitively.
+  - Files modified: `src/app/(app)/automations/page.tsx` — added single `useQuery` per OnGoingPromotionsCard (staleTime 60s, shared cache); replaced the two TextInputs with two PromoCombobox instances; added section-level error chip when adapter returns `BRAND_NOT_CONFIGURED` etc.
+  - Verification: typecheck clean, visual smoke 27/27, prod deploy returned `307 → /login` for unauth'd requests (route wired). Live test against WildSpinz showed all 37 promos in the dropdown sorted by name.
+
+- Task: Three operator-feedback UI tweaks on Automations + Queue
+  - Status: Complete (commit `0aa4d4c`).
+  1. **Single Promotion picker** (was: redundant Promo ID + Promo Name dropdowns) — kept Promo Name combobox; promo_id shows as small monospace caption beneath. Selection still updates both fields under the hood.
+  2. **Integration status pill** (was: editable "Running Promotions API URL" text input that duplicated Brand Management) — read-only pill driven by the same active-promotions query. States: "Checking…" (loading), "Connected · N active promotions" (green, success), "Not Connected" (red, BRAND_NOT_CONFIGURED), "Connection Error" (red, other adapter errors). API URL is now configured exclusively in Brand Management → Integration Settings; the rule-level `api_url` field stays in `config_json` for back-compat but is no longer surfaced anywhere editable.
+  3. **Per-page dropdown on Content Queue** — options 10 / 20 / 25 / 50 / 100, default stays 25. Switching resets to page 1. Session-state only (no persistence — flag if persistence is wanted).
+  - Verification: typecheck clean, visual smoke 27/27, deployed to prod (commit `0aa4d4c`).
 
 ### 2026-04-28
 - Task: Phase 5 sub-bullet 2 — Running Promotions automation **live verification against WildSpinz**

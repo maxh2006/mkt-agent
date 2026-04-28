@@ -227,21 +227,111 @@ Definition of done:
 
 ---
 
+## PHASE M — PLATFORM MERGE (added 2026-04-28)
+
+Goal:
+Merge mkt-agent into the main casino platform as `apps/marketing/` inside the platform monorepo, with marketing data as `marketing_*` tables in the same Supabase database, joined to platform-owned `brands` / `users` / `promotions` / `game_rounds` / `games` via `brand_id`.
+
+This is a **layered, phased rollout** — not a single-shot rewrite. The platform team confirmed direction in their Q1–Q15 responses on 2026-04-28; the consolidated decision document is preserved at `/Users/maxh2006/.claude/plans/before-the-next-product-toasty-creek.md` for reference.
+
+### Migration sequence (all 5 steps)
+
+1. **Step 1 — Data-source merge.** mkt-agent reads Supabase directly for promotions / users / VIP / tags / transactions / game rounds / games. BigQuery `shared.*` retained for analytics only, then sunset. *Currently active as Track B.*
+2. **Step 2 — Auth merge.** Service-account IAM scope synced with platform's `admin_brand_access` so a scoped admin only sees their brands through the marketing UI.
+3. **Step 3 — Scheduler merge.** mkt-agent cron / Cloud Scheduler → platform's Cloud Run Jobs pattern (Express HTTP + `x-worker-secret` + Cloud Tasks chunk-enqueue). Reference jobs: `agent-settlement`, `shared-data-sync`.
+4. **Step 4 — Storage merge.** Generated assets → Supabase Storage `marketing-assets/` bucket. GCS staging path retained for the BigQuery sync pipeline only.
+5. **Step 5 — UI merge.** mkt-agent UI → `/marketing/*` routes inside the platform's admin app. Standalone `34.92.70.250` deployment retired. Brand Management UI refactors at this step (see "Brand Management refactor" below).
+
+### Source-of-truth assignments (post-merge)
+
+| Domain | Source | Notes |
+|---|---|---|
+| brands | `public.brands` | Multi-tenant root; identity (name, domain, colors, logo, country, currency, timezone). |
+| players / users | `public.users` (1:1 with `auth.users`) | Joins to `wallets` / `vip_levels` / `user_tags` / `user_groups`. |
+| promotions | `public.promotions` + `public.brand_promotions` | No separate API. |
+| transactions | `public.transactions` | Brand-scoped, audit-enabled. |
+| game rounds | `public.game_rounds` | UNIQUE `(vendor, round_id)`. Fields: `bet_amount` / `payout_amount` / `valid_bet` / `status` / `settled_at`. |
+| games | `public.games` | UNIQUE `(vendor, tg_game_code)`. |
+| marketing brand profile | NEW `marketing_brand_profiles` (1:1 → `public.brands.id`) | Voice settings, design defaults, sample captions. **mkt-agent's marketing-tuning data, NOT identity.** |
+| automation rules | NEW `marketing_automation_rules` | `event_trigger ∈ {big_win, hot_game, promo_running, omega_signal}`, brand-scoped. |
+| channels | NEW `marketing_channels` | sms / telegram / facebook / email / push / outbound-call. Existing SMS infra becomes the SMS-channel implementation. |
+| campaigns | NEW `marketing_campaigns` + `marketing_executions` | Top-level campaign + per-recipient delivery log. |
+| signals (OMEGA-style) | NEW `marketing_signals` | HMAC-signed webhook → table → worker drain. |
+| audit logs | `public.audit_log` (existing) | One-line `enable_audit('public.marketing_xxx')` per new table. |
+
+### Read/write pattern (post-merge)
+
+- **Read** = direct Supabase (service-role or admin token + RLS). Same DB, same truth.
+- **Write to platform-owned data** = via existing platform RPCs (`grant_promotion_reward()`, `apply_user_tag()`, `record_wr_turnover()`, …) so RLS / triggers / brand-scope / audit invariants stay enforced.
+- **Write to marketing-owned data** (`marketing_*` tables) = direct.
+
+### Brand Management refactor (Step 5)
+
+Platform's Brand Management owns identity (name, domain, colors, logo, country, currency, timezone, regulatory). mkt-agent's Brand Management becomes a marketing-profile editor at `/marketing/brands/<id>`:
+- **Identity tab → removed** (read-only header sourced from `public.brands`)
+- **Voice / Design / Sample Captions tabs → kept**, write to `marketing_brand_profiles.<json>`
+- **Integration Settings tab → mostly removed** (Promotions API obsolete post-Step 1; only kept if a brand has *other* external sources)
+
+Don't refactor the UI before platform-side identity is canonical in our app — that's specifically Step 1's job.
+
+### Layer status (post-Step 1)
+
+| Layer | Status | Reason |
+|---|---|---|
+| BigQuery adapter | Keep (transitional) | Real-time / large analytics. Subscribe to schema-drift Telegram alerts (mig 178). Eventually sunset. |
+| Promotions adapter | **Replace in Step 1** | Direct Supabase query. |
+| Auth flow | Transitional | Service-account stays for analytics worker only post-Step 2. |
+| Scheduler pattern | Transitional | Migrates in Step 3. |
+| Media bucket / storage | Transitional | Migrates in Step 4. |
+| Audit log | Refactor in Step 1 | mkt-agent's own audit retired; platform `audit_log` via `enable_audit()`. |
+| Manus publishing worker | **Open question** | Pending follow-up to platform team — does platform replace it or does Manus stay as the publishing boundary? |
+
+### Deferred until merge stabilizes
+
+- New channel types (WhatsApp / Viber / LINE / outbound voice) — `marketing_channels` is theoretical until Step 1+ lands.
+- OMEGA signal ingestion implementation — entry-point shape decided (HTTP webhook → `marketing_signals` table → worker drain), but build deferred until merge structure exists.
+- Cloud Scheduler job for the Running Promotions + Adhoc Events orchestrators — was the next concrete infra step pre-merge; now folded into Step 3 of the migration.
+- AI cost / billing routing decision (Anthropic + Gemini API spend post-merge) — finance discussion outside this ROADMAP.
+
+### Definition of done (Phase M)
+
+- mkt-agent runs entirely under `apps/marketing/` in the platform monorepo
+- All marketing-owned data lives in `marketing_*` tables in the same Supabase
+- Platform's `admins` + `admin_brand_access` is the only auth path
+- Cloud Run Jobs replace cron + Cloud Scheduler
+- Generated assets stored in Supabase Storage
+- Standalone `34.92.70.250` deployment retired
+
+---
+
 ## EXECUTION PRIORITY
 
-Current practical priority order (updated 2026-04-27):
-1. ✅ Phase 2 Manus publishing lifecycle — original 10 items resolved; ongoing bridge-hardening landing as needed.
-2. 🟡 Phase 3 BigQuery/API source layer — 5 of 8 done; items 4 & 5 blocked on platform team `shared.game_rounds` provisioning.
-3. 🟡 Phase 4 AI content generator agent — visual chain shipped end-to-end on 2026-04-27 (Brand Simple Mode UI, Event Visual Override UI + persistence, `compileVisualPrompt()` wired into `runGeneration()`, background-image provider boundary, Nano Banana 2 / Gemini real adapter, deterministic Satori + Resvg overlay renderer, GCS-backed artifact storage with auto-populated `Post.image_url`); sample comparison UI shipped same day (`/queue/compare/[group_id]`); Image Inspector modal shipped 2026-04-28 (`src/components/posts/image-inspector-modal.tsx`, opened from the Preview panel on `/queue/[id]`). Operational gates remain: Anthropic credits (text gen) + Gemini paid-tier upgrade (image gen) + one-time GCS bucket creation per docs/08 — all three currently fall back cleanly. Remaining product gap: composite cleanup/lifecycle policy.
-4. 🟡 **Phase 5 automate draft creation flows** — in progress. Running Promotions orchestrator shipped 2026-04-27 (Phase 5 sub-bullet 2); Adhoc Event orchestrator shipped 2026-04-28 (Phase 5 sub-bullet 4). Both manual-trigger today via admin API + CLI; both share the same `getAutomationCreator()` + `runGeneration()` pipeline. Big Wins + Hot Games flows blocked on `shared.game_rounds` provisioning. Next concrete step: a single Cloud Scheduler job (or two) that hits `POST /api/automations/running-promotions/run` and `POST /api/automations/adhoc-events/run` on a cadence (separate infra work, mirrors the existing `mkt-agent-dispatch` Manus job).
+**Current practical priority order — updated 2026-04-28 to reflect the platform-merge decision (see Phase M below).**
+
+The existing single-app phase plan (Phases 1–7) is now overlaid by the **mkt-agent ⇄ Platform merge plan (Phase M)**. The merge runs as **two parallel tracks** — Track A (real-AI quality audit, on the existing standalone product) and Track B (Migration Step 1 — data-source merge). Tracks B's later steps (auth, scheduler, storage, UI) are gated on Track A confirming the AI pipeline is solid in real-data mode.
+
+### Active tracks (parallel)
+
+1. 🟢 **Track A — Real-AI quality audit** (NOW). Top up Anthropic credits + upgrade Gemini key to paid tier → exercise the full pipeline against real WildSpinz promo data → audit output quality (text tone, brand voice, image safe zones, brand colors, refine workflow, edge cases) → iterate on prompt builder / normalizer / visual compiler as needed. Cheap, reversible (env flip back to stub), runs entirely inside the standalone mkt-agent. **This is how we confirm the product is truly working before merging it.**
+
+2. 🟢 **Track B — Migration Step 1: data-source merge** (NOW, parallel to A). Replace mkt-agent's Promotions API adapter with a direct Supabase query against `public.promotions` + `public.brand_promotions`. Permanently fixes the BigQuery `shared.*` access regression discovered 2026-04-28 without re-grant requests. Read-path-only — does not disturb the AI pipeline.
+
+### Phase status (existing scope)
+
+1. ✅ Phase 2 Manus publishing lifecycle — original 10 items resolved.
+2. 🟡 Phase 3 BigQuery/API source layer — 5 of 8 done; items 4 & 5 blocked on `shared.game_rounds`. **Now superseded by Track B + later merge steps**: post-merge, Big Wins / Hot Games read directly from `public.game_rounds` (Supabase), not BigQuery.
+3. 🟡 Phase 4 AI content generator agent — visual chain end-to-end (Brand Simple Mode, Event Visual Override, `compileVisualPrompt()` wired into `runGeneration()`, Gemini adapter, Satori+Resvg overlay, GCS storage, auto-populated `Post.image_url`); Sample Comparison UI; Image Inspector modal. Operational gates (Anthropic credits, Gemini paid-tier) being unblocked NOW as part of Track A. Remaining product gap: composite cleanup/lifecycle policy.
+4. 🟡 Phase 5 automate draft creation flows — Running Promotions + Adhoc Event orchestrators shipped, manual-trigger today; Cloud Scheduler infra deferred until Track B completes (so the scheduler hits the merged data-source path, not the soon-to-be-replaced one). Big Wins + Hot Games flows unblocked by Track B + later merge steps.
 5. Phase 6 close learning loop.
 6. Phase 1 & 7 secondary audits/polish.
 
-**Known unblockers needed** before resuming blocked Phase 3/4 items:
-- Platform team provisions `shared.game_rounds` → unlocks Phase 3 #4/#5 + exercises Big Wins / Hot Games adapters against live data.
-- Anthropic credits top-up → flip `AI_PROVIDER=anthropic`, re-test Generate Drafts with real model output.
-- Gemini API key paid-tier upgrade → flip `AI_IMAGE_PROVIDER=gemini`, re-test image generation with real Nano Banana 2 output. Verified blocker on 2026-04-27 via `npm run gemini:smoke`: the key returns `429 RATE_LIMITED` with `free_tier_requests, limit: 0` for `gemini-3.1-flash-image-preview`. Project-level billing on `mktagent-493404` isn't sufficient on its own — the key itself must be opted into paid tier at https://aistudio.google.com/api-keys. Until then prod stays on `AI_IMAGE_PROVIDER=stub` (overlay renderer falls back to brand-color solid background).
-- GCS artifact bucket created + `GCS_ARTIFACT_BUCKET` env set per `docs/08-deployment.md` "GCS artifact bucket — one-time setup" → unlocks auto-population of `Post.image_url` from the composited PNG, which in turn activates the existing Manus media-validation + dispatch path for AI-generated creatives. One-time gcloud run + env append + pm2 restart. Until then composites stay as `data:` URIs in metadata only and `Post.image_url` stays null (operators can paste a hosted URL manually — the override path is preserved).
+### Known unblockers (refreshed 2026-04-28)
+
+- **Anthropic credits top-up** → flips `AI_PROVIDER=anthropic`. Single biggest Track A gate. ~$5 minimum buys 150+ generation runs. Pending user action.
+- **Gemini API key paid-tier upgrade** → flips `AI_IMAGE_PROVIDER=gemini`. Verified blocker on 2026-04-27 via `npm run gemini:smoke`: free-tier limit is 0 for `gemini-3.1-flash-image-preview`. Pending user action at https://aistudio.google.com/api-keys.
+- **Supabase service-role + read-only key** for `public.promotions` + `public.brand_promotions` (and eventually `users` / `vip_levels` / `user_tags` / `game_rounds` / `games`). Track B can't start without this. Pending platform-team handoff.
+- **BigQuery `shared.*` re-grant** — **NO LONGER NEEDED.** Track B + later merge steps replace BigQuery as the source of truth. Don't burn platform-team time on a re-grant we'll throw away.
+- **GCS artifact bucket** — already created; `GCS_ARTIFACT_BUCKET` env set; verified end-to-end on 2026-04-27.
 
 ---
 
@@ -250,11 +340,13 @@ Current practical priority order (updated 2026-04-27):
 Always preserve these rules:
 - AI creates drafts only
 - Content Queue handles human review
-- Manus handles publishing
+- Manus handles publishing (post-merge: open question — see Phase M)
 - Retry reuses the same approved payload
 - Refine does not break source rules
-- Big Wins + Hot Games use BigQuery
-- Running Promotions uses separate API
+- **Big Wins + Hot Games + Promotions read directly from platform Supabase** (post-merge; replaces "BigQuery + separate API" rule below). Until Phase M Step 1 lands, mkt-agent transitionally still uses BigQuery for Big Wins / Hot Games and the WildSpinz Promotions API for promos.
+- Every marketing row carries `brand_id` (no cross-brand reads except super-admin)
+- Audit logging via platform's `audit_log` (post-merge) — never reinvent
+- Multi-country: read country/currency/timezone from `brands` row — never hardcode PH
 - Docs + WORKLOG must stay aligned with architecture changes
 
 ---
