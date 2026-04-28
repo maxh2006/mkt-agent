@@ -111,6 +111,17 @@ function mapRow(raw: unknown): MapResult {
     return { ok: false, reason: "missing required title (title / name)" };
   }
 
+  // Skip inactive / expired promos. Both flags are optional upstream;
+  // a row missing them is treated as active+not-expired (back-compat).
+  // Skipped rows still surface in `result.skipped[]` with a clear
+  // reason so ops can audit "why didn't this promo generate a draft".
+  if (r.is_active === false) {
+    return { ok: false, reason: "promo inactive (is_active=false)" };
+  }
+  if (r.is_expired === true) {
+    return { ok: false, reason: "promo expired (is_expired=true)" };
+  }
+
   return {
     ok: true,
     value: {

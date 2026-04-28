@@ -58,6 +58,11 @@ export async function fetchPromotionsRaw(
         ...(config.external_brand_code
           ? { "X-Brand-Code": config.external_brand_code }
           : {}),
+        // x-api-key auth — WildSpinz Promotions API requires this.
+        // Header name hardcoded for now (one shape covers our current
+        // brand). If a future brand uses a different scheme, promote
+        // PromoIntegrationConfig.api_key to a structured object.
+        ...(config.api_key ? { "x-api-key": config.api_key } : {}),
       },
     });
     const body = await res.text();

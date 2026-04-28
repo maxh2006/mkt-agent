@@ -49,4 +49,11 @@ export interface PromoIntegrationConfig {
   api_base_url: string;
   promo_list_endpoint: string;
   external_brand_code: string | null;
+  /** Optional API key sent as the `x-api-key` request header. WildSpinz
+   *  uses this; other brands may not need it. Stored in
+   *  `Brand.integration_settings_json.api_key`. Header name is hardcoded
+   *  to `x-api-key` today — if a future brand needs a different header
+   *  (e.g. `Authorization: Bearer …`), promote to a structured
+   *  {scheme, header, value} field at that point. */
+  api_key: string | null;
 }

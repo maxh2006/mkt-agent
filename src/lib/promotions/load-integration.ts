@@ -27,6 +27,7 @@ export async function loadPromoIntegration(
   const api_base_url = trim(raw.api_base_url);
   const promo_list_endpoint = trim(raw.promo_list_endpoint);
   const external_brand_code = trim(raw.external_brand_code);
+  const api_key = trim(raw.api_key);
 
   if (!api_base_url || !promo_list_endpoint) return null;
 
@@ -34,6 +35,7 @@ export async function loadPromoIntegration(
     api_base_url,
     promo_list_endpoint,
     external_brand_code: external_brand_code || null,
+    api_key: api_key || null,
   };
 }
 
