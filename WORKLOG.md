@@ -21,6 +21,7 @@ Current execution priority (per ROADMAP.md):
   - Current account plan: Evaluation access (free, zero credits)
   - Ballpark: $5 minimum top-up ≈ 150+ full Event generate-drafts runs at sonnet-4.6 rates
   - When done: say "credits added" to the session → resume Phase 4 validation
+  - **Verify after flip: caption quality on Event-derived drafts.** Today's stub at `src/lib/ai/client.ts:151-158` builds the caption by concatenating `event.objective + event.reward + event.rules` verbatim — that's deterministic placeholder behavior, not a product bug. After flipping to `anthropic`, regenerate the same event and confirm the caption reads like a casino marketer wrote it (transformed copy, not echoed structured fields). User flagged 2026-04-28 in a screenshot of a stub-generated 123casino "300% massive bonus hunt" draft.
 - **⏳ REMINDER — Upgrade Gemini API key to paid tier** (https://aistudio.google.com/api-keys → key settings → "Set up billing" / paid tier).
   - Blocks: real background-image generation in prod (Gemini returns `429 RATE_LIMITED` with body `Quota exceeded for metric: ...generate_content_free_tier_requests, limit: 0, model: gemini-3.1-flash-image` until the key is opted into paid tier).
   - Verified blocker on 2026-04-27 via `npm run gemini:smoke` against the local env. Key + project + Generative Language API are all set up correctly; only the key's tier is the gate. Image-generation models are paid-tier-only; project-level billing on `mktagent-493404` isn't sufficient on its own — the key itself must be opted in.
@@ -38,6 +39,61 @@ Current execution priority (per ROADMAP.md):
 ## Done Tasks
 
 ### 2026-04-28
+- Task: Phase 5 sub-bullet 2 — Running Promotions automation **live verification against WildSpinz**
+  - Status: Complete. End-to-end smoke against the real WildSpinz Promotions API succeeded; dedupe verified on immediate rerun. Phase 5 sub-bullet 2 is now operationally proven, not just code-complete.
+  - Why: Yesterday's code shipped against test brands without a real upstream (`BRAND_NOT_CONFIGURED` for everything). Today the live API endpoint became available and we needed to prove the orchestrator works end-to-end against real data, including auth, active/expired filtering, dedupe, draft creation, GCS-hosted composites, and `Post.image_url` auto-population.
+  - Live API details (recorded for ops, not in source):
+    - Base URL: `https://wildspinz-promotions-api-production.up.railway.app`
+    - Endpoint: `GET /promotions`
+    - Auth: `x-api-key: wildspinz-mkt-agent-2026`
+    - Response: `{ data: Promotion[], meta: {...} }` envelope
+    - Total upstream rows: 46 (37 active+not-expired, 9 inactive/expired)
+  - Files modified:
+    - `src/lib/promotions/types.ts` — added optional `api_key: string | null` to `PromoIntegrationConfig`. Comment notes the header name is hardcoded to `x-api-key` for now; promote to a structured `{scheme,header,value}` shape if a future brand needs a different scheme.
+    - `src/lib/promotions/load-integration.ts` — reads `integration_settings_json.api_key` (trimmed; blank → null).
+    - `src/lib/promotions/client.ts` — sends `x-api-key: <api_key>` request header when set; absent when not (back-compat preserved for brands that don't need auth).
+    - `src/lib/promotions/normalize.ts` — `mapRow` now skips rows where `is_active === false` or `is_expired === true`. Skipped rows still surface in `result.skipped[]` with reasons `"promo inactive (is_active=false)"` / `"promo expired (is_expired=true)"` so ops can audit. Both flags are optional upstream; missing → treated as active+not-expired (back-compat).
+    - `scripts/promotions-preview.ts` — added missing `import "dotenv/config"` so the CLI loads DATABASE_URL when run on the VM. Same fix already applied to `scripts/running-promotions-automation.ts` earlier.
+  - Files added (new ops scripts, kept locally — see notes below):
+    - `scripts/check-wildspinz-brand.ts` — read-only existence + integration-state check for the WildSpinz brand.
+    - `scripts/configure-wildspinz-promotions.ts` — idempotent config tool that writes the WildSpinz `integration_settings_json` (api_base_url, promo_list_endpoint, api_key, integration_enabled=true) and ensures an enabled `running_promotion` automation rule exists.
+    - `scripts/inspect-wildspinz-drafts.ts` — read-only spot-check that prints aggregate counts + 3 most-recent draft samples with key fields (image_url, image_generation, composited_image, sample_index) for eyeball verification.
+  - WildSpinz brand prep (operator-driven via Brand Management UI; recorded for completeness):
+    - id: `cmoilvz0q0000rp0l37h5o8xo`
+    - name: `Wildspinz`
+    - active: `true`
+    - integration_settings_json populated via `scripts/configure-wildspinz-promotions.ts` with the live API config above
+    - running_promotion automation rule created + enabled (id: `cmoilxlp40000fu0lv0xc48tf`, name: "Running promotions")
+  - Adapter preview (`npm run promotions:preview -- cmoilvz0q0000rp0l37h5o8xo`):
+    - HTTP 200 → auth header accepted by upstream
+    - `count=37, skipped=9` → active/expired filter working (37 valid + 9 correctly filtered)
+    - All 9 skipped rows carried readable reasons (`"promo inactive (is_active=false)"` or `"promo expired (is_expired=true)"`)
+  - First-run automation (`npm run automation:running-promotions -- cmoilvz0q0000rp0l37h5o8xo`):
+    - `fetched=37, skipped_dedupe=2, generated=105, errors=0, duration_ms=67305`
+    - The `skipped_dedupe=2` on first run = upstream returned 37 rows but only 35 distinct `promo_id` values; the second occurrence of each duplicated id hit dedup against the just-inserted draft from earlier in the same run. Math: 35 unique × 3 samples × 1 platform = 105 drafts.
+    - Console logs emitted as designed: `[promotions]` adapter line + `[automation:promo] start/per-brand/done` lines.
+  - Draft verification (`scripts/inspect-wildspinz-drafts.ts`):
+    - Total Wildspinz `source_type='promo'` drafts: 105 ✓
+    - Distinct `source_id` values: 35 ✓
+    - Sample row fields: `source_id` is real upstream promo identifier (e.g. `APP_FIRST_LOGIN`), `platform=facebook`, `status=draft`, `sample_index=0/3..2/3` sharing one `sample_group_id`.
+    - **`Post.image_url` populated with hosted GCS URL** (e.g. `https://storage.googleapis.com/mktagent-493404-artifacts/generated/cmoilvz0q0000rp0l37h5o8xo/<group_id>.png`) — full visual chain working end-to-end (overlay renderer + GCS upload + auto-populate).
+    - `composited_image.status=ok background_fallback=true` — overlay renderer ran successfully with brand-color fallback (expected: `AI_IMAGE_PROVIDER=stub` because Gemini paid-tier upgrade is still pending).
+    - `image_generation.status=ok artifact_url=null` — stub provider's documented behavior.
+  - Dedupe rerun (immediate second invocation):
+    - `fetched=37, skipped_dedupe=37, generated=0, errors=0, duration_ms=10972`
+    - All 37 rows now correctly recognized as already-generated; zero new drafts created.
+    - Run was ~6× faster (11s vs 67s) because no generation work, just `Post.findFirst` checks.
+  - Caveats / what the smoke validated vs deferred:
+    - **Validated**: auth header, active/expired filter, dedupe, draft creation, sample-grouping, GCS storage chain, Post.image_url auto-populate, failure-isolation (no errors observed but the discipline is unchanged from yesterday's code), per-brand log shape, CLI exit codes.
+    - **Not validated by this smoke (still gated)**: real AI text quality (waits on Anthropic credits — captions are stub copy, deterministic concatenation of structured fields per `src/lib/ai/client.ts:131-137` for the promo case). Real AI image (waits on Gemini paid-tier — composites use brand-color background fallback today).
+    - The 2026-04-28 reminder under "Top up Anthropic credits" in Ongoing Tasks — *"Verify after flip: caption quality on Event-derived drafts"* — equally applies to promo-derived drafts. Same caption-quality test recommended on a Wildspinz promo draft after credit top-up.
+  - Ops scripts left untracked locally (not committed):
+    - `scripts/check-wildspinz-brand.ts`, `scripts/configure-wildspinz-promotions.ts`, `scripts/inspect-wildspinz-drafts.ts` — one-shot brand-cutover tools. They reference a hardcoded WildSpinz brand id; useful for re-running the verification sequence from scratch, not as recurring product code. Decide later whether to commit, .gitignore, or delete.
+  - Cloud Scheduler readiness:
+    - **Yes — ready for Cloud Scheduler.** Auth, filtering, dedupe, draft creation, GCS storage all proven against real data. The orchestrator can now be safely invoked on a cadence; the scheduler job's job is only "POST to /api/automations/running-promotions/run on a tick".
+    - The same scheduler job can also fire `POST /api/automations/adhoc-events/run` since both routes share the identical admin-only contract.
+    - This is the next concrete infra step after Phase 4 visual chain operational unblockers (Anthropic credits, Gemini paid-tier).
+
 - Task: Phase 5 sub-bullet 4 — Adhoc Event automation generation flow
   - Status: Complete (orchestrator + admin API + CLI shipped; manual-trigger surfaces ready). No deploy needed for runtime activation — the orchestrator is invocable the moment it lands in prod.
   - Why: Phase 5's second concrete deliverable. Adhoc Events already had the manual `POST /api/events/[id]/generate-drafts` route (operator-clicked from the Event detail page); what was missing was the cadence-driven automation that scans eligible events and routes them through the same pipeline without operator clicks. Adhoc Events do not depend on the upstream promo endpoint that's still in dev-team prep, so it was the obvious next item to ship.

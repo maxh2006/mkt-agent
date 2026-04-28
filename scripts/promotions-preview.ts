@@ -16,6 +16,7 @@
  * operator's shell.
  */
 
+import "dotenv/config";
 import { fetchPromotionsForBrand } from "../src/lib/promotions/adapter";
 
 async function main(): Promise<void> {
