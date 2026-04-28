@@ -16,8 +16,9 @@ import { generateClientId } from "@/lib/client-id";
 import { CheckboxGroup } from "@/components/ui/checkbox-group";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Info, Plus, Trash2 } from "lucide-react";
+import { Info, Plus, Trash2, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { PromoCombobox, type PromoOption } from "@/components/automations/promo-combobox";
 
 // ─── Shared UI primitives ────────────────────────────────────────────────────
 
@@ -486,6 +487,13 @@ function BigWinCard({ rule, canEdit, onSaved }: { rule: AutomationRule; canEdit:
 
 // ─── On Going Promotions Card ────────────────────────────────────────────────
 
+interface ActivePromotionsResponse {
+  brand_id: string;
+  fetched_at: string;
+  promotions: PromoOption[];
+  error?: { code: string; message: string };
+}
+
 function OnGoingPromotionsCard({ rule, canEdit, onSaved }: { rule: AutomationRule; canEdit: boolean; onSaved: () => void }) {
   const stored = migrateOngoingPromo(rule.config_json);
   const [cfg, setCfg] = useState<OnGoingPromotionRuleConfig>(stored);
@@ -496,6 +504,50 @@ function OnGoingPromotionsCard({ rule, canEdit, onSaved }: { rule: AutomationRul
   const original = useMemo(() => migrateOngoingPromo(rule.config_json), [rule.config_json]);
   const dirty = enabled !== rule.enabled || JSON.stringify(cfg) !== JSON.stringify(original);
   const disabled = !canEdit;
+
+  // Single shared fetch of active promotions for this brand. Powers the
+  // Promo ID / Promo Name dropdowns on every promo-rule card. One request
+  // per OnGoingPromotionsCard mount; both Combobox instances per rule
+  // and all rules share the cache.
+  const queryClient = useQueryClient();
+  const promoQueryKey = ["brand", rule.brand_id, "promotions", "active"];
+  const promoQuery = useQuery<ActivePromotionsResponse>({
+    queryKey: promoQueryKey,
+    queryFn: async () => {
+      const res = await fetch(`/api/brands/${rule.brand_id}/promotions/active`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? `Request failed: ${res.status}`);
+      return json.data as ActivePromotionsResponse;
+    },
+    staleTime: 60_000,
+  });
+
+  // Adapter-level errors come back inside `data.error` (200 OK with the
+  // error field set), so we surface those as a soft error in addition to
+  // hard query failures. Map common adapter codes to actionable copy.
+  const promoErrorMessage = (() => {
+    if (promoQuery.error) {
+      return promoQuery.error instanceof Error
+        ? promoQuery.error.message
+        : "Failed to load promotions";
+    }
+    const e = promoQuery.data?.error;
+    if (!e) return null;
+    if (e.code === "BRAND_NOT_CONFIGURED") {
+      return "Configure the API URL + key in Brand Management → Integration Settings.";
+    }
+    if (e.code === "HTTP_ERROR") {
+      return `Upstream API error: ${e.message}. Check api_key in Brand Management.`;
+    }
+    if (e.code === "NETWORK_ERROR") {
+      return `Couldn't reach the upstream API: ${e.message}.`;
+    }
+    return e.message;
+  })();
+  const promoOptions: PromoOption[] = promoQuery.data?.promotions ?? [];
+  const refetchPromos = () => {
+    queryClient.invalidateQueries({ queryKey: promoQueryKey });
+  };
 
   function updateCfg<K extends keyof OnGoingPromotionRuleConfig>(key: K, value: OnGoingPromotionRuleConfig[K]) { setCfg((p) => ({ ...p, [key]: value })); }
 
@@ -575,6 +627,15 @@ function OnGoingPromotionsCard({ rule, canEdit, onSaved }: { rule: AutomationRul
 
         <div>
           <SectionLabel>Promotion Rules</SectionLabel>
+          {promoErrorMessage && (
+            <div className="mb-3 flex items-start gap-2 rounded-md border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5 text-amber-700" />
+              <div className="flex-1">
+                <p className="text-amber-700 font-medium">Promo picker disabled</p>
+                <p className="text-amber-700/80 mt-0.5">{promoErrorMessage}</p>
+              </div>
+            </div>
+          )}
           {cfg.promo_rules.length === 0 && (
             <p className="text-sm text-muted-foreground mb-3">No promotion rules configured. Add a rule to get started.</p>
           )}
@@ -585,8 +646,34 @@ function OnGoingPromotionsCard({ rule, canEdit, onSaved }: { rule: AutomationRul
                 {canEdit && <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => removePromoRule(pr.id)}><Trash2 className="h-3.5 w-3.5" /></Button>}
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <div><p className="text-xs text-muted-foreground mb-1">Promo ID</p><TextInput value={pr.promo_id} onChange={(v) => updatePromoRule(pr.id, { promo_id: v })} placeholder="From source API" disabled={disabled} /></div>
-                <div><p className="text-xs text-muted-foreground mb-1">Promo Name</p><TextInput value={pr.promo_name} onChange={(v) => updatePromoRule(pr.id, { promo_name: v })} placeholder="Promotion name" disabled={disabled} /></div>
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">Promo ID</p>
+                  <PromoCombobox
+                    mode="id"
+                    options={promoOptions}
+                    value={{ promo_id: pr.promo_id, promo_name: pr.promo_name }}
+                    onChange={(next) => updatePromoRule(pr.id, { promo_id: next.promo_id, promo_name: next.promo_name })}
+                    loading={promoQuery.isLoading}
+                    error={promoErrorMessage}
+                    onRetry={refetchPromos}
+                    disabled={disabled}
+                    placeholder="Select promo"
+                  />
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">Promo Name</p>
+                  <PromoCombobox
+                    mode="name"
+                    options={promoOptions}
+                    value={{ promo_id: pr.promo_id, promo_name: pr.promo_name }}
+                    onChange={(next) => updatePromoRule(pr.id, { promo_id: next.promo_id, promo_name: next.promo_name })}
+                    loading={promoQuery.isLoading}
+                    error={promoErrorMessage}
+                    onRetry={refetchPromos}
+                    disabled={disabled}
+                    placeholder="Select promotion"
+                  />
+                </div>
               </div>
               <FieldRow label="Posting mode">
                 <Select value={pr.posting_mode} onValueChange={(v) => {
