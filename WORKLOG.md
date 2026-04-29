@@ -72,6 +72,39 @@ Current execution priority (per ROADMAP.md):
 
 ## Done Tasks
 
+### 2026-04-29
+- Task: VM region migration — `asia-east2-c` Hong Kong → `asia-southeast1-b` Singapore
+  - Status: Complete. Anthropic API access verified from new region. App live, externally reachable, Cloud Scheduler retargeted. Old VM stopped (not deleted) as 24h fallback.
+  - Why: Earlier in the day we tried to flip `AI_PROVIDER=anthropic` after the user topped up credits. Got `403 forbidden / "Request not allowed"` regardless of model, key, workspace, or tier. Diagnostic curl from the user's Mac to the same `/v1/models` endpoint with the same key returned HTTP 200 — proving the rejection was geographic. Anthropic's API geo-blocks Hong Kong egress traffic. Rather than work around it via local-only Track A, the user pulled the trigger on a region migration to match the platform team's `asia-southeast1` deployment region.
+  - Migration steps performed:
+    1. Captured current VM specs (`e2-small`, 20GB boot disk, default Compute Engine SA `125619101656-compute@developer.gserviceaccount.com` with `cloud-platform` scope, tags `http-server,https-server`)
+    2. Took boot-disk snapshot `mkt-agent-pre-singapore-20260429-200914` (preserved as long-term DR safety net)
+    3. Created new VM `mkt-agent-prod` in `asia-southeast1-b` from snapshot. Initial attempt at `-a` zone returned `resource_availability` (no e2-small capacity); succeeded on `-b`.
+    4. New external IP: **`34.142.207.132`** (replaces `34.92.70.250`)
+    5. Verified Anthropic API works from new VM: `curl /v1/models` → HTTP 200 with full models list. Same key, same endpoint, just different region.
+    6. Updated `AUTH_URL` in `/opt/mkt-agent/.env` from old IP to new IP. Pre-migration `.env` backed up as `.env.bak.<timestamp>-pre-singapore`.
+    7. `pm2 restart mkt-agent --update-env` — booted clean (pid 1301, restart count 1, port 3000 + nginx 80 both serving). External `/login` → 200, `/queue` → 307 (auth middleware intact).
+    8. Retargeted Cloud Scheduler `mkt-agent-dispatch` (still in `asia-east2` location — only the target URL changed) from `http://34.92.70.250/api/jobs/dispatch` → `http://34.142.207.132/api/jobs/dispatch`.
+    9. Stopped (not deleted) old VM `mkt-agent-dev` in `asia-east2-c`. Status now `TERMINATED`. Disk preserved. Old IP `34.92.70.250` may release back to the GCP pool.
+  - Files modified:
+    - `docs/08-deployment.md` — Production target block updated (new IP, zone, instance name); region migration history note added at top; Cloud Scheduler section clarifies job stays in asia-east2 while VM is in asia-southeast1.
+    - `WORKLOG.md` — this entry.
+  - Side-effects + carry-overs to verify when the user runs Track A:
+    - GCS bucket `mktagent-493404-artifacts` was created in `asia-east2`. Still globally readable, but writes from Singapore VM cross-region (small added latency, no functional issue). Migrate the bucket to `asia-southeast1` as a future cleanup, OR (more likely) defer until merge — Phase M Step 4 moves storage to Supabase Storage anyway.
+    - BigQuery `shared.*` access already broken (regression flagged 2026-04-28). Migration doesn't help; Phase M Step 1 is the canonical fix.
+    - Old VM stays stopped for 24h as DR. After 24h: `gcloud compute instances delete mkt-agent-dev --zone=asia-east2-c` to free the disk + IP.
+  - What's still pending for Track A audit:
+    - User to paste the Gemini API key from AI Studio console (the one they put on Tier 1 Postpay earlier today). Will append `GEMINI_API_KEY` + `AI_IMAGE_PROVIDER=gemini` + `AI_IMAGE_MODEL=gemini-3.1-flash-image-preview` to prod `.env`.
+    - Once both keys are in place: flip `AI_PROVIDER=anthropic` + `AI_IMAGE_PROVIDER=gemini`, restart pm2, run `npm run automation:running-promotions -- cmoilvz0q0000rp0l37h5o8xo` against WildSpinz to generate a fresh draft set with real Claude text + real Gemini images.
+    - Audit those drafts in the Content Queue + Image Inspector for tone, brand voice, image quality. Iterate on prompt builder / visual compiler if needed.
+  - Verification:
+    - VM specs match origin (`e2-small`, 20GB, same SA, same tags).
+    - Anthropic API HTTP 200 from new VM.
+    - PM2 online (pid 1301, restart count 1).
+    - External HTTP 200 on `/login`, 307 on `/queue` (auth middleware working).
+    - Cloud Scheduler URI confirmed at `http://34.142.207.132/api/jobs/dispatch`.
+    - Old VM `TERMINATED`, snapshot preserved.
+
 ### 2026-04-28 (later in the day)
 - Task: Platform-merge architecture alignment + ROADMAP refactor
   - Status: Direction agreed with platform team via Q1–Q15 response.

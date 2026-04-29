@@ -6,16 +6,27 @@ Operational / deployment runbook.
 
 ## Production target
 
-- Host: GCP Compute Engine VM (external IP `34.92.70.250`, project
-  `mktagent-493404`, zone `asia-east2-c`)
+- Host: GCP Compute Engine VM (external IP `34.142.207.132`, project
+  `mktagent-493404`, zone `asia-southeast1-b`, instance name `mkt-agent-prod`)
 - App path: `/opt/mkt-agent`
 - Deploy script: `scripts/deploy.sh` (run on the server as root)
 - Env file: `/opt/mkt-agent/.env` (see `.env.production.example` for shape)
 - Process manager: PM2 (`mkt-agent`), fronted by Nginx
-- Public URL: `https://<your-domain>` (Nginx terminates TLS; app listens on
-  localhost:3000)
+- Public URL: `http://34.142.207.132` (Nginx → localhost:3000; HTTPS pending domain wiring)
 
 For dev/deploy steps see `scripts/deploy.sh` and `scripts/server-setup.sh`.
+
+> **Region migration history (2026-04-29):** The original VM was `mkt-agent-dev`
+> in `asia-east2-c` (Hong Kong, IP `34.92.70.250`). Anthropic's API geo-blocks
+> Hong Kong-egress traffic with `403 forbidden / "Request not allowed"` regardless
+> of key, workspace, tier, or credits — verified via direct curl against
+> `/v1/models` from both regions on the same key. Migrated to `asia-southeast1-b`
+> (Singapore, instance `mkt-agent-prod`, IP `34.142.207.132`) which is unblocked.
+> Old VM is **stopped (not deleted)** with its disk preserved as a 24h rollback
+> path; pre-migration snapshot `mkt-agent-pre-singapore-20260429-200914` is also
+> retained. Cloud Scheduler `mkt-agent-dispatch` retargeted to the new IP.
+> AUTH_URL updated. Cloud Scheduler stays in `asia-east2` (job location) — only
+> the target URL changed.
 
 ---
 
@@ -245,14 +256,14 @@ not `data:` URIs.
 
 Run once from a machine with `gcloud` authenticated to the project.
 Replace `<vm-sa-email>` with the VM's attached service account
-(find it via `gcloud compute instances describe mkt-agent-dev
---project=mktagent-493404 --zone=asia-east2-c
+(find it via `gcloud compute instances describe mkt-agent-prod
+--project=mktagent-493404 --zone=asia-southeast1-b
 --format='value(serviceAccounts.email)'`).
 
 ```bash
 PROJECT=mktagent-493404
 BUCKET=mkt-agent-artifacts          # change for dev: mkt-agent-artifacts-dev
-LOCATION=asia-east2                 # match the VM region for low-latency writes
+LOCATION=asia-southeast1                 # match the VM region for low-latency writes
 VM_SA=<vm-sa-email>                 # the VM's attached service account
 
 # 1. Create the bucket with uniform bucket-level access (required
@@ -405,9 +416,10 @@ trigger route on a schedule.
 
 ### Current dev configuration (2026-04-21)
 
-The scheduler job `mkt-agent-dispatch` is live in `asia-east2`, firing every
-2 minutes against `http://34.92.70.250/api/jobs/dispatch` (raw HTTP via the
-VM's public IP). This is a dev-phase trade-off — the dispatch secret travels
+The scheduler job `mkt-agent-dispatch` is live in `asia-east2` (job location
+unchanged through the VM region migration), firing every 2 minutes against
+`http://34.142.207.132/api/jobs/dispatch` (raw HTTP via the
+VM's public IP — VM lives in `asia-southeast1`). This is a dev-phase trade-off — the dispatch secret travels
 in clear text in the `x-dispatch-secret` header. Acceptable while
 `MANUS_AGENT_ENDPOINT` is unset (dispatcher is in dry-run mode), but **before
 real Manus traffic**: add a domain (Cloudflare proxy or Let's Encrypt),
@@ -554,7 +566,7 @@ Must be set in `/opt/mkt-agent/.env` before Cloud Scheduler is enabled:
 - `DATABASE_URL` — Postgres connection string
 - `AUTH_SECRET` — NextAuth session secret
 - `AUTH_TRUST_HOST=true`
-- `AUTH_URL` — canonical base URL for this deployment (e.g. `http://34.92.70.250`
+- `AUTH_URL` — canonical base URL for this deployment (e.g. `http://34.142.207.132`
   for the dev VM, or `https://mkt.example.com` once a domain is wired up).
   Required even with `AUTH_TRUST_HOST=true`: relying on host-header forwarding
   alone has been observed to make NextAuth's signOut redirect resolve to
