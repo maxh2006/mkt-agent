@@ -288,6 +288,46 @@ function composeSafeZoneInstruction(layout: {
   return `Composition must leave these zones visually quiet so text can be overlaid later: ${phrases.join("; ")}.`;
 }
 
+/**
+ * Per-sample structural appendix (added 2026-04-29).
+ *
+ * Glued onto each sample's Claude-generated `image_prompt` narrative
+ * before sending to Gemini. Carries:
+ *   - aspect ratio hint (drives composition for the format)
+ *   - safe-zone instruction (where to leave quiet space for text overlay)
+ *   - brand palette hint (subtle color guidance — not a hard rule)
+ *   - the absolute anti-text rule (also enforced by the negative prompt)
+ *
+ * Style / emphasis / subject / brand notes are NOT added here — the
+ * sample's own image_prompt already encodes those because Claude saw
+ * the visual_compiled context when writing it.
+ */
+export function composeImagePromptStructuralAppendix(args: {
+  visual: CompiledVisualPrompt;
+  brand_palette?: { primary: string | null; secondary: string | null; accent: string | null };
+}): string {
+  const parts: string[] = [];
+
+  parts.push(`Target aspect ratio: ${formatAspectHint(args.visual.platform_format)}.`);
+
+  const safeZone = composeSafeZoneInstruction({ safe_zones: args.visual.safe_zone_config.zones });
+  if (safeZone) parts.push(safeZone);
+
+  if (args.brand_palette) {
+    const colors = [args.brand_palette.primary, args.brand_palette.secondary, args.brand_palette.accent]
+      .filter((c): c is string => typeof c === "string" && c.trim().length > 0);
+    if (colors.length > 0) {
+      parts.push(`Favor a palette aligned with brand colors: ${colors.join(", ")}.`);
+    }
+  }
+
+  parts.push(
+    "Absolutely no text, letters, numbers, typography, brand names, logos, watermarks, UI elements, or signage anywhere in the image.",
+  );
+
+  return parts.join(" ");
+}
+
 function composeBackgroundPrompt(args: {
   visual_style: VisualStyle;
   visual_emphasis: VisualEmphasis;

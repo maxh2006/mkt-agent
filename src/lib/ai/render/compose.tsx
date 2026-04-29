@@ -173,13 +173,19 @@ function renderTextZone(args: {
 }
 
 function textForSlot(slot: TextZone["slot"], text: RenderRequest["text"]): string | null {
+  // Per-2026-04-29 audit: only the short, punchy `banner_text` goes on
+  // the image. Headline / caption / CTA stay in the post body when
+  // published — putting the full caption on the image was producing
+  // wall-of-text composites that overflowed the layout's text zones.
+  // The image is now a visual hook; the post body is where the message
+  // lives. Layouts still define headline/caption/cta zones for
+  // forward-compat (a future "image with full message" mode could
+  // re-enable them per-layout).
   switch (slot) {
     case "headline":
-      return nonEmpty(text.headline);
     case "caption":
-      return nonEmpty(text.caption);
     case "cta":
-      return nonEmpty(text.cta);
+      return null;
     case "banner":
       return nonEmpty(text.banner);
     case "brand_logo":

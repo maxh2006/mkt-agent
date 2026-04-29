@@ -99,18 +99,15 @@ export async function insertSamplesAsDrafts(args: {
       };
     }
 
-    // Phase 4 (2026-04-27): persist the background-image provider
-    // result. Shared across every sibling draft in this run — the
-    // orchestrator runs the provider ONCE per run and replicates the
-    // result here. Status is one of "ok" / "skipped" / "error";
-    // `artifact_url` is null for the stub provider (placeholder) and
-    // for any error / skipped path. The future overlay renderer reads
-    // this block to fetch the background; until that ships, the block
-    // is purely metadata. NOTE: `Post.image_url` is NOT touched — that
-    // field is reserved for the FINAL composited asset produced by
-    // the deferred overlay renderer.
-    if (input.image_result) {
-      const r = input.image_result;
+    // Per-sample image-generation result (per-sample restructure
+    // 2026-04-29). Each sibling has its OWN Gemini call driven by its
+    // OWN Claude-generated `image_prompt` narrative. `image_results[i]`
+    // corresponds to `samples[i]`. Status is one of "ok" / "skipped" /
+    // "error"; `artifact_url` is null for stub provider (placeholder)
+    // and for any error / skipped path.
+    const sampleImageResult = input.image_results?.[index];
+    if (sampleImageResult) {
+      const r = sampleImageResult;
       generationContext.image_generation = {
         provider: r.provider,
         model: r.model,
@@ -130,23 +127,17 @@ export async function insertSamplesAsDrafts(args: {
       };
     }
 
-    // Phase 4 (2026-04-27): persist the deterministic overlay
-    // renderer's composited image. Shared across siblings in this
-    // run — orchestrator renders ONCE per run and the inserter
-    // replicates here. `artifact_url` is a `data:image/png;base64,…`
-    // URI in MVP; the GCS storage migration follow-up will swap it
-    // for a hosted https URL (same field name; only the URL scheme
-    // changes). NOTE: `Post.image_url` is STILL NOT touched — that
-    // field stays gated on hosted URLs the Manus media-validation
-    // path can dispatch. Operators see the composite as a preview in
-    // the queue (image inspector UI is a separate follow-up).
-    if (input.composited) {
-      const c = input.composited;
-      // Persist the composited_image block. NOTE: `c.png_bytes` is a
-      // memory-only field used by the orchestrator to upload to GCS;
-      // we deliberately don't include it here — the persisted
-      // representation is `artifact_url` (https URL post-upload, or
-      // a `data:` URI fallback when storage is unconfigured).
+    // Per-sample composited-image result (per-sample restructure
+    // 2026-04-29). `composited_images[i]` corresponds to `samples[i]`.
+    // The composite uses sibling `i`'s background + sibling `i`'s
+    // `banner_text` overlay. `artifact_url` is the GCS https URL
+    // (post-upload), a `data:` URI fallback (storage unconfigured),
+    // or null (render/upload failure).
+    const sampleComposited = input.composited_images?.[index];
+    if (sampleComposited) {
+      const c = sampleComposited;
+      // `c.png_bytes` is memory-only — the persisted representation is
+      // `artifact_url`.
       generationContext.composited_image = {
         status: c.status,
         artifact_url: c.artifact_url,
@@ -157,9 +148,6 @@ export async function insertSamplesAsDrafts(args: {
         visual_emphasis: c.visual_emphasis,
         background_fallback: c.background_fallback,
         logo_drawn: c.logo_drawn,
-        // GCS upload metadata (Phase 4 storage migration, 2026-04-27).
-        // Present when the orchestrator's upload step succeeded;
-        // null/absent when storage was unconfigured or upload failed.
         bucket: c.bucket ?? null,
         object_path: c.object_path ?? null,
         mime_type: c.mime_type ?? null,
@@ -195,9 +183,14 @@ export async function insertSamplesAsDrafts(args: {
     // Operators retain the manual-override path: if they edit
     // `Post.image_url` later, that's preserved (we set it once at
     // creation; subsequent edits are operator-driven).
-    const compositedUrl = input.composited?.artifact_url ?? null;
+    // Per-sample composite drives Post.image_url. Each row gets ITS OWN
+    // image (per-sample restructure 2026-04-29). Hosted https://
+    // requirement is unchanged — Manus media-validation only fetches
+    // public URLs, so data: URI fallback drafts ship with image_url=null
+    // and rely on the operator-paste path or a later GCS upload.
+    const compositedUrl = sampleComposited?.artifact_url ?? null;
     const imageUrl =
-      input.composited?.status === "ok" &&
+      sampleComposited?.status === "ok" &&
       compositedUrl &&
       compositedUrl.startsWith("https://")
         ? compositedUrl

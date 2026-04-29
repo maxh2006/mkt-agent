@@ -24,10 +24,14 @@
 // No JSON key files in code. Mirrors the @google-cloud/bigquery auth
 // pattern at src/lib/bq/client.ts.
 //
-// Object path: `generated/<brand_id>/<sample_group_id>.png`. One
-// composite per generation run; siblings share the URL since the
-// composite content is identical. The brand_id prefix lets us list /
-// clean per-brand later.
+// Object path:
+//   - `generated/<brand_id>/<sample_group_id>/<sample_index>.png`
+//     (when `sample_index` is provided; per-sample restructure
+//     2026-04-29 — each sibling has its own image, so each gets its
+//     own object).
+//   - `generated/<brand_id>/<sample_group_id>.png`
+//     (legacy / off-pipeline callers; one composite per run).
+// The brand_id prefix lets us list / clean per-brand later.
 
 import { Storage } from "@google-cloud/storage";
 
@@ -54,6 +58,11 @@ export class StorageError extends Error {
 export interface UploadCompositedArgs {
   brand_id: string;
   sample_group_id: string;
+  /** Per-sample index when each sibling has its own image. When set,
+   *  the object path becomes `generated/<brand>/<group>/<index>.png`.
+   *  When absent, falls back to the legacy `generated/<brand>/<group>.png`
+   *  path (single composite per group). */
+  sample_index?: number;
   bytes: Uint8Array;
   /** Defaults to "image/png". */
   content_type?: string;
@@ -111,7 +120,10 @@ export async function uploadCompositedPng(
   }
 
   const mime_type = args.content_type ?? "image/png";
-  const object_path = `generated/${sanitizeSegment(args.brand_id)}/${sanitizeSegment(args.sample_group_id)}.png`;
+  const object_path =
+    typeof args.sample_index === "number"
+      ? `generated/${sanitizeSegment(args.brand_id)}/${sanitizeSegment(args.sample_group_id)}/${sanitizeSegment(String(args.sample_index))}.png`
+      : `generated/${sanitizeSegment(args.brand_id)}/${sanitizeSegment(args.sample_group_id)}.png`;
   const startedAt = Date.now();
 
   try {

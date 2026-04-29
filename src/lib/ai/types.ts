@@ -269,28 +269,28 @@ export interface NormalizedGenerationInput {
   visual?: CompiledVisualPrompt;
 
   /**
-   * Background-image generation result (Phase 4 image provider boundary,
-   * 2026-04-27). Populated by the orchestrator after the text generation
-   * call completes — one shared result per run, replicated to every
-   * sibling draft via `generation_context_json.image_generation`. NOT
-   * the final publishable image — the deterministic overlay renderer
-   * produces that downstream. Optional so off-pipeline call sites and
-   * pre-image-provider regressions keep typechecking.
+   * Per-sample background-image generation results (Phase 4 image
+   * provider boundary, 2026-04-27; per-sample restructure 2026-04-29).
+   * One result PER SAMPLE — `image_results[i]` corresponds to
+   * `samples[i]`. Each sample's Claude-generated `image_prompt`
+   * narrative drives its own Gemini call so the 3 siblings produce
+   * 3 different image concepts. Failure is isolated per slot: a
+   * BackgroundImageResult with `status: "error"` lands in the slot
+   * where the call failed; other slots continue.
+   * Optional so off-pipeline call sites keep typechecking.
    */
-  image_result?: BackgroundImageResult;
+  image_results?: BackgroundImageResult[];
 
   /**
-   * Final composited image result (Phase 4 overlay renderer,
-   * 2026-04-27). Populated by the orchestrator after the image
-   * provider call — composites text + brand logos onto the AI
-   * background. One shared result per run; queue inserter replicates
-   * onto every sibling draft via `generation_context_json.composited_image`.
-   * In MVP the artifact lives only as a `data:` URI in metadata —
-   * Post.image_url stays untouched until the GCS storage migration
-   * promotes data URIs to hosted https URLs. Optional so off-
-   * pipeline call sites keep typechecking.
+   * Per-sample composited image results (Phase 4 overlay renderer,
+   * 2026-04-27; per-sample restructure 2026-04-29). One result PER
+   * SAMPLE — `composited_images[i]` corresponds to `samples[i]`. Each
+   * sample composites its OWN Gemini background + its OWN banner_text
+   * via the deterministic overlay renderer. The artifact lives at
+   * the GCS https URL (post-upload) or as a `data:` URI fallback.
+   * Optional so off-pipeline call sites keep typechecking.
    */
-  composited?: CompositedImageResult;
+  composited_images?: CompositedImageResult[];
 }
 
 // ─── AI output shape ─────────────────────────────────────────────────────────
