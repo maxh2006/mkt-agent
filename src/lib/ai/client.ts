@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { StructuredPrompt } from "./prompt-builder";
-import { ANTHROPIC_JSON_PREFILL, serializePromptForAnthropic } from "./serialize-prompt";
+import { serializePromptForAnthropic } from "./serialize-prompt";
 import { parseGeneratedSamples } from "./parse-response";
 import type { GeneratedSample, NormalizedGenerationInput } from "./types";
 
@@ -65,25 +65,27 @@ async function anthropicProvider(args: {
   const client = new Anthropic({ apiKey });
   const { system, user } = serializePromptForAnthropic(prompt);
 
-  // Assistant pre-fill with `{` strongly nudges Claude to emit JSON from
-  // the very first token. Parser prepends this back before validating.
-  // See docs/07-ai-boundaries.md "AI generator — real provider".
+  // The system prompt explicitly instructs strict JSON-only output
+  // (no prose, no markdown fences) — see serialize-prompt.ts. Older
+  // Claude models accepted an assistant prefill (`{`) to nudge JSON
+  // emission from the first token, but sonnet-4-6 + later DROPPED
+  // prefill support: requests with a trailing assistant message now
+  // 400 with "This model does not support assistant message prefill.
+  // The conversation must end with a user message." So the messages
+  // array now ends on a user turn; the parser tolerates leading
+  // whitespace / occasional markdown that slips past the strict
+  // instruction.
   const response = await client.messages.create({
     model,
     max_tokens: ANTHROPIC_MAX_TOKENS,
     system,
-    messages: [
-      { role: "user", content: user },
-      { role: "assistant", content: ANTHROPIC_JSON_PREFILL },
-    ],
+    messages: [{ role: "user", content: user }],
   });
 
-  // Stitch text blocks + the pre-fill into the raw response.
-  const textBlocks = response.content
+  const rawText = response.content
     .filter((b): b is Anthropic.TextBlock => b.type === "text")
     .map((b) => b.text)
     .join("");
-  const rawText = ANTHROPIC_JSON_PREFILL + textBlocks;
 
   const samples = parseGeneratedSamples(rawText, input.sample_count);
 
