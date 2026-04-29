@@ -72,6 +72,41 @@ Current execution priority (per ROADMAP.md):
 
 ## Done Tasks
 
+### 2026-04-29 (later in the day)
+- Task: First end-to-end real-AI generation in production
+  - Status: ✅ **FIRST TRACK A SUCCESS.** Real Claude text + real Gemini image + real GCS upload all working from Singapore VM. Three sibling drafts for the WildSpinz `APP_FIRST_LOGIN` promo created with Tagalog/Taglish casino-marketer voice and unique emoji-led copy.
+  - Why: Earlier today's region migration (commit `90ae08f`) cleared the Hong Kong geo-block. After Anthropic credit top-up + Gemini paid-tier activation, we expected to flip both providers and immediately see real output. Two issues blocked us: (1) Gemini's "Tier 1 · Postpay" UI label was misleading — actual API still required prepay credits, fixed after a top-up; (2) `claude-sonnet-4-6` rejected our assistant-prefill pattern with `400 invalid_request_error`, fixed with the prefill-removal commit.
+  - Files modified:
+    - `src/lib/ai/client.ts` (commit `82f3e83`) — dropped trailing `{role: "assistant", content: "{"}` message and removed the `ANTHROPIC_JSON_PREFILL +` prepend in response parsing. The system prompt's strict "Return ONLY a single JSON object" instruction + `parseGeneratedSamples()` tolerance for markdown fences / balanced-brace scans cover the case where the model occasionally adds whitespace.
+  - Prod state on Singapore VM after this work:
+    - `AI_PROVIDER=anthropic` (live)
+    - `AI_IMAGE_PROVIDER=gemini` (live)
+    - `AI_IMAGE_MODEL=gemini-3.1-flash-image-preview` (live)
+    - `ANTHROPIC_API_KEY` set (working — verified HTTP 200 on `/v1/models` from Singapore)
+    - `GEMINI_API_KEY` set (working — verified HTTP 200 on both `gemini-2.5-flash` text and `gemini-3.1-flash-image-preview` after billing top-up)
+  - First real run results (`npm run automation:running-promotions -- cmoilvz0q0000rp0l37h5o8xo`):
+    - `fetched=37 skipped_dedupe=36 generated=3 errors=0 duration_ms=77567`
+    - Anthropic: 970 input tokens + 1326 output tokens for 3 promo samples → ~$0.012
+    - Gemini: ~482KB image, 22s generation → ~$0.04
+    - Renderer: 1.37MB composited PNG, 940ms (overlay renderer fast)
+    - GCS: 6.7s upload to `mktagent-493404-artifacts/generated/cmoilvz0q0000rp0l37h5o8xo/d949885b-0c3a-4600-97d6-cb1ceea47296.png`
+    - All 3 samples share one image (1 generation per `sample_group_id`, replicated to siblings — designed behavior)
+    - Key signal: `composited_image.background_fallback=false` confirms the overlay used the REAL Gemini background, not the brand-color fallback we've been seeing in stub mode.
+  - Sample captions (proof of voice quality):
+    - "😱 Na-miss Mo Na Ba? App First Login Bonus — ONCE LANG 'TO! 🎁"
+    - "🚀 Mag-login sa App Once — Bonus Na Agad! Totoo 'To! 💸"
+    - "🎉 First Login = Instant Bonus? YES GANYAN KAMI! 🎉"
+    - Compared to the stub-era equivalent (`"Wildspinz: App First Login Bonus" + concatenated mechanics`), these are unmistakably casino-marketer Tagalog with PH-flavored Taglish, emoji density, and per-sample variation. Track A audit confirms the prompt builder + brand voice settings are working as designed.
+  - Operational quirks discovered + handled:
+    - Gemini "Tier 1 · Postpay" label was misleading — first API call after activation returned `429 RESOURCE_EXHAUSTED "Your prepayment credits are depleted"`. User added prepay top-up; second call returned 200. Recommend the deploy docs note this for next operator.
+    - `claude-sonnet-4-6` dropped assistant-prefill support that older Claude models accepted. Code fix shipped as commit `82f3e83`. WORKLOG note here so the next prompt-builder change knows to keep messages ending on user role.
+    - User pasted Gemini API key directly in chat. After today's audit, recommend rotating the key in AI Studio so the chat-history copy stops being valid — added to follow-up list.
+  - What's still pending:
+    - Gemini key rotation (chat-history exposure)
+    - Old asia-east2 VM deletion after 24h soak
+    - Phase M Step 1 (Supabase data-source migration) when platform-team Supabase keys arrive
+    - Track A continued audit: user inspects more sample groups (delete + re-run pattern works, ~$0.30/sample group), iterate on prompt builder if voice/length/tone needs work
+
 ### 2026-04-29
 - Task: VM region migration — `asia-east2-c` Hong Kong → `asia-southeast1-b` Singapore
   - Status: Complete. Anthropic API access verified from new region. App live, externally reachable, Cloud Scheduler retargeted. Old VM stopped (not deleted) as 24h fallback.
